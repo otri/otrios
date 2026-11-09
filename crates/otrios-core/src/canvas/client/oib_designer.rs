@@ -9,7 +9,7 @@ use crate::canvas::oib::document::{
 };
 use crate::dashboard::components::{ACCENT, CARD, MUTED, WHITE, background, canvas, text};
 use otrios_interfaces::{
-    oib::designer::{DesignerMode, PropertyAddress, PropertyEditor, Selection},
+    oib::designer::{DesignerMode, InstanceId, PropertyAddress, PropertyEditor, Selection},
     scene::{Primitive, Rect, SwitchSemantics},
     theme::{BG, LINE},
 };
@@ -49,6 +49,7 @@ enum LocalAction {
     Profile,
     Resize(usize),
     Palette,
+    Placement(Selection),
     EditComponent(Selection),
     DeleteComponent(u64),
     Structure(otrios_interfaces::oib::InstanceOperation),
@@ -98,9 +99,14 @@ pub(super) struct Designer {
     pub(super) studio: super::oib_focus_layout::Studio,
     resize_origin: Option<[f32; 2]>,
     palette_open: bool,
+    placement_open: bool,
     management: Option<ManagedComponent>,
     management_nodes: Vec<SceneNode>,
     structure_tools: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
+    connection_tools: Vec<(
+        PropertyAddress,
+        Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
+    )>,
     tree: Vec<HierarchyRow>,
     tree_scope: HierarchyScope,
     tree_closed: Vec<HierarchyKey>,
@@ -137,9 +143,11 @@ impl Clone for Designer {
             studio: self.studio,
             resize_origin: self.resize_origin,
             palette_open: self.palette_open,
+            placement_open: self.placement_open,
             management: self.management.clone(),
             management_nodes: self.management_nodes.clone(),
             structure_tools: self.structure_tools.clone(),
+            connection_tools: self.connection_tools.clone(),
             tree: self.tree.clone(),
             tree_scope: self.tree_scope,
             tree_closed: self.tree_closed.clone(),
@@ -199,9 +207,11 @@ impl Designer {
             studio: Default::default(),
             resize_origin: None,
             palette_open: false,
+            placement_open: false,
             management: None,
             management_nodes: vec![],
             structure_tools: vec![],
+            connection_tools: vec![],
             tree: vec![],
             tree_scope: HierarchyScope::Composition,
             tree_closed: vec![],
@@ -379,6 +389,15 @@ impl Designer {
                     AuthoringTools {
                         operations: &self.structure_tools,
                         open: self.palette_open,
+                        placement: self
+                            .management
+                            .as_ref()
+                            .filter(|_| {
+                                seed.designer.as_ref().is_some_and(|d| {
+                                    d.definitions.iter().any(|d| !d.slots.is_empty())
+                                })
+                            })
+                            .map(|m| (&m.root, self.placement_open)),
                     },
                 )?
             } else {
@@ -407,6 +426,7 @@ impl Designer {
                 self.details.as_ref(),
                 &self.registers,
                 seed,
+                &self.connection_tools,
             )?
         } else {
             inspector(
@@ -655,6 +675,7 @@ impl Designer {
                     LocalAction::Layers
                         | LocalAction::Profile
                         | LocalAction::EditComponent(_)
+                        | LocalAction::Placement(_)
                         | LocalAction::DeleteComponent(_)
                 )
             ) {
@@ -879,6 +900,7 @@ fn hierarchy(
 struct AuthoringTools<'a> {
     operations: &'a [(String, otrios_interfaces::oib::InstanceOperation)],
     open: bool,
+    placement: Option<(&'a Selection, bool)>,
 }
 fn focus_hierarchy(
     b: &mut Builder,
@@ -892,6 +914,7 @@ fn focus_hierarchy(
     let AuthoringTools {
         operations: structure,
         open: palette_open,
+        placement,
     } = tools;
     let mut nodes = vec![
         b.focus_button(
@@ -953,11 +976,12 @@ fn focus_hierarchy(
         nodes.push(palette);
         y += 56.;
         for (label, operation) in structure {
-            if matches!(
+            let insert = matches!(
                 operation,
                 otrios_interfaces::oib::InstanceOperation::Insert { .. }
-            ) && !palette_open
-            {
+            ) || matches!(operation, otrios_interfaces::oib::InstanceOperation::Hierarchy(batch)
+                    if matches!(batch.operations.as_slice(), [otrios_interfaces::oib::authoring::HierarchyEdit::Insert { .. }]));
+            if insert && !palette_open {
                 continue;
             }
             nodes.push(b.focus_button(
@@ -969,6 +993,20 @@ fn focus_hierarchy(
             )?);
             y += 56.;
         }
+    }
+    if let Some((selection, open)) = placement {
+        nodes.push(b.focus_button(
+            0.,
+            y,
+            288.,
+            if open {
+                "Hide placement"
+            } else {
+                "Edit placement"
+            },
+            LocalAction::Placement(selection.clone()),
+        )?);
+        y += 56.;
     }
     for row in tree {
         let mut parent = row.parent.as_ref();
@@ -1437,11 +1475,25 @@ impl Mount {
             if editable && self.doc.confirmed() && designer.mode == DesignerMode::Edit {
                 use otrios_interfaces::oib::InstanceOperation;
                 let generation = designer.editor_revision;
-                let roots: Vec<_> = self
+                let destination = if let Selection::Object(a) = &designer.selection {
+                    self.doc.oib_destination(a.instance.0)?
+                } else {
+                    otrios_interfaces::oib::authoring::Destination::Canvas
+                };
+                let all_roots: Vec<_> = self
                     .doc
                     .oib_instances()?
                     .into_iter()
                     .filter(|i| i.active)
+                    .collect();
+                let roots: Vec<_> = all_roots
+                    .iter()
+                    .filter(|i| {
+                        self.doc
+                            .oib_destination(i.id)
+                            .is_ok_and(|d| d == destination)
+                    })
+                    .cloned()
                     .collect();
                 let selected = match &designer.selection {
                     Selection::Object(a) if a.references.is_empty() => roots.iter().position(|i| {
@@ -1456,7 +1508,8 @@ impl Mount {
                             format!("Insert {name}"),
                             InstanceOperation::Insert {
                                 prototype,
-                                before: selected.map(|index| roots[index].id),
+                                before: selected.filter(|_| destination == otrios_interfaces::oib::authoring::Destination::Canvas)
+                                    .map(|index| roots[index].id),
                                 generation,
                             },
                         ));
@@ -1464,35 +1517,240 @@ impl Mount {
                 }
                 if let Some(index) = selected {
                     let instance = roots[index].id;
-                    if index > 0 {
-                        designer.structure_tools.push((
-                            "Move earlier".into(),
+                    let reorder = |before| {
+                        if destination == otrios_interfaces::oib::authoring::Destination::Canvas {
                             InstanceOperation::Reorder {
                                 instance,
-                                before: Some(roots[index - 1].id),
+                                before,
                                 generation,
-                            },
-                        ));
+                            }
+                        } else {
+                            InstanceOperation::Hierarchy(
+                                otrios_interfaces::oib::authoring::HierarchyBatch {
+                                    generation,
+                                    operations: vec![
+                                        otrios_interfaces::oib::authoring::HierarchyEdit::Move {
+                                            instance: InstanceId(instance),
+                                            destination: destination.clone(),
+                                            before: before.map(InstanceId),
+                                            frame: seed
+                                                .designer
+                                                .as_ref()
+                                                .and_then(|d| {
+                                                    d.placements
+                                                        .iter()
+                                                        .find(|p| p.instance.0 == instance)
+                                                })
+                                                .and_then(|p| p.frame),
+                                        },
+                                    ],
+                                },
+                            )
+                        }
+                    };
+                    if index > 0 {
+                        designer
+                            .structure_tools
+                            .push(("Move earlier".into(), reorder(Some(roots[index - 1].id))));
                     }
                     if index + 1 < roots.len() {
                         designer.structure_tools.push((
                             "Move later".into(),
-                            InstanceOperation::Reorder {
-                                instance,
-                                before: roots.get(index + 2).map(|i| i.id),
-                                generation,
-                            },
+                            reorder(roots.get(index + 2).map(|i| i.id)),
+                        ));
+                    }
+                }
+                if let Selection::Object(component) = &designer.selection {
+                    use otrios_interfaces::oib::authoring::{
+                        Destination, HierarchyBatch, HierarchyEdit,
+                    };
+                    let operation = |edit| HierarchyBatch {
+                        generation,
+                        operations: vec![edit],
+                    };
+                    for (slot_name, destination) in super::super::oib::document::placement::slots(
+                        seed,
+                        &allocations,
+                        component,
+                    )? {
+                        for (prototype, name) in self.doc.oib_canvas_factories().unwrap_or_default()
+                        {
+                            if self.doc.oib_available_slots_for(prototype) == 0 {
+                                continue;
+                            }
+                            let batch = operation(HierarchyEdit::Insert {
+                                prototype: InstanceId(prototype),
+                                destination: destination.clone(),
+                                before: None,
+                                frame: None,
+                            });
+                            if self.doc.oib_hierarchy_allowed(&batch) {
+                                designer.structure_tools.push((
+                                    format!("Into {slot_name}: {name}"),
+                                    InstanceOperation::Hierarchy(batch),
+                                ));
+                            }
+                        }
+                    }
+                    if let Some(index) = selected {
+                        let current = &roots[index];
+                        let numbers = self.doc.oib_placement_properties(component)?;
+                        let mut frame = [0.; 4];
+                        for (index, info) in numbers.iter().enumerate() {
+                            if let Some(Value::Number(n)) = info.value {
+                                frame[index] = n;
+                            }
+                        }
+                        let canvas_count = all_roots
+                            .iter()
+                            .filter(|i| {
+                                self.doc
+                                    .oib_destination(i.id)
+                                    .is_ok_and(|d| d == Destination::Canvas)
+                            })
+                            .count();
+                        let pitch = seed
+                            .instance_surface
+                            .as_ref()
+                            .ok_or("Missing factory surface")?
+                            .preview_stride;
+                        let canvas_frame = [0., canvas_count as f32 * pitch, frame[2], frame[3]];
+                        if destination != Destination::Canvas {
+                            let batch = operation(HierarchyEdit::Move {
+                                instance: InstanceId(current.id),
+                                destination: Destination::Canvas,
+                                before: None,
+                                frame: Some(canvas_frame),
+                            });
+                            if self.doc.oib_hierarchy_allowed(&batch) {
+                                designer.structure_tools.push((
+                                    "Move to canvas".into(),
+                                    InstanceOperation::Hierarchy(batch),
+                                ));
+                            }
+                        }
+                        for parent in &all_roots {
+                            if parent.id == current.id {
+                                continue;
+                            }
+                            let Some(parent_object) =
+                                objects.iter().find_map(|o| match &o.selection {
+                                    Selection::Object(a)
+                                        if a.instance.0 == parent.id && a.references.is_empty() =>
+                                    {
+                                        Some(a)
+                                    }
+                                    _ => None,
+                                })
+                            else {
+                                continue;
+                            };
+                            for (slot_name, target) in
+                                super::super::oib::document::placement::slots(
+                                    seed,
+                                    &allocations,
+                                    parent_object,
+                                )?
+                            {
+                                if target == destination {
+                                    continue;
+                                }
+                                let batch = operation(HierarchyEdit::Move {
+                                    instance: InstanceId(current.id),
+                                    destination: target,
+                                    before: None,
+                                    frame: Some([0., 0., frame[2], frame[3]]),
+                                });
+                                if self.doc.oib_hierarchy_allowed(&batch) {
+                                    designer.structure_tools.push((
+                                        format!("{}: {slot_name}", parent.name),
+                                        InstanceOperation::Hierarchy(batch),
+                                    ));
+                                }
+                            }
+                        }
+                        let batch = operation(HierarchyEdit::Duplicate {
+                            instance: InstanceId(current.id),
+                            name: None,
+                            destination: Destination::Canvas,
+                            before: None,
+                            frame: Some(canvas_frame),
+                        });
+                        if self.doc.oib_hierarchy_allowed(&batch) {
+                            designer.structure_tools.push((
+                                "Duplicate subtree".into(),
+                                InstanceOperation::Hierarchy(batch),
+                            ));
+                        }
+                    }
+                }
+                if let Selection::DefinitionNode { definition, node } = &designer.selection
+                    && let Some(def) = seed
+                        .designer
+                        .as_ref()
+                        .and_then(|d| d.definitions.iter().find(|d| d.id == *definition))
+                    && let Some(parent) =
+                        def.nodes.iter().find(|n| n.visual_children.contains(node))
+                    && let Some(index) = parent.visual_children.iter().position(|n| n == node)
+                    && let Some(owner) = def
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == *node)
+                        .and_then(|n| n.owner)
+                {
+                    use otrios_interfaces::oib::authoring::{DefinitionBatch, DefinitionEdit};
+                    let operation = |before| {
+                        InstanceOperation::Definitions(DefinitionBatch {
+                            generation,
+                            operations: vec![DefinitionEdit::MoveNode {
+                                definition: *definition,
+                                node: *node,
+                                owner,
+                                visual_parent: Some(parent.id),
+                                before,
+                            }],
+                        })
+                    };
+                    if index > 0 {
+                        designer.structure_tools.push((
+                            "Move shared earlier".into(),
+                            operation(Some(parent.visual_children[index - 1])),
+                        ));
+                    }
+                    if index + 1 < parent.visual_children.len() {
+                        designer.structure_tools.push((
+                            "Move shared later".into(),
+                            operation(parent.visual_children.get(index + 2).copied()),
                         ));
                     }
                 }
             }
 
-            let properties = super::super::oib::document::properties(
+            let mut properties = super::super::oib::document::properties(
                 seed,
                 &allocations,
                 &designer.selection,
                 &self.doc.oib_active()?,
             )?;
+            if designer.placement_open
+                && let Selection::Object(object) = &designer.selection
+                && let Ok(placement) = self.doc.oib_placement_properties(object)
+            {
+                properties.extend(placement);
+            }
+            designer.connection_tools.clear();
+            if editable && designer.mode == DesignerMode::Edit {
+                for property in &properties {
+                    if property.source == "bound"
+                        && let Some(address) = &property.address
+                    {
+                        let tools = self.doc.oib_connection_choices(address)?;
+                        if !tools.is_empty() {
+                            designer.connection_tools.push((address.clone(), tools));
+                        }
+                    }
+                }
+            }
             let conflicts = self.doc.oib_conflicts();
             designer.registers = properties
                 .iter()
@@ -1575,7 +1833,13 @@ impl Client {
             return Err("Unknown designer selection".into());
         }
         let previous = designer.clone();
-        let changed = designer.select(selection);
+        let reveal_placement = designer.drafts.drafts().iter().any(|d| d.dirty
+            && matches!(&d.address, PropertyAddress::Placement { object, .. } if Selection::Object(object.clone()) == selection));
+        if reveal_placement {
+            designer.placement_open = true;
+            designer.revision = None;
+        }
+        let changed = designer.select(selection) || reveal_placement;
         if changed && let Err(error) = m.refresh_designer() {
             m.designer = Some(previous);
             return Err(error);
@@ -1612,6 +1876,22 @@ impl Client {
             before,
             generation,
         })
+    }
+    /// Submit an explicitly captured shared-definition batch through the same
+    /// edit-mode, input, draft and Space admission gates as the visible tools.
+    pub fn edit_oib_definitions(
+        &mut self,
+        batch: otrios_interfaces::oib::authoring::DefinitionBatch,
+    ) -> Result<bool> {
+        self.edit_oib_structure(otrios_interfaces::oib::InstanceOperation::Definitions(
+            batch,
+        ))
+    }
+    pub fn edit_oib_hierarchy(
+        &mut self,
+        batch: otrios_interfaces::oib::authoring::HierarchyBatch,
+    ) -> Result<bool> {
+        self.edit_oib_structure(otrios_interfaces::oib::InstanceOperation::Hierarchy(batch))
     }
     fn edit_oib_structure(
         &mut self,
@@ -1728,6 +2008,21 @@ impl Client {
                 {
                     panel.scroll.set_offset([0., 0.]);
                 }
+                m.invalidate_presentation();
+                Ok(true)
+            }
+            LocalAction::Placement(selection) => {
+                let was_open = self
+                    .active
+                    .as_ref()
+                    .and_then(|m| m.designer.as_ref())
+                    .is_some_and(|d| d.placement_open && d.selection == selection);
+                self.designer_select_after_blur(selection)?;
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.placement_open = !was_open;
+                d.revision = None;
+                m.refresh_designer()?;
                 m.invalidate_presentation();
                 Ok(true)
             }
@@ -1954,6 +2249,7 @@ impl Client {
                             | LocalAction::Profile
                             | LocalAction::Resize(_)
                             | LocalAction::EditComponent(_)
+                            | LocalAction::Placement(_)
                             | LocalAction::DeleteComponent(_)
                     )
                 ) {

@@ -6,7 +6,10 @@ use otrios_interfaces::layout::{Binding, ValueType};
 use otrios_interfaces::oib::designer::Document;
 use otrios_interfaces::oib::designer::*;
 mod admission;
+pub mod authoring;
+pub mod connections;
 mod hierarchy;
+pub mod placement;
 mod sources;
 pub use admission::{compatible_mappings, validate, validate_layout};
 pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
@@ -230,6 +233,9 @@ pub fn cell_for_address(
 ) -> Result<u64> {
     let doc = metadata(seed)?;
     match address {
+        PropertyAddress::Placement { .. } => {
+            Err("Placement uses structural admission, not a causal property cell".into())
+        }
         PropertyAddress::Definition {
             definition,
             node,
@@ -447,7 +453,10 @@ fn valid_text(value: &str, max: usize) -> bool {
 }
 
 /// Expand identity/mapping metadata alongside disposable cells, never persist it.
-pub(super) fn expanded_metadata(seed: &Seed, allocations: &[Allocation]) -> Result<Document> {
+pub(in crate::canvas) fn expanded_metadata(
+    seed: &Seed,
+    allocations: &[Allocation],
+) -> Result<Document> {
     let original = metadata(seed)?;
     let factories: BTreeSet<_> = original
         .mappings
@@ -508,6 +517,8 @@ pub(super) fn expanded_metadata(seed: &Seed, allocations: &[Allocation]) -> Resu
         .objects
         .sort_by(|a, b| a.address.cmp(&b.address));
     doc.mappings.roots.sort_by_key(|m| m.prototype);
+    placement::project_metadata(&mut doc, allocations)?;
+    connections::project_metadata(&mut doc)?;
     Ok(doc)
 }
 fn walk_objects(

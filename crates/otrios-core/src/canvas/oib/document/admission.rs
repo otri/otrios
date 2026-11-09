@@ -38,7 +38,7 @@ fn subclass(doc: &Document, child: ClassId, parent: ClassId) -> Result<bool> {
     }
     Ok(false)
 }
-fn accepts(doc: &Document, classes: &[ClassId], child: ClassId) -> Result<bool> {
+pub(super) fn accepts(doc: &Document, classes: &[ClassId], child: ClassId) -> Result<bool> {
     for accepted in classes {
         if subclass(doc, child, *accepted)? {
             return Ok(true);
@@ -175,6 +175,8 @@ pub fn validate(seed: &Seed) -> Result<()> {
     let doc = metadata(seed)?;
     require(
         doc.id.0 == seed.main_oib
+            && doc.placements.is_empty()
+            && doc.connections.is_empty()
             && doc.id.0 != 0
             && valid_text(&doc.name, 64)
             && doc.classes.len() <= 16

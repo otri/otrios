@@ -29,6 +29,7 @@ struct Receipt {
 #[derive(Clone)]
 pub struct Document {
     oib_ui: Option<std::sync::Arc<Ui>>,
+    oib_authored: std::sync::Arc<std::sync::Mutex<Option<oib::AuthoredUi>>>,
     schema: std::sync::Arc<StateSchema>,
     required_fields: u64,
     scope: String,
@@ -131,6 +132,7 @@ impl Document {
         let tree = Snapshot::empty().edit([0; 16], &edits).map_err(err)?.0;
         Ok(Self {
             oib_ui: None,
+            oib_authored: Default::default(),
             required_fields: StateSelection::all(&schema).fields,
             schema: schema.into(),
             scope: scope.into(),
@@ -190,6 +192,7 @@ impl Document {
         let actor = root.actor.as_slice().try_into().map_err(err)?;
         let result = Self {
             oib_ui: None,
+            oib_authored: Default::default(),
             field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
             required_fields,
             schema: schema.into(),

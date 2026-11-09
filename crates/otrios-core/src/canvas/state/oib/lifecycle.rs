@@ -290,6 +290,11 @@ impl Document {
             .map(|k| vec![k])
             .collect();
         keep.extend([0, 3, 4, 7].map(|k| vec![4, k]));
+        for kind in [8, 9, 10] {
+            if self.tree.subtree(&[4, kind]).is_ok() {
+                keep.push(vec![4, kind]);
+            }
+        }
         for cell in self.oib_resolved_seed()?.cells {
             for branch in [1, 2] {
                 keep.push(cell_path(branch, cell.id));
@@ -385,7 +390,7 @@ impl Document {
             }
         }
         let mut size = 0;
-        for branch in [1, 2, 4, 5, 6, 7] {
+        for branch in [1, 2, 4, 5, 6, 7, 8, 9, 10] {
             if let Ok(n) = self.tree.subtree(&[4, branch]) {
                 size += n.canonical_bytes();
             }

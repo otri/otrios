@@ -1224,3 +1224,116 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     );
     f.counter_unchanged();
 }
+
+#[test]
+fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values() {
+    use otrios_interfaces::oib::{
+        InstanceOperation,
+        authoring::{DefinitionBatch, DefinitionEdit},
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut f = Fixture::start(&binary);
+    let mut a = f.open('a', 84, 0);
+    let mut b = f.open('a', 85, 0);
+    let mut viewer = f.open('b', 86, 0);
+    assert!(!viewer.binding.ui_editable);
+    assert!(a.state.set(&VALUES).unwrap());
+    a.settle();
+    a.edit(&[(203, Some(Value::Text("Retained source".into())))]);
+    b.observe(&a);
+    viewer.observe(&a);
+    let collection = a.binding.collection.clone();
+    let original = f.durable(&collection);
+    let original_tree = Snapshot::from_bytes(&original.save().unwrap()).unwrap();
+    let generation = a.state.oib_generation().unwrap();
+    let edit = |before| {
+        InstanceOperation::Definitions(DefinitionBatch {
+            generation,
+            operations: vec![DefinitionEdit::MoveNode {
+                definition: DefinitionId(10),
+                node: NodeId(8),
+                owner: NodeId(1),
+                visual_parent: Some(NodeId(1)),
+                before: Some(NodeId(before)),
+            }],
+        })
+    };
+    assert!(a.state.edit_oib_structure(edit(7)).unwrap());
+    assert!(b.state.edit_oib_structure(edit(9)).unwrap());
+    let accepted = a.issue();
+    let rejected = b.issue();
+    a.send(accepted.clone());
+    viewer.until(|s| s.oib_generation() == Some(generation + 1));
+    b.send(rejected.clone());
+    viewer.until(|s| s.oib_status_text().contains("Structure rejected"));
+    let persisted = f.durable(&collection);
+    let compiled = persisted.oib_compiled(2).unwrap().0;
+    let definition = oib::seed(&compiled)
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap();
+    assert_eq!(
+        definition.nodes[0].visual_children,
+        [2, 3, 8, 7, 9].map(NodeId)
+    );
+    let tree = Snapshot::from_bytes(&persisted.save().unwrap()).unwrap();
+    for branch in [1, 2, 4, 5, 6, 7] {
+        assert_eq!(
+            original_tree
+                .subtree(&[4, branch])
+                .unwrap()
+                .to_bytes()
+                .unwrap(),
+            tree.subtree(&[4, branch]).unwrap().to_bytes().unwrap()
+        );
+    }
+    assert_eq!(
+        original_tree.subtree(&[1]).unwrap().hash(),
+        tree.subtree(&[1]).unwrap().hash()
+    );
+    let pending_a = a.state;
+    let pending_b = b.state;
+    drop(a.socket);
+    drop(b.socket);
+    drop(viewer);
+    f.rig.stop();
+    assert_eq!(f.durable(&collection).root_hash(), persisted.root_hash());
+    f.rig.restart(&binary, true, true);
+    let mut a = f.open('a', 84, pending_a.resume_sequence());
+    let mut b = f.open('a', 85, pending_b.resume_sequence());
+    let mut viewer = f.open('b', 86, 0);
+    a.state.restore_pending(&pending_a).unwrap();
+    b.state.restore_pending(&pending_b).unwrap();
+    a.settle();
+    b.settle();
+    a.send(accepted);
+    b.send(rejected);
+    assert_eq!(a.state.oib_generation(), Some(generation + 1));
+    assert_eq!(b.state.oib_generation(), Some(generation + 1));
+    assert!(b.state.oib_status_text().contains("Structure rejected"));
+    assert_values(&viewer.state);
+    let retry = InstanceOperation::Definitions(DefinitionBatch {
+        generation: generation + 1,
+        operations: vec![DefinitionEdit::MoveNode {
+            definition: DefinitionId(10),
+            node: NodeId(8),
+            owner: NodeId(1),
+            visual_parent: Some(NodeId(1)),
+            before: Some(NodeId(9)),
+        }],
+    });
+    assert!(b.state.edit_oib_structure(retry).unwrap());
+    b.settle();
+    viewer.observe(&b);
+    assert_eq!(b.state.oib_generation(), Some(generation + 2));
+    assert!(!b.state.oib_status_text().contains("Structure rejected"));
+    assert_values(&viewer.state);
+    f.counter_unchanged();
+}

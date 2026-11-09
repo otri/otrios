@@ -68,6 +68,13 @@ impl Document {
             return Err("Resolve pending canvas children first".into());
         }
         for id in moving.into_iter().chain(before) {
+            if super::super::super::oib::document::placement::destination(
+                &self.oib_placements()?,
+                otrios_interfaces::oib::designer::InstanceId(id),
+            ) != otrios_interfaces::oib::authoring::Destination::Canvas
+            {
+                return Err("Canvas ordering cannot move an owned slot child".into());
+            }
             if !live.contains(&id)
                 || !allocations
                     .iter()
@@ -89,8 +96,57 @@ impl Document {
     ) -> Result<()> {
         let mut candidate = self.clone();
         let result = (|| {
-            candidate.oib_validate_structure(operation)?;
-            candidate.oib_instance_apply(writer, operation)?;
+            if let InstanceOperation::Hierarchy(batch) = operation {
+                candidate.oib_hierarchy_write(writer, batch)?;
+            } else if let InstanceOperation::Definitions(batch) = operation {
+                let status = candidate.oib_status()?;
+                if batch.generation != status.generation {
+                    return Err("Document changed; review structure and retry".into());
+                }
+                if !status.conflicts.is_empty()
+                    || candidate.oib_draft_root()? != status.source_draft
+                {
+                    return Err("Resolve the UI draft before changing structure".into());
+                }
+                let current = candidate.oib_authored_ui()?;
+                let current_seed =
+                    super::super::super::oib::seed(&current).ok_or("Missing OIB seed")?;
+                if current_seed.instance_surface.is_none() {
+                    return Err("Definition authoring requires the bounded instance surface".into());
+                }
+                let compiled =
+                    super::super::super::oib::document::authoring::apply(&current, batch)?;
+                let definitions = &super::super::super::oib::seed(&compiled)
+                    .ok_or("Missing authored OIB seed")?
+                    .designer
+                    .as_ref()
+                    .ok_or("Missing OIB document")?
+                    .definitions;
+                if definitions
+                    != &current_seed
+                        .designer
+                        .as_ref()
+                        .ok_or("Missing OIB document")?
+                        .definitions
+                {
+                    let value = bytes(definitions)?;
+                    if value.len() > MAX_STRUCTURE_BYTES {
+                        return Err("OIB structural source budget".into());
+                    }
+                    candidate.change(
+                        &[],
+                        vec![Edit {
+                            path: vec![4, 8],
+                            schema: candidate.extra_schema(4, 8),
+                            value: Some(value),
+                        }],
+                    )?;
+                    candidate.activate_oib(candidate.tree.clone())?;
+                }
+            } else {
+                candidate.oib_validate_structure(operation)?;
+                candidate.oib_instance_apply(writer, operation)?;
+            }
             // An already-satisfied ordering is still an accepted deliberate
             // retry. Clear a previous structural rejection without publishing
             // another graph generation or rewriting any property register.
@@ -118,25 +174,26 @@ impl Document {
         match result {
             Ok(()) => self.tree = candidate.tree,
             Err(error) => {
-                // The outer authority transaction persists the rejection and its
-                // ordinary writer receipt together. No failed identity/order or
-                // property edits escape the disposable candidate.
-                let mut status = self.oib_status()?;
-                let mut diagnostic = format!("Structure rejected: {error}");
-                while diagnostic.len() > 256 {
-                    diagnostic.pop();
-                }
-                status.error = Some(diagnostic);
-                self.change(
-                    &[],
-                    vec![Edit {
-                        path: vec![4, 3],
-                        schema: self.extra_schema(4, 3),
-                        value: Some(bytes(&status)?),
-                    }],
-                )?;
+                self.oib_reject_structure(&error)?;
             }
         }
         Ok(())
+    }
+    pub(super) fn oib_reject_structure(&mut self, error: &str) -> Result<()> {
+        let mut status = self.oib_status()?;
+        let mut diagnostic = format!("Structure rejected: {error}");
+        while diagnostic.len() > 256 {
+            diagnostic.pop();
+        }
+        status.error = Some(diagnostic);
+        self.change(
+            &[],
+            vec![Edit {
+                path: vec![4, 3],
+                schema: self.extra_schema(4, 3),
+                value: Some(bytes(&status)?),
+            }],
+        )
+        .map(|_| ())
     }
 }

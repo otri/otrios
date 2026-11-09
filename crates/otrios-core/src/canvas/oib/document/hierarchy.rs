@@ -200,22 +200,56 @@ pub fn hierarchy(
             header.component = Some(d.id);
             p.push(header, (0, index as u64))?;
             for n in &d.nodes {
+                // Navigation may follow a different visual parent, but that must
+                // never hide a missing, cyclic or excessively deep owner chain.
+                let mut current = n.owner;
+                let mut owners = BTreeSet::from([n.id]);
+                while let Some(id) = current {
+                    if !owners.insert(id) || owners.len() > MAX_DEPTH {
+                        return Err("Cyclic/deep OIB definition ownership".into());
+                    }
+                    current = d
+                        .nodes
+                        .iter()
+                        .find(|parent| parent.id == id)
+                        .ok_or("Missing OIB definition owner")?
+                        .owner;
+                }
                 let owner = n.owner.map(|node| Selection::DefinitionNode {
                     definition: d.id,
                     node,
                 });
+                let visual_parent = d
+                    .nodes
+                    .iter()
+                    .find(|parent| parent.visual_children.contains(&n.id));
+                let navigation_parent = visual_parent
+                    .map(|parent| Selection::DefinitionNode {
+                        definition: d.id,
+                        node: parent.id,
+                    })
+                    .or_else(|| owner.clone())
+                    .unwrap_or_else(|| selection.clone());
+                let rank = visual_parent
+                    .and_then(|parent| {
+                        parent
+                            .visual_children
+                            .iter()
+                            .position(|child| *child == n.id)
+                    })
+                    .map_or((1, n.id.0), |index| (0, index as u64));
                 let mut r = row(
                     Selection::DefinitionNode {
                         definition: d.id,
                         node: n.id,
                     },
-                    Some(key(owner.clone().unwrap_or_else(|| selection.clone()))),
+                    Some(key(navigation_parent)),
                     n.name.clone(),
                     n.class,
                 );
                 r.component = n.reference.as_ref().map(|r| r.definition);
                 r.owner = owner;
-                p.push(r, (0, n.id.0))?;
+                p.push(r, rank)?;
             }
         }
         return p.finish();

@@ -322,6 +322,8 @@ fn fixture() -> Ui {
     ]);
     mappings.objects.sort_by(|a, b| a.address.cmp(&b.address));
     let doc = otrios_interfaces::oib::designer::Document {
+        placements: vec![],
+        connections: vec![],
         id: DocumentId(1),
         name: "Runtime fixture".into(),
         class: ClassId(2),

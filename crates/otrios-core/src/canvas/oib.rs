@@ -409,7 +409,11 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
     for viewport in [[1280., 800.], [800., 1280.]] {
         let scene = layout.resolve_viewport(&slots, viewport)?;
         if let Some(surface) = &seed.instance_surface
-            && surface.layout.is_some()
+            && (surface.layout.is_some()
+                || seed
+                    .designer
+                    .as_ref()
+                    .is_some_and(|d| !d.placements.is_empty()))
         {
             instances::validate_row_geometry(&scene, surface.preview_viewport)?;
         }

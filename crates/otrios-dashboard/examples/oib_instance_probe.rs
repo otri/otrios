@@ -162,6 +162,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 step["before"].as_u64(),
             )?,
             "reorder" => client.reorder_oib(id, step["before"].as_u64())?,
+            "definitions" => {
+                client.edit_oib_definitions(serde_json::from_value(step["batch"].clone())?)?
+            }
+            "hierarchy" => {
+                client.edit_oib_hierarchy(serde_json::from_value(step["batch"].clone())?)?
+            }
             "race-reorder" => {
                 let other_id = step["other_id"]
                     .as_u64()
@@ -211,6 +217,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let selection = match step["scope"].as_str().ok_or("Selection scope required")? {
                     "document" => Selection::Document(DocumentId(id)),
                     "definition" => Selection::Definition(DefinitionId(id)),
+                    "definition-node" => Selection::DefinitionNode {
+                        definition: DefinitionId(id),
+                        node: otrios_interfaces::oib::designer::NodeId(
+                            step["node"].as_u64().ok_or("Definition node required")?,
+                        ),
+                    },
                     "object" => Selection::Object(serde_json::from_value::<ObjectAddress>(
                         step["address"].clone(),
                     )?),

@@ -4082,10 +4082,10 @@ impl Mount {
                 scroll.set_content(seed.inspector_content);
             }
             if let Some(seed) = super::oib::seed(&self.ui)
-                && let Some(surface) = &seed.instance_surface
+                && seed.instance_surface.is_some()
                 && let Some(scroll) = &mut self.preview_scroll
             {
-                scroll.set_content([0., seed.instances.len() as f32 * surface.preview_stride]);
+                scroll.set_content(super::oib::document::placement::preview_content(seed));
             }
             self.oib_generation = Some(generation);
             if let Some(view) = &mut self.oib_view {
@@ -4581,7 +4581,7 @@ fn qualify(
             s.instance_surface.as_ref().map(|surface| {
                 super::text_scroll::Scroll::new(
                     surface.preview_viewport,
-                    [0., s.instances.len() as f32 * surface.preview_stride],
+                    super::oib::document::placement::preview_content(s),
                 )
             })
         }),
@@ -4642,10 +4642,10 @@ fn qualify(
             scroll.set_content(seed.inspector_content);
         }
         if let Some(seed) = super::oib::seed(&m.ui)
-            && let Some(surface) = &seed.instance_surface
+            && seed.instance_surface.is_some()
             && let Some(scroll) = &mut m.preview_scroll
         {
-            scroll.set_content([0., seed.instances.len() as f32 * surface.preview_stride]);
+            scroll.set_content(super::oib::document::placement::preview_content(seed));
         }
         m.oib_generation = m.doc.oib_generation();
         m.refresh_oib_view()?;

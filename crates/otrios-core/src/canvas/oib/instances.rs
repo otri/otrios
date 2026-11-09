@@ -528,6 +528,8 @@ pub fn expand(
         };
     result.presentation = Some(Presentation::Oib(Box::new(resolved)));
     result.layout = Layout::encode(&blueprint)?;
+    document::placement::project_ui(&mut result, allocations, live)?;
+    document::connections::project_ui(ui, &mut result)?;
     if result.handlers.len() > 128 || result.selectors.len() > 128 {
         return Err("OIB expanded control/selector budget".into());
     }

@@ -12,6 +12,8 @@ fn seed() -> Seed {
         main_oib: 1,
         main_class: "otrios.declarative-v1".into(),
         designer: Some(otrios_interfaces::oib::designer::Document {
+            placements: vec![],
+            connections: vec![],
             id: DocumentId(1),
             name: "Document".into(),
             class: ClassId(1),
@@ -3671,4 +3673,103 @@ fn desktop_studio_delete_discards_own_dirty_draft_and_retains_unrelated_draft() 
     assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
     assert!(client.confirmed());
     assert!(!client.input_busy());
+}
+
+#[test]
+fn desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_targets() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    let fields = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let allocations = authority.oib_allocations().unwrap();
+    let values = authority.oib_values(2).unwrap();
+    client
+        .inspect_oib_selection(Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(8),
+        })
+        .unwrap();
+    let generation = authority.oib_status().unwrap().generation;
+    let stale = activate_studio_tool(&mut client, "Move shared earlier");
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_status().unwrap().generation, generation + 1);
+    assert!(!client.activate(client.epoch(), stale).unwrap());
+    assert_eq!(authority.oib_allocations().unwrap(), allocations);
+    assert_eq!(authority.oib_values(2).unwrap(), values);
+    assert_eq!(
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        fields
+    );
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(8)
+        }
+    );
+    let authored = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_authoring_seed()
+        .unwrap();
+    let definition = authored
+        .designer
+        .as_ref()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap();
+    assert_eq!(
+        definition.nodes[0].visual_children,
+        [2, 3, 8, 7, 9].map(NodeId)
+    );
+    let tree = &client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .tree;
+    let rank = |node| {
+        tree.iter()
+            .position(|row| {
+                row.selection
+                    == Some(Selection::DefinitionNode {
+                        definition: DefinitionId(10),
+                        node: NodeId(node),
+                    })
+            })
+            .unwrap()
+    };
+    assert!(
+        rank(8) < rank(7),
+        "Components follows the authored visual order"
+    );
+    activate_studio_tool(&mut client, "Move shared later");
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_status().unwrap().generation, generation + 2);
+    assert_eq!(authority.oib_values(2).unwrap(), values);
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .structure_tools
+            .is_empty()
+    );
 }

@@ -104,7 +104,19 @@ impl Draft {
             }
             ValueType::Number => {
                 let n = parse_number(raw(Part::Value)).ok_or(Error::InvalidNumber)?;
-                if !(0. ..=1000.).contains(&n)
+                let maximum = if matches!(
+                    self.address,
+                    PropertyAddress::Placement {
+                        property: otrios_interfaces::oib::designer::PlacementProperty::X
+                            | otrios_interfaces::oib::designer::PlacementProperty::Y,
+                        ..
+                    }
+                ) {
+                    16000.
+                } else {
+                    1000.
+                };
+                if !(0. ..=maximum).contains(&n)
                     || self.descriptor.number_range.is_some_and(|[lo, hi]| {
                         !lo.is_finite() || !hi.is_finite() || n < lo || n > hi || lo > hi
                     })
@@ -500,7 +512,10 @@ impl PropertyDrafts {
 }
 fn writable(info: &PropertyInfo) -> Result<&PropertyAddress, Error> {
     let address = info.address.as_ref().ok_or(Error::Unavailable)?;
-    if info.cell.is_none() || info.source == "bound" || !info.descriptor.policy.live_literal {
+    if (info.cell.is_none() && !matches!(address, PropertyAddress::Placement { .. }))
+        || info.source == "bound"
+        || !info.descriptor.policy.live_literal
+    {
         return Err(Error::ReadOnly);
     }
     let allowed = matches!(

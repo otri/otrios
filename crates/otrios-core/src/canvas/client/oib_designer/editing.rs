@@ -12,6 +12,7 @@ const KEY_BASE: u32 = 2_695_000_000;
 
 pub(super) fn selection(address: &PropertyAddress) -> Selection {
     match address {
+        PropertyAddress::Placement { object, .. } => Selection::Object(object.clone()),
         PropertyAddress::Definition {
             definition, node, ..
         } => Selection::DefinitionNode {
@@ -50,6 +51,10 @@ pub(super) fn inspector(
     details: Option<&PropertySources>,
     registers: &[PropertyRegisterView],
     seed: &otrios_interfaces::oib::Seed,
+    connections: &[(
+        PropertyAddress,
+        Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
+    )],
 ) -> Result<(Vec<SceneNode>, f32)> {
     // Clean fields outside this selection are disposable. Dirty/invalid fields
     // are never silently evicted and retain their original full address.
@@ -150,7 +155,17 @@ pub(super) fn inspector(
             nodes.push(info);
         }
         y += 56.;
-        property_context(b, &mut nodes, &mut y, p, details, registers, seed, editable)?;
+        property_context(
+            b,
+            &mut nodes,
+            &mut y,
+            p,
+            details,
+            registers,
+            seed,
+            editable,
+            connections,
+        )?;
         let allowed = editable && !p.cell.is_some_and(|c| conflicts.contains(&c));
         let pending = status.contains("Saving")
             && p.address
@@ -295,7 +310,9 @@ pub(super) fn inspector(
         nodes.push(label(
             b,
             y,
-            if p.overridden {
+            if matches!(address, PropertyAddress::Placement { .. }) {
+                "Parent-local placement"
+            } else if p.overridden {
                 "Local override"
             } else {
                 "Inherited / authored"
@@ -334,12 +351,18 @@ fn property_context(
     registers: &[PropertyRegisterView],
     seed: &otrios_interfaces::oib::Seed,
     editable: bool,
+    connections: &[(
+        PropertyAddress,
+        Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
+    )],
 ) -> Result<()> {
     if let Some(trace) = details.filter(|d| property.address.as_ref() == Some(&d.address)) {
         nodes.push(label(
             b,
             *y,
-            if trace.overridden {
+            if matches!(trace.address, PropertyAddress::Placement { .. }) {
+                "Placement - structural batch"
+            } else if trace.overridden {
                 "Live override at occurrence"
             } else {
                 "Inherited source"
@@ -357,8 +380,33 @@ fn property_context(
             *y += 40.;
         }
         if trace.binding.is_some() {
-            nodes.push(label(b, *y, "App binding - read only", MUTED)?);
+            let choices = connections
+                .iter()
+                .find(|(address, _)| address == &trace.address)
+                .filter(|_| editable);
+            nodes.push(label(
+                b,
+                *y,
+                if choices.is_some() {
+                    "App value; choose source"
+                } else {
+                    "App binding - read only"
+                },
+                MUTED,
+            )?);
             *y += 40.;
+            if let Some((_, choices)) = choices {
+                for (name, operation) in choices {
+                    nodes.push(b.focus_button(
+                        0.,
+                        *y,
+                        320.,
+                        name,
+                        LocalAction::Structure(operation.clone()),
+                    )?);
+                    *y += 56.;
+                }
+            }
         }
         if let Some(source) = &trace.immediate_source {
             nodes.push(b.focus_button(
@@ -865,12 +913,16 @@ impl Client {
         }
         let authoring_seed = m.doc.oib_authoring_seed()?;
         let seed = &authoring_seed;
-        let fresh = super::super::super::oib::document::properties(
-            seed,
-            &m.doc.oib_allocations()?,
-            &selection(address),
-            &m.doc.oib_active()?,
-        )?
+        let fresh = if let PropertyAddress::Placement { object, .. } = address {
+            m.doc.oib_placement_properties(object)?
+        } else {
+            super::super::super::oib::document::properties(
+                seed,
+                &m.doc.oib_allocations()?,
+                &selection(address),
+                &m.doc.oib_active()?,
+            )?
+        }
         .into_iter()
         .find(|p| p.address.as_ref() == Some(address));
         let d = m.designer.as_mut().ok_or("Missing designer")?;

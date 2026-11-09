@@ -461,6 +461,8 @@ fn document() -> Document {
     });
     instances.sort_by_key(|i| i.id);
     Document {
+        placements: vec![],
+        connections: vec![],
         id: DocumentId(1),
         name: "Settings designer".into(),
         class: DOCUMENT,

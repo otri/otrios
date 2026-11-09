@@ -152,6 +152,12 @@ pub fn property_sources(
         hops: Vec::new(),
     };
     match address {
+        PropertyAddress::Placement { object, .. } => {
+            instance(doc, object.instance)?;
+            // Automatic layout has no authored scalar default to pretend is a
+            // class/definition register. The inspector supplies its resolved frame.
+            result.read_only = false;
+        }
         PropertyAddress::Definition {
             definition,
             node,

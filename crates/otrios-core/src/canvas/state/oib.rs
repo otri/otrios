@@ -7,8 +7,18 @@ use otrios_interfaces::oib::{
     MAX_CHANGES,
 };
 use std::collections::BTreeSet;
+mod hierarchy;
 mod lifecycle;
 mod structure;
+
+/// One disposable compiled structural revision, shared by document clones and
+/// keyed by both signed admission identity and canonical authored source hash.
+pub(super) struct AuthoredUi {
+    signed: std::sync::Arc<Ui>,
+    source: merkle::Hash,
+    ui: std::sync::Arc<Ui>,
+}
+const MAX_STRUCTURE_BYTES: usize = otrios_interfaces::oib::authoring::MAX_SOURCE_BYTES;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -171,6 +181,66 @@ impl Document {
     fn oib_binding(&self) -> Result<Binding> {
         decode(&payload(&self.tree, &[4, 0])?)
     }
+    fn oib_authored_ui(&self) -> Result<std::sync::Arc<Ui>> {
+        let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
+        let Ok(source) = self.tree.subtree(&[4, 8]) else {
+            return Ok(signed);
+        };
+        let mut cache = self.oib_authored.lock().map_err(err)?;
+        if let Some(cached) = cache.as_ref()
+            && std::sync::Arc::ptr_eq(&signed, &cached.signed)
+            && cached.source == source.hash()
+        {
+            return Ok(cached.ui.clone());
+        }
+        let definitions = self.oib_definition_snapshot()?;
+        let ui = std::sync::Arc::new(super::super::oib::document::authoring::restore(
+            &signed,
+            &definitions,
+        )?);
+        *cache = Some(AuthoredUi {
+            signed,
+            source: source.hash(),
+            ui: ui.clone(),
+        });
+        Ok(ui)
+    }
+    fn oib_definition_snapshot(
+        &self,
+    ) -> Result<Vec<otrios_interfaces::oib::designer::ComponentDefinition>> {
+        let data = payload(&self.tree, &[4, 8])?;
+        if data.len() > MAX_STRUCTURE_BYTES {
+            return Err("OIB structural source budget".into());
+        }
+        let definitions: Vec<otrios_interfaces::oib::designer::ComponentDefinition> =
+            decode(&data)?;
+        if bytes(&definitions)? != data {
+            return Err("Noncanonical OIB structural source".into());
+        }
+        Ok(definitions)
+    }
+    fn oib_authored_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
+        let mut seed = if self.oib_ui.is_some() {
+            super::super::oib::seed(&*self.oib_authored_ui()?)
+                .ok_or("Missing OIB seed")?
+                .clone()
+        } else {
+            let signed = self.oib_binding()?.seed;
+            if self.tree.subtree(&[4, 8]).is_err() {
+                signed
+            } else {
+                super::super::oib::document::authoring::restore_seed(
+                    &signed,
+                    &self.oib_definition_snapshot()?,
+                )?
+            }
+        };
+        if let Some(doc) = &mut seed.designer {
+            doc.placements = self.oib_placements()?;
+            doc.connections = self.oib_connections()?;
+        }
+        Ok(seed)
+    }
     fn oib_cell_schema(&self, id: u64) -> merkle::Hash {
         digest(
             &[
@@ -236,13 +306,7 @@ impl Document {
         Ok(live)
     }
     fn oib_resolved_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
-        let seed = if let Some(ui) = &self.oib_ui {
-            super::super::oib::seed(ui)
-                .ok_or("Missing OIB seed")?
-                .clone()
-        } else {
-            self.oib_binding()?.seed
-        };
+        let seed = self.oib_authored_seed()?;
         super::super::oib::instances::expanded_seed(&seed, &self.oib_allocations()?)
     }
     fn oib_active_root(&self) -> Result<merkle::Hash> {
@@ -251,28 +315,82 @@ impl Document {
             return Ok(properties);
         }
         let instances = self.tree.subtree(&[4, 6]).map_err(err)?.hash();
-        Ok(digest(
+        let root = digest(
             &[
                 b"OTriOS\0oib-active-v2\0".as_slice(),
                 &properties,
                 &instances,
             ]
             .concat(),
-        ))
+        );
+        Ok(self.oib_structural_root(root))
     }
     fn oib_draft_root(&self) -> Result<merkle::Hash> {
         let properties = self.tree.subtree(&[4, 1]).map_err(err)?.hash();
         let Ok(instances) = self.tree.subtree(&[4, 5]) else {
             return Ok(properties);
         };
-        Ok(digest(
+        let root = digest(
             &[
                 b"OTriOS\0oib-draft-v2\0".as_slice(),
                 &properties,
                 &instances.hash(),
             ]
             .concat(),
-        ))
+        );
+        Ok(self.oib_structural_root(root))
+    }
+    fn oib_structural_root(&self, properties_and_presence: merkle::Hash) -> merkle::Hash {
+        let root = self
+            .tree
+            .subtree(&[4, 8])
+            .map_or(properties_and_presence, |source| {
+                digest(
+                    &[
+                        b"OTriOS\0oib-structure-v1\0".as_slice(),
+                        &properties_and_presence,
+                        &source.hash(),
+                    ]
+                    .concat(),
+                )
+            });
+        let root = self.tree.subtree(&[4, 9]).map_or(root, |source| {
+            digest(
+                &[
+                    b"OTriOS\0oib-placement-v1\0".as_slice(),
+                    &root,
+                    &source.hash(),
+                ]
+                .concat(),
+            )
+        });
+        let root = self.tree.subtree(&[4, 10]).map_or(root, |source| {
+            digest(
+                &[
+                    b"OTriOS\0oib-connections-v1\0".as_slice(),
+                    &root,
+                    &source.hash(),
+                ]
+                .concat(),
+            )
+        });
+        if [8, 9, 10]
+            .iter()
+            .any(|kind| self.tree.subtree(&[4, *kind]).is_ok())
+        {
+            self.tree.subtree(&[4, 4]).map_or(root, |roster| {
+                digest(
+                    &[
+                        b"OTriOS\0oib-structure-roster-v1\0".as_slice(),
+                        &root,
+                        &roster.hash(),
+                    ]
+                    .concat(),
+                )
+            })
+        } else {
+            root
+        }
     }
     pub fn oib_compiled(&self, branch: u64) -> Result<(Ui, crate::dashboard::layout::Layout)> {
         self.oib_compiled_selected(branch, None)
@@ -282,10 +400,16 @@ impl Document {
         branch: u64,
         selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
-        let ui = self.oib_ui()?;
+        let mut ui = (*self.oib_authored_ui()?).clone();
+        if let Some(Presentation::Oib(seed)) = &mut ui.presentation
+            && let Some(doc) = &mut seed.designer
+        {
+            doc.placements = self.oib_placements()?;
+            doc.connections = self.oib_connections()?;
+        }
         let values = self.oib_values(branch)?;
         let resolved = super::super::oib::instances::expand(
-            ui,
+            &ui,
             &self.oib_allocations()?,
             &self.oib_live(branch)?,
             selected,
@@ -348,7 +472,11 @@ impl Document {
         if branch.register().is_some()
             || branch.child_keys().any(|k| {
                 k > if binding.seed.instance_surface.is_some() {
-                    7
+                    if binding.seed.designer.is_some() {
+                        10
+                    } else {
+                        7
+                    }
                 } else {
                     3
                 }
@@ -356,7 +484,11 @@ impl Document {
         {
             return Err("Invalid OIB branch".into());
         }
-        for index in [0, 3] {
+        for index in [0, 3].into_iter().chain(
+            [8, 9, 10]
+                .into_iter()
+                .filter(|kind| tree.subtree(&[4, *kind]).is_ok()),
+        ) {
             let leaf = tree.subtree(&[4, index]).map_err(err)?;
             if leaf.child_keys().next().is_some()
                 || leaf
@@ -364,6 +496,20 @@ impl Document {
                     .is_none_or(|r| r.schema() != self.extra_schema(4, index as usize))
             {
                 return Err("Invalid OIB metadata".into());
+            }
+        }
+        if tree.subtree(&[4, 8]).is_ok() {
+            let authored = payload(tree, &[4, 8])?;
+            if authored.len() > MAX_STRUCTURE_BYTES {
+                return Err("OIB structural source budget".into());
+            }
+            let total = [1, 4, 5, 7, 8]
+                .iter()
+                .filter_map(|kind| tree.subtree(&[4, *kind]).ok())
+                .map(|t| t.canonical_bytes())
+                .sum::<usize>();
+            if total > otrios_interfaces::oib::MAX_BYTES {
+                return Err("OIB combined authored/causal byte budget".into());
             }
         }
         let status = candidate.oib_status()?;
@@ -1102,15 +1248,77 @@ impl Document {
         writer: Actor,
         operation: &InstanceOperation,
     ) -> Result<()> {
+        let placements = self.oib_placements()?;
+        let connections = self.oib_connections()?;
+        if let InstanceOperation::Remove { instance, .. } | InstanceOperation::Duplicate { instance, .. } = operation
+            && (placements.iter().any(|p| p.instance.0 == *instance
+                || matches!(&p.destination, otrios_interfaces::oib::authoring::Destination::Slot { component, .. } if component.instance.0 == *instance))
+                || connections.iter().any(|c| c.object.instance.0 == *instance)) {
+            return self.oib_reject_structure("Placed components require a hierarchy delete or owned subtree duplicate");
+        }
+        if let InstanceOperation::Restore { defaults } = operation
+            && (!placements.is_empty()
+                || !connections.is_empty()
+                || (*defaults && self.tree.subtree(&[4, 8]).is_ok()))
+        {
+            let mut candidate = self.clone();
+            let mut edits = vec![Edit {
+                path: vec![4, 9],
+                schema: self.extra_schema(4, 9),
+                value: Some(bytes(
+                    &Vec::<otrios_interfaces::oib::authoring::Placement>::new(),
+                )?),
+            }];
+            if !connections.is_empty() {
+                edits.push(Edit {
+                    path: vec![4, 10],
+                    schema: self.extra_schema(4, 10),
+                    value: Some(bytes(&Vec::<
+                        otrios_interfaces::oib::authoring::AppConnection,
+                    >::new())?),
+                });
+            }
+            if *defaults && self.tree.subtree(&[4, 8]).is_ok() {
+                let definitions = self
+                    .oib_binding()?
+                    .seed
+                    .designer
+                    .ok_or("Missing OIB document")?
+                    .definitions;
+                edits.push(Edit {
+                    path: vec![4, 8],
+                    schema: self.extra_schema(4, 8),
+                    value: Some(bytes(&definitions)?),
+                });
+            }
+            candidate.change(&[], edits)?;
+            candidate.oib_instance_apply(writer, operation)?;
+            if let Some(error) = candidate.oib_status()?.error {
+                return self.oib_reject_structure(&error);
+            }
+            self.tree = candidate.tree;
+            return Ok(());
+        }
         if matches!(
             operation,
-            InstanceOperation::Insert { .. } | InstanceOperation::Reorder { .. }
+            InstanceOperation::Insert { .. }
+                | InstanceOperation::Reorder { .. }
+                | InstanceOperation::Definitions(_)
+                | InstanceOperation::Hierarchy(_)
         ) {
             return self.oib_structure_write(writer, operation);
         }
         self.oib_instance_apply(writer, operation)
     }
     fn oib_instance_apply(&mut self, writer: Actor, operation: &InstanceOperation) -> Result<()> {
+        self.oib_instance_stage(writer, operation, true)
+    }
+    fn oib_instance_stage(
+        &mut self,
+        writer: Actor,
+        operation: &InstanceOperation,
+        activate: bool,
+    ) -> Result<()> {
         let ui = self.oib_ui()?.clone();
         let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
         if seed.instance_surface.is_none() {
@@ -1119,6 +1327,9 @@ impl Document {
         let mut candidate = self.clone();
         let mut allocations = self.oib_allocations()?;
         match operation {
+            InstanceOperation::Definitions(_) | InstanceOperation::Hierarchy(_) => {
+                return Err("Definition edit requires atomic structural admission".into());
+            }
             InstanceOperation::Reorder {
                 instance, before, ..
             } => {
@@ -1294,8 +1505,10 @@ impl Document {
                 candidate.change(&[], edits)?;
             }
         }
-        let next = candidate.tree.clone();
-        candidate.activate_oib(next)?;
+        if activate {
+            let next = candidate.tree.clone();
+            candidate.activate_oib(next)?;
+        }
         self.tree = candidate.tree;
         Ok(())
     }
@@ -1304,9 +1517,7 @@ impl StateAdapter {
     /// Canonical signed factory metadata, before resident expansion removes
     /// palette templates or replaces prototype IDs with allocated identities.
     pub(in crate::canvas) fn oib_authoring_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
-        Ok(super::super::oib::seed(self.doc.oib_ui()?)
-            .ok_or("Missing OIB seed")?
-            .clone())
+        self.doc.oib_authored_seed()
     }
     pub fn restore_oib(&mut self, defaults: bool) -> Result<bool> {
         self.edit_oib_instance(InstanceOperation::Restore { defaults })
@@ -1354,7 +1565,10 @@ impl StateAdapter {
     pub fn edit_oib_structure(&mut self, operation: InstanceOperation) -> Result<bool> {
         if !matches!(
             operation,
-            InstanceOperation::Insert { .. } | InstanceOperation::Reorder { .. }
+            InstanceOperation::Insert { .. }
+                | InstanceOperation::Reorder { .. }
+                | InstanceOperation::Definitions(_)
+                | InstanceOperation::Hierarchy(_)
         ) {
             return Err("Expected a canvas structure operation".into());
         }
@@ -1378,9 +1592,44 @@ impl StateAdapter {
         })
     }
     pub fn duplicate_oib(&mut self, instance: u64, name: Option<String>) -> Result<bool> {
+        if !self.doc.oib_placements()?.is_empty() || !self.doc.oib_connections()?.is_empty() {
+            let placements = self.doc.oib_placements()?;
+            let destination = super::super::oib::document::placement::destination(
+                &placements,
+                otrios_interfaces::oib::designer::InstanceId(instance),
+            );
+            let frame = placements
+                .iter()
+                .find(|p| p.instance.0 == instance)
+                .and_then(|p| p.frame);
+            return self.edit_oib_structure(InstanceOperation::Hierarchy(
+                otrios_interfaces::oib::authoring::HierarchyBatch {
+                    generation: self.doc.oib_status()?.generation,
+                    operations: vec![
+                        otrios_interfaces::oib::authoring::HierarchyEdit::Duplicate {
+                            instance: otrios_interfaces::oib::designer::InstanceId(instance),
+                            name,
+                            destination,
+                            before: None,
+                            frame,
+                        },
+                    ],
+                },
+            ));
+        }
         self.edit_oib_instance(InstanceOperation::Duplicate { instance, name })
     }
     pub fn remove_oib(&mut self, instance: u64) -> Result<bool> {
+        if !self.doc.oib_placements()?.is_empty() || !self.doc.oib_connections()?.is_empty() {
+            return self.edit_oib_structure(InstanceOperation::Hierarchy(
+                otrios_interfaces::oib::authoring::HierarchyBatch {
+                    generation: self.doc.oib_status()?.generation,
+                    operations: vec![otrios_interfaces::oib::authoring::HierarchyEdit::Remove {
+                        instance: otrios_interfaces::oib::designer::InstanceId(instance),
+                    }],
+                },
+            ));
+        }
         let observed = self
             .doc
             .tree
@@ -1399,6 +1648,23 @@ impl StateAdapter {
             return Err("OIB instance surface unavailable".into());
         }
         match &operation {
+            InstanceOperation::Hierarchy(batch) => {
+                if batch.generation == 0
+                    || batch.operations.is_empty()
+                    || batch.operations.len() > otrios_interfaces::oib::authoring::MAX_OPERATIONS
+                    || bytes(batch)?.len() > otrios_interfaces::oib::authoring::MAX_BATCH_BYTES
+                {
+                    return Err("Invalid hierarchy batch envelope".into());
+                }
+            }
+            InstanceOperation::Definitions(batch) => {
+                if batch.generation == self.doc.oib_status()?.generation {
+                    super::super::oib::document::authoring::apply(
+                        &*self.doc.oib_authored_ui()?,
+                        batch,
+                    )?;
+                }
+            }
             InstanceOperation::Insert { generation, .. }
             | InstanceOperation::Reorder { generation, .. } => {
                 // Captured actions retain their observed generation even if a
@@ -1514,7 +1780,12 @@ impl StateAdapter {
         address: &otrios_interfaces::oib::designer::PropertyAddress,
         value: Option<Value>,
     ) -> Result<bool> {
-        let seed = self.doc.oib_binding()?.seed;
+        if let otrios_interfaces::oib::designer::PropertyAddress::Placement { object, property } =
+            address
+        {
+            return self.edit_oib_placement_property(object, *property, value);
+        }
+        let seed = self.doc.oib_authored_seed()?;
         let id = super::super::oib::document::cell_for_address(
             &seed,
             &self.doc.oib_allocations()?,

@@ -76,6 +76,11 @@ pub enum DesignerMode {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum PropertyAddress {
+    /// Parent-local whole-instance geometry, submitted as a structural batch.
+    Placement {
+        object: ObjectAddress,
+        property: PlacementProperty,
+    },
     Definition {
         definition: DefinitionId,
         node: NodeId,
@@ -85,6 +90,14 @@ pub enum PropertyAddress {
         instance: InstanceId,
         path: PropertyPath,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PlacementProperty {
+    X,
+    Y,
+    Width,
+    Height,
 }
 
 /// Explicit nonvisual owner. Definitions and root instances belong to Document;
@@ -112,6 +125,12 @@ pub struct Document {
     pub definitions: Vec<ComponentDefinition>,
     pub instances: Vec<ComponentInstance>,
     pub mappings: Mappings,
+    /// Derived authority placement projection. Signed seeds leave this empty;
+    /// accepted placement source is replicated separately from signed admission.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placements: Vec<super::authoring::Placement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<super::authoring::AppConnection>,
 }
 
 /// Keys for existing admitted host implementations, not executable class code.

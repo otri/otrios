@@ -3,6 +3,8 @@
 use crate::layout::Value;
 use serde::{Deserialize, Serialize};
 
+/// Bounded D2 authoring records; admitted through the existing instance request.
+pub mod authoring;
 /// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
 
@@ -89,6 +91,9 @@ pub struct Allocation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum InstanceOperation {
+    /// Atomic definition authoring within the existing signed class surface.
+    Definitions(authoring::DefinitionBatch),
+    Hierarchy(authoring::HierarchyBatch),
     /// Whole signed factory into the presented canvas, guarded by active generation.
     Insert {
         prototype: u64,
