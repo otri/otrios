@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0036: Independently upgradable OIB component libraries
 
-Date: 2026-11-09. Status: **L1 implemented and focused live-qualified; L2 and XR remain proposed**.
+Date: 2026-11-09. Updated: 2026-11-10. Status: **L1 and bounded L2 implemented and focused live-qualified; XR remains proposed**.
 
 The user selected independently upgradable OIB libraries on 2026-11-09. This RFC
 defines that boundary and a bounded first loader milestone. The
 [L1 work record](../OIB_LIBRARY_L1.md) records implementation and qualification.
 D2 itself did not import libraries or execute library behavior.
 [D2 completion](../OIB_D2_COMPLETION.md) and data-library L1 are delivered;
-component behavior ABI L2 remains the next executable-library stage.
+[bounded L2](../OIB_LIBRARY_L2.md) now adds component ABI 1 and a library-owned Slider.
 The practical boundary is summarized in [OIB library boundary](../OIB_LIBRARY_BOUNDARY.md).
 
 ## Goal and current execution
@@ -17,7 +17,7 @@ Routine component appearance, composition and eventually interaction updates
 must be publishable without rebuilding the Frame executable, browser host module
 or authority executable. The runtime supplies generic scene, layout, input,
 state, publication and sandbox mechanisms. Libraries supply reusable definitions,
-styles, exposed properties, slots and, in a later stage, portable behavior.
+styles, exposed properties, slots and bounded portable behavior.
 
 Today the Frame runs a native ARM host. Optional app `Code/behavior.wasm` runs in
 Wasmi with the bounded app behavior ABI 1. The browser executes the outer OTriOS
@@ -37,7 +37,7 @@ The existing app ABI's five command lanes are not that ABI either.
 | --- | --- | --- |
 | D2 | Canonical authored graph, semantic property identities, bounded structural edits | Deployed; no library imports |
 | L1 | Signed data-only library imports, exact pins, compatible baseline adoption | Loader/adoption deployed; compatible library bodies reuse it |
-| L2 | Portable component behavior with a generic typed event/command ABI | Implement and qualify the ABI once; widget behavior then ships in libraries |
+| L2 | Portable component behavior with a generic typed event/command ABI | Bounded ABI 1 and library-owned Slider deployed; compatible guest bodies reuse it |
 | Later XR | Spatial scene/input/backend support and XR libraries | Explicit runtime/backend milestone before XR library iteration |
 
 L1 reuses admitted 2D shapes, expressions, layout, classes and actions. It can
@@ -284,12 +284,11 @@ a new Rust `ClassKind` or action enum variant for every library widget. Preserve
 the base scene/layout/input primitives and library-declared property/slot/outlet
 contracts. Do not allow guest-provided Rust/native class implementations.
 
-The initial concrete ABI candidate is one exported memory, `abi_version() -> i32`,
-an exported input-buffer offset and `dispatch(ptr, len) -> i64` packing output
-offset/length. Inputs and outputs use versioned canonical records, checked memory
-ranges and at most 8 KiB each. Freeze export names, bit order, encoding and golden
-vectors in the L2 implementation change before publishing executable libraries;
-these candidate wire details are not implemented by this RFC.
+The implemented [component ABI 1](../OIB_COMPONENT_BEHAVIOR_ABI.md) freezes one
+exported memory, `abi_version() -> i32`, `input_buffer() -> i32` and
+`dispatch(ptr, len) -> i64` packing output offset in the low 32 bits and length
+in the high 32 bits. Versioned canonical records, checked memory ranges and
+golden vectors bound each input/output to 8 KiB.
 
 Input contains the component's stable semantic address, normalized local input
 phase/data, effective exposed properties and host-owned local state. The output
@@ -332,8 +331,8 @@ with the accepted pin, coherent pinned snapshots, a held gesture during staging,
 compatible rollback, stale-generation rejection and bounded slow-reader resync.
 Bad signatures/hashes, missing exports, incompatible types and over-budget
 candidates must retain the prior active closure. The [L1 work record](../OIB_LIBRARY_L1.md) records the signed live update,
-rollback, gesture and recovery evidence; the component ABI requirements below
-remain future work.
+rollback, gesture and recovery evidence. The [L2 work record](../OIB_LIBRARY_L2.md)
+records the executable-library qualification against the additional requirements below.
 
 L2 additionally needs cross-host canonical ABI vectors, unauthorized-command and
 memory/fuel/trap rejection, capture safety and a new widget whose behavior changes

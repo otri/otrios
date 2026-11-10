@@ -5,6 +5,12 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Executable OIB library L2](OIB_LIBRARY_L2.md), qualified 2026-11-10, adds a
+bounded typed Wasmi component ABI and a library-owned Slider. Signed guest-only
+behavior updates and compatible rollback reuse the Frame/Web/authority hosts.
+The initial new-export cutover initialized Designer once; subsequent revisions
+retain semantic identity, values and overrides. State v31 preserves control v1.
+
 [Independent OIB library L1](OIB_LIBRARY_L1.md), qualified 2026-11-09,
 adds signed data libraries, exact app pins and compatible baseline adoption.
 Library-only style/default updates and rollback reuse native/browser/authority

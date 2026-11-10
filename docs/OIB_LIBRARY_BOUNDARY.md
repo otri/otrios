@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB library boundary
 
-Date: 2026-11-09. Status: **L1 implemented and focused live-qualified; L2 and XR remain proposed**.
+Date: 2026-11-09. Updated: 2026-11-10. Status: **L1 and bounded L2 implemented and focused live-qualified; XR remains proposed**.
 See [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md) for the normative
 stages, identity, admission, bounds and acceptance requirements.
-[L1 qualification](OIB_LIBRARY_L1.md) records the deployed result.
+[L1 qualification](OIB_LIBRARY_L1.md) and [L2 qualification](OIB_LIBRARY_L2.md)
+record the deployed results.
 
 The desired iteration loop is to edit a component library, publish a signed
 revision and update an app's exact dependency pin. The Frame executable, browser
@@ -16,14 +17,15 @@ updates. A runtime update is needed when adding a new host primitive or ABI.
 | Area | Current runtime | Later work |
 | --- | --- | --- |
 | Authored UI | Canonical local graph plus verified immutable imports; renderer output is derived | Richer separately selected controls/content |
-| Components | L1 reuses signed bounded host classes/actions | L2 supplies generic executable component behavior |
+| Components | L1 graph imports plus L2 typed executable component behavior; library-owned Slider | Broader library controls within the admitted ABI |
 | App executable | Optional `Code/behavior.wasm`, bounded Wasmi app ABI 1 | Keep separate from the new component ABI |
 | Packages | Independently signed library kind, exact app locks and complete release closure | New package/ABI requirements need explicit admission |
 | Baseline changes | Compatible library adoption preserves app data/overrides; other signed-source changes require fresh admission | Future additive import/replacement operations |
 | XR | No XR backend/library runtime | Explicit later backend milestone, then library iteration |
 
 The browser's engine runs the outer host WebAssembly; our host embeds Wasmi for
-the nested app guest. The native ARM host embeds Wasmi directly. L1 libraries use portable graph bytes; L2 will add component guest bytes.
+the nested app/component guests. The native ARM host embeds Wasmi directly. L1
+libraries use portable graph bytes; L2 adds signed component guest bytes.
 Neither uses `.so` plugins. No new WASI, filesystem,
 network, unsafe runtime code or trust roots are selected here.
 
@@ -35,7 +37,7 @@ publication, signature verification and bounded sandbox execution. These are
 stable mechanisms, not a catalog of every product widget.
 
 The library owns reusable composition, styles/defaults, exposed typed
-properties/slots/outlets, and later widget behavior over those primitives. L1 is
+properties/slots/outlets, and bounded widget behavior over those primitives. L1 is
 data-only: it cannot invent a new input, font/image or rendering primitive. L2
 adds a generic typed event/context/command dispatcher once, then allows new
 widget behavior without another host enum variant per widget.
@@ -131,4 +133,5 @@ rejection, bad package/API/limit rejection and bounded slow-reader resync. L2
 also needs a changed widget implementation without a host rebuild and qualified
 ABI/permission/trap/resource handling on both hosts. The [L1 record](OIB_LIBRARY_L1.md) includes these bounded
 data-library results.
-Component behavior ABI L2 and XR acceptance remain future work.
+[L2 qualification](OIB_LIBRARY_L2.md) records the bounded component ABI and
+guest-only Slider acceptance. XR acceptance remains future work.

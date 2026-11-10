@@ -1,0 +1,8 @@
+{
+  "manifest_sha256": "da9bed857c552265afc9706561428d39239690062fe58a248fbe296fb6d71de4",
+  "passed": true,
+  "release": "da9bed857c552265afc9706561428d39239690062fe58a248fbe296fb6d71de4",
+  "wasm_bytes": 7622546,
+  "wasm_content_type": "application/wasm",
+  "wasm_sha256": "8d276683b93f09f75e981dd34103a08ff64a98ff7640bf6ba2b4bdaab07701ee"
+}

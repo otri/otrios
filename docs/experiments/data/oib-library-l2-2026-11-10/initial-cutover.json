@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "release": "cb6619417202717524d14cdeba209eeddb0bc09c41b9db2669a90278b90bbb29",
+  "app": "oib-designer",
+  "initial_L2_contract_cutover": true,
+  "fresh_collection": true,
+  "business_schema_unchanged": true,
+  "unrelated_apps_reset": false,
+  "data_migrated": false,
+  "generation": 78
+}

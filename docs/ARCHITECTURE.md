@@ -37,10 +37,13 @@ generation-checked structural edits are described in [D2](OIB_D2_COMPLETION.md).
 These app-specific contracts do not implement the general module system below.
 
 [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md) selects signed graph/style
-libraries, followed by a generic component Wasm ABI. The deployed
+libraries and a separate generic component Wasm ABI. The deployed
 [L1 loader](OIB_LIBRARY_L1.md) verifies exact signed pins, resolves immutable
 imports and adopts compatible baselines without rebuilding hosts or clearing
-values/overrides. The component Wasm ABI is not implemented. XR requires a
+values/overrides. [L2](OIB_LIBRARY_L2.md) executes independently signed
+`Code/component.wasm` through bounded component ABI 1, with typed context,
+declared outlets/locals and host-validated commands. A library-owned Slider
+qualifies guest-only behavior update and rollback. XR requires a
 separately qualified backend before XR library iteration.
 
 A later module manifest binds content hashes, interface versions, imported capabilities, target constraints, and signer identity. Verify trusted signatures, the full referenced content graph, and policy before execution. Streaming may fetch chunks lazily; it must never execute unverified bytes. Define trust roots, revocation, rollback policy, and resource limits in a security RFC.

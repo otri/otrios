@@ -207,7 +207,7 @@ Frame installation. It preserves every public runtime asset and native binary,
 generates Home from installed entries, and uses the expected-baseline activation
 lock. Registry changes use a safe browser/native handoff after confirmed edits and
 idle gestures. Code/state stay on the existing session. The current managed
-session uses state v30 and retains control v1. [Live OIB UI](OIB.md) adds
+session uses state v31 and retains control v1. [Live OIB UI](OIB.md) adds
 Space-scoped property editing through that session. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
 outside the host source registry.
 

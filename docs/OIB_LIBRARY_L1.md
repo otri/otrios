@@ -4,6 +4,10 @@
 Date: 2026-11-09. Status: **implemented, signed, deployed and focused live-qualified; awaiting user review**.
 Branch: `feat/oib-library-l1`, based on canonical D2 commit `7b88756`.
 
+Follow-up, 2026-11-10: [bounded L2](OIB_LIBRARY_L2.md) adds component Wasm ABI 1
+and guest-only Slider update/rollback. The scope and protocol references below
+record the earlier data-only L1 milestone.
+
 This implements the data-only L1 selected in
 [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md). Component Wasm ABI L2,
 new renderer/input primitives, typography/images and XR remain separate work.

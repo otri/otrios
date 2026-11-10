@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "release": "94c452d64a05f03e0d6326b47f724f488c04561b4095d97ca1f9c8fdd2f87723",
+  "state_protocol": "otrios-canvas-sync-v31",
+  "health": "ok",
+  "ready": {
+    "ui_ref": "app:oib-designer/ui",
+    "release": "94c452d64a05f03e0d6326b47f724f488c04561b4095d97ca1f9c8fdd2f87723",
+    "ui_release": "94c452d64a05f03e0d6326b47f724f488c04561b4095d97ca1f9c8fdd2f87723",
+    "runtime_release": "842cdac1d1396f66d15e11bd87c6c7ecc183ee06a083813b329cfcb2c4a47f18",
+    "pid": 17091,
+    "state_confirmed": true,
+    "stream_ready": true,
+    "input_busy": false,
+    "pending_commands": 0,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "touch_devices": 1,
+    "touch_calibrated": true,
+    "scanout_format": "RGB565",
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ]
+  },
+  "native_executable_sha256": "112616fda70c376de640c9e0207481e724fbe285dc635e3640c2422b943f368e",
+  "native_executable_matches_active_release": true,
+  "services": {
+    "otrios-authority": "active",
+    "otrios-dashboard-direct": "active",
+    "otrios-tunnel": "active"
+  },
+  "collector_resumed": false,
+  "collector_result": null,
+  "pixels_exported": false,
+  "authority_restarted": false,
+  "data_restored": false,
+  "elapsed_seconds": 3.644
+}

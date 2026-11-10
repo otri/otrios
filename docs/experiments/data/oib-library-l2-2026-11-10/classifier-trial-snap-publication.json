@@ -1,0 +1,13 @@
+{
+  "format": "otrios-oib-library-publication-v1",
+  "app": "oib-designer",
+  "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+  "library_revision": "7a512d046d6f86f2e9e3131b4b4eea66135a32d4382aeb80ae245d835e734cfe",
+  "source_sha256": "644f0fbd6257daceffb0dcaea2a344c3bb092084c43025970aaa3a5f407b5792",
+  "bindings_sha256": "d2ed892871c43481b8fb6311ddf5e9f7e2168aa13d28118abbef57e2f8728970",
+  "component_source_sha256": "61b97b977177608a2927b2d283264f71a4314b78f14a763e8b4dc8b9cce98d81",
+  "baseline": "d94f94c4b75d19f86b43c523785f9d371b0b5aacf426feb8916616e74bc3ecdf",
+  "release": "2b512522d61d5e47a65fcd1fc32ac747564e5d2d162daba5bac5f084e97dbe02",
+  "host_assets_unchanged": true,
+  "deployed": true
+}

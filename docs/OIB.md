@@ -61,14 +61,15 @@ one acknowledged snapshot, one in-flight offer and the latest authority state;
 optional UI history excludes imported library bodies.
 
 Current app features are `otrios-oib-v2` and `otrios-oib-designer-v2`; imported
-libraries additionally require `otrios-oib-library-v1`. Business schemas remain
-`live-ui-state-v2` and `oib-designer-state-v2`. State protocol is **v30** and the
+libraries additionally require `otrios-oib-library-v1`; executable libraries add
+`otrios-component-behavior-v1`. Business schemas remain
+`live-ui-state-v2` and `oib-designer-state-v2`. State protocol is **v31** and the
 shared WebSocket retains the release-control **v1** opening envelope. Release
 discovery remains available independently of state recovery.
 
 ## Current qualification
 
-Signed release `ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1`
+The historical L1 signed release `ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1`
 uses library revision
 `3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba`.
 The [L1 record](OIB_LIBRARY_L1.md) includes commands and sanitized evidence for
@@ -77,12 +78,18 @@ rollback, held browser input, native Frame mounting and authority restart.
 Untouched widths/default colors updated while an explicit 360 px occurrence
 width, all four business values, collection identity and semantic epoch survived.
 The initial format cutover reset only the two OIB collections; subsequent library
-updates and the corrected host deployment needed no reset or data migration.
+updates and the corrected L1 host deployment needed no reset or data migration.
+
+[L2 qualification](OIB_LIBRARY_L2.md) records the current executable-library
+increment: component ABI 1, a signed library-owned Slider, and guest-only behavior
+update/rollback with unchanged hosts. The first new behavior export required one
+fresh Designer admission. Later compatible revisions retain app values, the
+Display Width 420 override and semantic identities.
 
 Runtime snapshot/process checks cover the Canvas authority. They do not qualify
 the separate Linux shared-memory IPC PoC. Complete authored UI/data transfer,
-D3/D4, images and XR remain deferred. Wasmi currently executes app ABI 1;
-component behavior ABI L2 remains proposed in
+D3/D4, images and XR remain deferred. Wasmi executes independent bounded app ABI 1
+and component ABI 1 contracts, as described in
 [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md).
 
 Earlier records describe their dated increments: [Live UI O1](experiments/live-oib-2026-11-02.md),

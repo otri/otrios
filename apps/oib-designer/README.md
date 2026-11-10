@@ -26,14 +26,17 @@ properties retain their independent causal contexts. Selection, scrolling and
 Edit/Test mode are local. Desktop Studio is the browser default and Focus is the
 native default.
 
-Current state protocol is v30 with release-control v1. App features include
-`otrios-oib-v2`, `otrios-oib-designer-v2` and `otrios-oib-library-v1`. The initial
-format cutover reset only Designer and Live UI, with unchanged v2 business
-schemas. Compatible library-only update, rollback and return retained collection,
-epoch, app values and an explicit width override without recompiling hosts.
+Current state protocol is v31 with release-control v1. App features include
+`otrios-oib-v2`, `otrios-oib-designer-v2`, `otrios-oib-library-v1` and
+`otrios-component-behavior-v1`. L2 supplies a signed library-owned Slider through
+bounded component Wasm ABI 1. Its initial export-contract cutover initialized a
+fresh Designer collection once, with the same v2 business schema. Subsequent
+compatible graph/guest updates and rollback preserve collection, epoch, app
+values and an explicit width override without recompiling hosts.
 
-See [the current guide](../../docs/OIB.md) and [L1 qualification](../../docs/OIB_LIBRARY_L1.md).
+See [the current guide](../../docs/OIB.md), [L1 qualification](../../docs/OIB_LIBRARY_L1.md)
+and [L2 qualification](../../docs/OIB_LIBRARY_L2.md).
 [D2](../../docs/OIB_D2_COMPLETION.md), [Frame Focus](../../docs/OIB_FRAME_FOCUS_D1.md)
 and [Desktop Studio](../../docs/OIB_DESKTOP_STUDIO_D2.md) are dated earlier records.
-D3/D4, complete authored UI transfer, images, component Wasm ABI L2 and XR remain
-separate work. Existing Wasmi executes app ABI 1.
+D3/D4, complete authored UI transfer, images and XR remain separate work.
+Wasmi executes the independent app ABI 1 and component ABI 1 contracts.

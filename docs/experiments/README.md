@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [OIB executable library L2 — 2026-11-10](../OIB_LIBRARY_L2.md): bounded typed
+  Wasmi component ABI, library-owned Slider, signed guest-only update/rollback
+  with unchanged Frame/Web hosts and retained values/overrides.
+
 - [OIB content invalidation and layout — 2026-11-10](oib-needs-layout-2026-11-10.md):
   deferred slider updates, dependency-qualified content updates, input ownership,
   inspector identity and exact boundary encoding reuse.

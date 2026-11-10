@@ -1,0 +1,255 @@
+{
+  "passed": true,
+  "architecture": "armv7 Linux",
+  "release": "cb6619417202717524d14cdeba209eeddb0bc09c41b9db2669a90278b90bbb29",
+  "probe_sha256": "7032f5ea2f21abf92d0f36ff33210bcd7a33b07d1dd84cf38865b6adb3a66ef1",
+  "components": {
+    "calls": 3,
+    "errors": 0,
+    "hashes": [
+      "792aa59a79878728ac299af76eac421f344e216bb2c32a955d3a9c5b02907958"
+    ],
+    "instances": 2
+  },
+  "oib": {
+    "active_generation": 1,
+    "available_instance_slots": 4,
+    "baseline_lock": "2a34ee563bf1bf75bf84a645dc6b5706d4568ca9c8c2c620ee07d592c6295aaa",
+    "conflicts": [],
+    "instances": [
+      {
+        "active": true,
+        "component": 10,
+        "id": 20,
+        "name": "Audio",
+        "prototype": 20
+      },
+      {
+        "active": true,
+        "component": 10,
+        "id": 30,
+        "name": "Display",
+        "prototype": 30
+      }
+    ],
+    "libraries": [
+      {
+        "exports": [
+          {
+            "contract": [
+              203,
+              249,
+              161,
+              15,
+              167,
+              52,
+              150,
+              221,
+              189,
+              125,
+              188,
+              37,
+              140,
+              199,
+              222,
+              65,
+              146,
+              59,
+              59,
+              210,
+              48,
+              90,
+              56,
+              86,
+              239,
+              2,
+              177,
+              208,
+              244,
+              31,
+              217,
+              181
+            ],
+            "export": 1
+          },
+          {
+            "contract": [
+              169,
+              185,
+              93,
+              71,
+              90,
+              150,
+              247,
+              191,
+              70,
+              66,
+              133,
+              86,
+              205,
+              226,
+              108,
+              0,
+              74,
+              236,
+              254,
+              199,
+              8,
+              105,
+              88,
+              201,
+              23,
+              232,
+              153,
+              22,
+              184,
+              174,
+              168,
+              113
+            ],
+            "export": 2
+          },
+          {
+            "contract": [
+              86,
+              26,
+              16,
+              184,
+              180,
+              90,
+              250,
+              52,
+              79,
+              129,
+              215,
+              200,
+              189,
+              176,
+              239,
+              18,
+              178,
+              77,
+              119,
+              165,
+              29,
+              248,
+              124,
+              197,
+              40,
+              35,
+              110,
+              233,
+              92,
+              3,
+              148,
+              212
+            ],
+            "export": 3
+          }
+        ],
+        "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+        "revision": [
+          241,
+          233,
+          130,
+          22,
+          222,
+          75,
+          225,
+          226,
+          232,
+          188,
+          4,
+          125,
+          174,
+          144,
+          146,
+          97,
+          31,
+          127,
+          120,
+          242,
+          122,
+          80,
+          89,
+          37,
+          204,
+          188,
+          160,
+          13,
+          103,
+          39,
+          172,
+          73
+        ]
+      }
+    ],
+    "presented_generation": 1,
+    "properties": {
+      "1": "Accent: #34D399 (default)",
+      "10": "Label: Volume (authored)",
+      "11": "Accent: #34D399 (inherited)",
+      "12": "Label: Enabled (inherited)",
+      "13": "Accent: #34D399 (inherited)",
+      "14": "Accent: #34D399 (inherited)",
+      "15": "Width: 400 (inherited)",
+      "16": "Label: Brightness (authored)",
+      "17": "Accent: #34D399 (inherited)",
+      "18": "Label: Enabled (inherited)",
+      "2": "Accent: #34D399 (default)",
+      "3": "Width: 400 (default)",
+      "4": "Label: Level (default)",
+      "5": "Accent: #34D399 (default)",
+      "6": "Label: Enabled (default)",
+      "7": "Accent: #34D399 (inherited)",
+      "8": "Accent: #34D399 (inherited)",
+      "9": "Width: 400 (inherited)"
+    },
+    "selected_instance": 20,
+    "semantic_epoch": "b0056babf7e29bc5998e279e3580906593c9274f2b111aaefe13f82784b666a4",
+    "status": "Live \u00b7 revision 1 \u00b7 2 instances \u00b7 4 slots available"
+  },
+  "final_state_controls": {
+    "Audio enabled": {
+      "checked": true,
+      "control_percent": null,
+      "node": 38,
+      "normalized": 1000
+    },
+    "Brightness": {
+      "checked": false,
+      "control_percent": 70.0,
+      "node": 49,
+      "normalized": 700
+    },
+    "Display enabled": {
+      "checked": false,
+      "control_percent": null,
+      "node": 55,
+      "normalized": 0
+    },
+    "Volume": {
+      "checked": false,
+      "control_percent": 40.0,
+      "node": 32,
+      "normalized": 400
+    }
+  },
+  "measurements": [
+    {
+      "actual": 575.0,
+      "components": {
+        "calls": 2,
+        "errors": 0,
+        "hashes": [
+          "792aa59a79878728ac299af76eac421f344e216bb2c32a955d3a9c5b02907958"
+        ],
+        "instances": 2
+      },
+      "measurement": "ARM core pointer sample through current live app; separate from evdev/GLES",
+      "original": 400,
+      "phase": "slider-sample",
+      "requested": 575
+    }
+  ]
+}

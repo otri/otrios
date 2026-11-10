@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "baseline_release": "226111bb20e5b782a1f06902c34537197de3000164c050724fbfeb483feccd8c",
+  "release": "7e1b48bc88ff46c3619dcec58d353db675703ae7d9fe35c149c34256f8c170b6",
+  "all_host_assets_unchanged": true,
+  "authority_binary_unchanged": true,
+  "native_executable_unchanged": true,
+  "native_pid_unchanged": false,
+  "authority_sha256": "2b7ff5e928662a044af75ffcfb66fb3e1aa9f086380b18d75a562170bc490e4c",
+  "native_executable_sha256": "11c633c348c66c531c79ceae6c239b61fdfd58b5da5d0a9e2a67e6e0df763b1c",
+  "native_pid": 16128
+}

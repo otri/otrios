@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "implementation_commit": "63f97d9",
+  "baseline": "842cdac1d1396f66d15e11bd87c6c7ecc183ee06a083813b329cfcb2c4a47f18",
+  "guest_update": "94c452d64a05f03e0d6326b47f724f488c04561b4095d97ca1f9c8fdd2f87723",
+  "guest_rollback": "da9bed857c552265afc9706561428d39239690062fe58a248fbe296fb6d71de4",
+  "unchanged_host_assets": 53,
+  "native_pid": 17091,
+  "native_pid_retained": true,
+  "authority_sha256": "a688681bb227b826606be35a65bb84d727bdee4115d814c4fedb7c3c719a3e25",
+  "native_sha256": "112616fda70c376de640c9e0207481e724fbe285dc635e3640c2422b943f368e",
+  "wasm_sha256": "8d276683b93f09f75e981dd34103a08ff64a98ff7640bf6ba2b4bdaab07701ee",
+  "browser_session_retained": true,
+  "semantic_epoch": "b0056babf7e29bc5998e279e3580906593c9274f2b111aaefe13f82784b666a4",
+  "oib_generations": [
+    6,
+    7,
+    8
+  ],
+  "display_width_override": 420,
+  "restored_values": {
+    "Volume": 400,
+    "Brightness": 700,
+    "Audio": 1000,
+    "Display": 0
+  },
+  "guest_errors": 0,
+  "burst": {
+    "changed_resources": 1,
+    "changed_source_vertex_bytes": 36784,
+    "composition_dropped": 0,
+    "composition_phases": {
+      "client.layout.resolve": 1,
+      "layout.update_content": 1,
+      "render.retained.compose": 2,
+      "render.retained.cull": 2,
+      "render.retained.mesh.paint": 1,
+      "render.retained.normalize": 2,
+      "render.retained.rebuild": 2
+    },
+    "held_dropped": 0,
+    "held_phases": {
+      "component.behavior.call": 100,
+      "component.behavior.dispatch": 100,
+      "component.behavior.load": 100
+    },
+    "held_us": 149335,
+    "measurement": "pointer samples with ticks but without scene/composition queries, then one core composition; not physical input or GLES presentation",
+    "normalized_values_restored": true,
+    "one_composition_us": 3344,
+    "phase": "slider-burst",
+    "samples": 100
+  },
+  "full_preflight_run": false,
+  "linux_shared_memory_ipc_qualified": false
+}

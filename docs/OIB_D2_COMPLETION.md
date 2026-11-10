@@ -6,6 +6,8 @@ Branch: `feat/oib-d2-completion`, from `39156f2`.
 
 This records the dated D2 v29 qualification. [Library L1](OIB_LIBRARY_L1.md)
 subsequently deployed state v30 and supersedes its active-release statements.
+[Bounded L2](OIB_LIBRARY_L2.md) later added executable component libraries at
+state v31; this record retains the original D2 scope and evidence.
 
 The original repository remains on `main`. Work is isolated in the D2 worktree.
 The local authoring prototype was checkpointed in `6c954f0` before the format

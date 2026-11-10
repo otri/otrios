@@ -1,0 +1,16 @@
+{
+  "passed": false,
+  "baseline": "d94f94c4b75d19f86b43c523785f9d371b0b5aacf426feb8916616e74bc3ecdf",
+  "candidate": "2b512522d61d5e47a65fcd1fc32ac747564e5d2d162daba5bac5f084e97dbe02",
+  "guest_changed_via_state": true,
+  "web_origin_retained": true,
+  "web_mode_retained": true,
+  "native_pid_retained": true,
+  "catalogue_rejected": true,
+  "native_messages": [
+    "Rejected app candidate; continuing current app: Behavior replacement requires an existing declared module",
+    "App candidate layout rejected; continuing current app"
+  ],
+  "readiness": "failed: native UI release remained baseline; new guest was active through state",
+  "followup": "compare immutable admitted OIB UI contract rather than the live compiled view"
+}
