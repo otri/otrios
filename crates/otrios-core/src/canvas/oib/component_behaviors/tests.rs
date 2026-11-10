@@ -798,3 +798,141 @@ fn staged_context_checks_retained_locals_with_new_properties_before_activation()
         Value::Text("x".repeat(4096))
     );
 }
+
+#[test]
+fn activation_resumes_latest_locals_without_replacing_new_guest_or_allocating_leases() {
+    let source = with_code(fixture::imported(), counting_guest(1), 2);
+    let (ui, layout, mut doc) = mount(&source);
+    let runtime = Arc::new(Runtime::default());
+    let mut active = Instances::prepare(&ui, &layout, &runtime, None).unwrap();
+    let control = *active.controls.keys().next().unwrap();
+    let next = with_code(source, counting_guest(2), 3);
+    let (next_ui, next_layout, _) = mount(&next);
+    let mut candidate =
+        Instances::prepare(&next_ui, &next_layout, &runtime, Some(&active)).unwrap();
+    let candidate_hashes = candidate.code_hashes();
+    assert_ne!(candidate_hashes, active.code_hashes());
+    assert_eq!(candidate.controls[&control].local[&1], Value::Number(0.));
+    // A qualified candidate can wait while the old occurrence finishes input.
+    active
+        .dispatch(&ui, &mut doc, control, event(800), true)
+        .unwrap();
+    active
+        .dispatch(&ui, &mut doc, control, event(801), true)
+        .unwrap();
+    assert_eq!(active.controls[&control].local[&1], Value::Number(2.));
+    let leases = runtime.live_instances();
+    candidate.resume_from(&active, &next_ui, &doc).unwrap();
+    assert_eq!(runtime.live_instances(), leases);
+    assert_eq!(candidate.code_hashes(), candidate_hashes);
+    assert_eq!(candidate.controls[&control].local[&1], Value::Number(2.));
+    candidate
+        .dispatch(&next_ui, &mut doc, control, event(802), true)
+        .unwrap();
+    assert_eq!(candidate.controls[&control].local[&1], Value::Number(4.));
+    assert_eq!(active.controls[&control].local[&1], Value::Number(2.));
+}
+
+fn branching_local_guest(small: Vec<Command>, large: Vec<Command>) -> Vec<u8> {
+    let small = abi::encode_output(&abi::Output { commands: small }).unwrap();
+    let large = abi::encode_output(&abi::Output { commands: large }).unwrap();
+    wat::parse_str(format!(
+        r#"(module
+        (memory (export "memory") 1 1)
+        (data (i32.const 8192) "{}")
+        (data (i32.const 16384) "{}")
+        (func (export "abi_version") (result i32) i32.const 1)
+        (func (export "input_buffer") (result i32) i32.const 0)
+        (func (export "dispatch") (param $input i32) (param i32) (result i64)
+            (if (result i64) (i32.ge_u (i32.load16_u offset=10 (local.get $input)) (i32.const 500))
+                (then i64.const {}) (else i64.const {}))))"#,
+        wat_data(&small),
+        wat_data(&large),
+        ((large.len() as u64) << 32) | 16384,
+        ((small.len() as u64) << 32) | 8192
+    ))
+    .unwrap()
+}
+#[test]
+fn activation_resume_is_atomic_when_second_occurrence_exceeds_its_new_context_budget() {
+    let code = branching_local_guest(
+        vec![Command::SetLocal {
+            property: 1,
+            value: Value::Number(7.),
+        }],
+        vec![
+            Command::SetLocal {
+                property: 1,
+                value: Value::Number(9.),
+            },
+            Command::SetLocal {
+                property: 2,
+                value: Value::Text("x".repeat(4096)),
+            },
+            Command::SetLocal {
+                property: 3,
+                value: Value::Text("y".repeat(3960)),
+            },
+        ],
+    );
+    let source = update_context(with_code(fixture::imported(), code, 2), 2, |declaration| {
+        declaration.local = vec![
+            LocalProperty {
+                id: 1,
+                default: Value::Number(0.),
+            },
+            LocalProperty {
+                id: 2,
+                default: Value::Text(String::new()),
+            },
+            LocalProperty {
+                id: 3,
+                default: Value::Text(String::new()),
+            },
+        ]
+    });
+    let (ui, layout, mut doc) = mount(&source);
+    let runtime = Arc::new(Runtime::default());
+    let mut active = Instances::prepare(&ui, &layout, &runtime, None).unwrap();
+    let controls: Vec<_> = active.controls.keys().copied().collect();
+    let next = update_context(source, 3, |declaration| {
+        let mut label = declaration.properties[0].clone();
+        label.id = 2;
+        label.source.property = otrios_interfaces::oib::designer::PropertyId(3);
+        declaration.properties.push(label);
+        let mut number = declaration.properties[0].clone();
+        number.id = 3;
+        declaration.properties.push(number);
+    });
+    let (next_ui, next_layout, _) = mount(&next);
+    let mut candidate = Instances::prepare(&next_ui, &next_layout, &runtime, None).unwrap();
+    active
+        .dispatch(&ui, &mut doc, controls[0], event(100), true)
+        .unwrap();
+    active
+        .dispatch(&ui, &mut doc, controls[1], event(900), true)
+        .unwrap();
+    active.validate_current(&ui, &doc).unwrap();
+    assert_eq!(active.controls[&controls[0]].local[&1], Value::Number(7.));
+    let before_locals: BTreeMap<_, _> = candidate
+        .controls
+        .iter()
+        .map(|(control, instance)| (*control, instance.local.clone()))
+        .collect();
+    let before_values = values(&doc);
+    let leases = runtime.live_instances();
+    assert!(candidate.resume_from(&active, &next_ui, &doc).is_err());
+    assert_eq!(runtime.live_instances(), leases);
+    assert_eq!(
+        candidate
+            .controls
+            .iter()
+            .map(|(control, instance)| (*control, instance.local.clone()))
+            .collect::<BTreeMap<_, _>>(),
+        before_locals
+    );
+    assert_eq!(values(&doc), before_values);
+    active.validate_current(&ui, &doc).unwrap();
+    assert_eq!(active.controls[&controls[0]].local[&1], Value::Number(7.));
+    assert_eq!(active.controls[&controls[1]].local[&1], Value::Number(9.));
+}

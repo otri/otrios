@@ -2695,6 +2695,9 @@ impl Client {
         {
             candidate.doc.restore_pending(&old.doc)?;
             candidate.refresh()?;
+            candidate
+                .components
+                .resume_from(&old.components, &candidate.ui, &candidate.doc)?;
         }
         if self.previous_catalog.take().is_some()
             && self
@@ -2705,6 +2708,13 @@ impl Client {
             let mut current = self.active.take().ok_or("Missing app activation")?;
             if current.ui.behavior != candidate.ui.behavior {
                 current.behavior = candidate.behavior;
+            }
+            // The qualified guest set and UI are one activation. Retain host
+            // interaction state, but never leave the old code on a new UI.
+            current.components = candidate.components;
+            current.oib_view = candidate.oib_view;
+            if let Some(view) = &mut current.oib_view {
+                view.info.selected_instance = current.oib_selected;
             }
             current.ui = candidate.ui;
             current.layout = candidate.layout;
@@ -2735,6 +2745,10 @@ impl Client {
             if candidate.view.is_some() {
                 current.view = candidate.view;
             }
+            // This branch retains the old UI and any captured gesture. Its
+            // normal refresh stages the new guest only after that barrier.
+            // Release the redundant qualified leases before doing so.
+            candidate.components = Default::default();
             current.refresh()?;
             current.invalidate();
             candidate = current;

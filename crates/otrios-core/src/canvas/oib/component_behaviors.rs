@@ -499,6 +499,64 @@ fn read_value(
     )
 }
 
+fn resumed_locals(spec: &Spec, previous: Option<&Instances>) -> BTreeMap<u64, Value> {
+    let old = previous.and_then(|previous| {
+        previous.controls.values().find(|old| {
+            old.spec.address == spec.address
+                && old.spec.library == spec.library
+                && old.spec.declaration.id == spec.declaration.id
+        })
+    });
+    spec.declaration
+        .local
+        .iter()
+        .map(|property| {
+            let value = old
+                .and_then(|old| old.local.get(&property.id))
+                .filter(|value| value_type(value) == value_type(&property.default))
+                .cloned()
+                .unwrap_or_else(|| property.default.clone());
+            (property.id, value)
+        })
+        .collect()
+}
+fn validate_local_context(
+    spec: &Spec,
+    local: &BTreeMap<u64, Value>,
+    ui: &Ui,
+    seed: &Seed,
+    doc: &StateAdapter,
+    values: &mut Option<BTreeMap<u64, Option<Value>>>,
+) -> Result<()> {
+    if ui
+        .handlers
+        .iter()
+        .find(|handler| handler.control == spec.handler.control)
+        != Some(&spec.handler)
+    {
+        return Err("Component behavior handler changed during context validation".into());
+    }
+    let properties = spec
+        .properties
+        .iter()
+        .map(|read| {
+            Ok(Field {
+                id: read.id,
+                value: read_value(ui, seed, doc, &spec.address, read, values)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let local = local
+        .iter()
+        .map(|(id, value)| Field {
+            id: *id,
+            value: value.clone(),
+        })
+        .collect();
+    abi::encode_input(&context(spec, validation_event(), properties, local))?;
+    Ok(())
+}
+
 impl Instances {
     pub fn len(&self) -> usize {
         self.controls.len()
@@ -545,26 +603,7 @@ impl Instances {
                 .ok_or("Missing exact component behavior code")?;
             let compiled = runtime.compile(&code.bytes, spec.code_hash)?;
             let guest = runtime.instantiate(compiled)?;
-            let old = previous.and_then(|previous| {
-                previous.controls.values().find(|old| {
-                    old.spec.address == spec.address
-                        && old.spec.library == spec.library
-                        && old.spec.declaration.id == spec.declaration.id
-                })
-            });
-            let local = spec
-                .declaration
-                .local
-                .iter()
-                .map(|property| {
-                    let value = old
-                        .and_then(|old| old.local.get(&property.id))
-                        .filter(|value| value_type(value) == value_type(&property.default))
-                        .cloned()
-                        .unwrap_or_else(|| property.default.clone());
-                    (property.id, value)
-                })
-                .collect();
+            let local = resumed_locals(&spec, previous);
             let instance = Instance { spec, guest, local };
             // Even default local state must fit the canonical record envelope.
             abi::encode_input(&Input {
@@ -601,46 +640,27 @@ impl Instances {
         let seed = seed(ui).ok_or("Missing component behavior source")?;
         let mut values = None;
         for instance in self.controls.values() {
-            if ui
-                .handlers
-                .iter()
-                .find(|handler| handler.control == instance.spec.handler.control)
-                != Some(&instance.spec.handler)
-            {
-                return Err("Component behavior handler changed during context validation".into());
-            }
-            let properties = instance
-                .spec
-                .properties
-                .iter()
-                .map(|read| {
-                    Ok(Field {
-                        id: read.id,
-                        value: read_value(
-                            ui,
-                            seed,
-                            doc,
-                            &instance.spec.address,
-                            read,
-                            &mut values,
-                        )?,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let local = instance
-                .local
-                .iter()
-                .map(|(id, value)| Field {
-                    id: *id,
-                    value: value.clone(),
-                })
-                .collect();
-            abi::encode_input(&context(
-                &instance.spec,
-                validation_event(),
-                properties,
-                local,
-            ))?;
+            validate_local_context(&instance.spec, &instance.local, ui, seed, doc, &mut values)?;
+        }
+        Ok(())
+    }
+    /// Refresh a prepared candidate from the latest compatible host local state
+    /// at activation. Validate every complete context before committing any map;
+    /// the prepared guests and shared execution budget are unchanged.
+    pub fn resume_from(&mut self, previous: &Self, ui: &Ui, doc: &StateAdapter) -> Result<()> {
+        if self.controls.is_empty() {
+            return Ok(());
+        }
+        let seed = seed(ui).ok_or("Missing component behavior source")?;
+        let mut values = None;
+        let mut resumed = Vec::with_capacity(self.controls.len());
+        for instance in self.controls.values() {
+            let local = resumed_locals(&instance.spec, Some(previous));
+            validate_local_context(&instance.spec, &local, ui, seed, doc, &mut values)?;
+            resumed.push(local);
+        }
+        for (instance, local) in self.controls.values_mut().zip(resumed) {
+            instance.local = local;
         }
         Ok(())
     }

@@ -561,3 +561,213 @@ fn candidate_guest_quota_rejection_keeps_the_active_client_usable() {
         "old guest remains usable after rejection"
     );
 }
+
+fn stateful_snapping_guest(step: u16) -> Vec<u8> {
+    let bytes = encode_output(&Output {
+        commands: vec![
+            Command::SetLocal {
+                property: 1,
+                value: Value::Boolean(true),
+            },
+            Command::Emit {
+                outlet: 1,
+                value: Value::Number(0.),
+            },
+        ],
+    })
+    .unwrap();
+    let payload = 2048 + bytes.len() - 4;
+    module(
+        &format!(
+            r#"
+      i32.const {payload}
+      local.get $p i32.load16_u offset=10 i32.const {step} i32.div_u i32.const {step} i32.mul
+      local.get $p local.get $p i32.load8_u offset=18 i32.const 8 i32.mul i32.add
+      i32.const 60 i32.add i32.load8_u
+      if (result i32) i32.const 100 else i32.const 0 end
+      i32.add f32.convert_i32_u f32.store
+      i64.const {}"#,
+            packed(2048, bytes.len())
+        ),
+        &[(2048, bytes)],
+    )
+}
+fn qualified_candidate(
+    client: &Client,
+    authority: &mut crate::canvas::Document,
+    ui: &Ui,
+) -> (Mount, Session) {
+    let ui = fixture::admit(ui);
+    let writer = [1; 16];
+    let (mut session, _) = authority.open_session(&writer, 0).unwrap();
+    session.set_oib_editable(true);
+    session
+        .set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    let mut candidate = qualify(
+        ui,
+        "l2:client",
+        &[],
+        &VecDeque::new(),
+        &[],
+        Qualification {
+            component_runtime: client.component_runtime.clone(),
+            epoch: 2,
+            private: false,
+            writer,
+        },
+    )
+    .unwrap();
+    candidate
+        .doc
+        .receive(&authority.generate(&mut session).unwrap().unwrap())
+        .unwrap();
+    candidate.refresh().unwrap();
+    (candidate, session)
+}
+fn exercise_direct_activation(reconnecting: bool) {
+    let bytes = stateful_snapping_guest(100);
+    let ui = library_ui(bytes.clone());
+    let next = replacement(&ui, stateful_snapping_guest(250));
+    let old_hash = hex(&fixture::seed(&ui).resolved_libraries[0]
+        .component
+        .as_ref()
+        .unwrap()
+        .sha256);
+    let next_hash = hex(&fixture::seed(&next).resolved_libraries[0]
+        .component
+        .as_ref()
+        .unwrap()
+        .sha256);
+    let (mut client, mut authority, mut session) = mounted(&ui);
+    let (control, origin, width) = slider(&client, 20);
+    if reconnecting {
+        pointer(
+            &mut client,
+            77,
+            PointerPhase::Down,
+            [origin[0] + width * 0.437, origin[1]],
+            1000,
+        );
+    } else {
+        client.event(client.epoch(), control, 437, 0).unwrap();
+    }
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(client.value(1).unwrap(), 400);
+    let initial_calls = client.resource_usage().component_behavior_calls;
+    let untouched = [2, 3, 4].map(|id| client.value(id).unwrap());
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&next, generation, baseline)
+        .unwrap();
+    if reconnecting {
+        // The authoritative document advances while held presentation and guest
+        // retain the old closure. This selects the reconnect preservation arm.
+        pump(&mut client, &mut authority, &mut session);
+        assert!(client.active.as_ref().unwrap().input.dragging(77));
+        assert_eq!(
+            client.resource_usage().component_behavior_hashes,
+            vec![old_hash.clone()]
+        );
+    }
+    let runtime = client.component_runtime.clone();
+    let compiled = runtime
+        .compile(&bytes, hash(&bytes).try_into().unwrap())
+        .unwrap();
+    let leases: Vec<_> = (0..4)
+        .map(|_| runtime.instantiate(compiled.clone()).unwrap())
+        .collect();
+    assert_eq!(runtime.live_instances(), 6);
+    let (candidate, mut candidate_session) = qualified_candidate(&client, &mut authority, &next);
+    assert_eq!(
+        runtime.live_instances(),
+        8,
+        "active and qualified guests fill the shared budget"
+    );
+    if !reconnecting {
+        client.previous_catalog = Some((
+            client.catalog.as_ref().unwrap().clone(),
+            client.catalog_hash.clone(),
+        ));
+    }
+    client
+        .activate_candidate(candidate, reconnecting, vec![])
+        .unwrap();
+    assert_eq!(
+        runtime.live_instances(),
+        6,
+        "activation does not retain an extra candidate guest set"
+    );
+    if reconnecting {
+        assert!(client.active.as_ref().unwrap().input.dragging(77));
+        assert_eq!(
+            client.resource_usage().component_behavior_hashes,
+            vec![old_hash.clone()]
+        );
+        pointer(
+            &mut client,
+            77,
+            PointerPhase::Move,
+            [origin[0] + width * 0.687, origin[1]],
+            1010,
+        );
+        assert_eq!(
+            client.value(1).unwrap(),
+            700,
+            "held reconnect retains old code and its local state"
+        );
+        pointer(
+            &mut client,
+            77,
+            PointerPhase::Up,
+            [origin[0] + width * 0.687, origin[1]],
+            1020,
+        );
+        assert!(!client.confirmed());
+        assert_eq!(
+            client.resource_usage().component_behavior_hashes,
+            vec![old_hash]
+        );
+        pump(&mut client, &mut authority, &mut candidate_session);
+        assert_eq!(
+            client.value(1).unwrap(),
+            700,
+            "activation itself emits no app edit"
+        );
+    } else {
+        assert_eq!(
+            client.value(1).unwrap(),
+            400,
+            "catalogue activation itself emits no app edit"
+        );
+    }
+    // No Tick follows catalogue activation before these assertions and event.
+    assert_eq!(
+        client.resource_usage().component_behavior_hashes,
+        vec![next_hash]
+    );
+    assert!(
+        client.resource_usage().component_behavior_calls >= initial_calls,
+        "cumulative diagnostics survive activation"
+    );
+    let calls = client.resource_usage().component_behavior_calls;
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(
+        client.value(1).unwrap(),
+        600,
+        "new 250-step code plus resumed true local gives600; oldcode gives700 and resetlocal gives500"
+    );
+    assert_eq!(client.resource_usage().component_behavior_calls, calls + 1);
+    assert_eq!([2, 3, 4].map(|id| client.value(id).unwrap()), untouched);
+    assert_eq!(client.resource_usage().component_behavior_errors, 0);
+    drop(leases);
+    assert_eq!(runtime.live_instances(), 2);
+}
+#[test]
+fn catalogue_activation_commits_new_guest_and_resumed_locals_before_any_tick() {
+    exercise_direct_activation(false);
+}
+#[test]
+fn held_reconnect_preserves_old_guest_then_activates_without_third_guest_set() {
+    exercise_direct_activation(true);
+}
