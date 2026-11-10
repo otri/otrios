@@ -431,4 +431,89 @@ class DirectHostContract(unittest.TestCase):
             for bad in ['0 0 0 0 0 0','nan 1 0 -1 0 1','1 0 0 0 1']:
                 rule.write_text('ENV{LIBINPUT_CALIBRATION_MATRIX}="'+bad+'"')
                 with self.assertRaises(ValueError):agent.touch_calibration(rule)
+class CompatibleAppClassification(unittest.TestCase):
+    def pair(self):
+        return json.loads((HERE/'fixtures/app-update-classification.json').read_text())
+    def test_exact_library_dependency_rotation_and_rollback_keep_the_catalog_path(self):
+        import copy
+        pair=self.pair();before,after=pair['previous'],pair['next']
+        self.assertFalse(agent.ui_only_change(before,after))
+        self.assertTrue(agent.app_only_change(before,after));self.assertTrue(agent.app_only_change(after,before))
+        ui=copy.deepcopy(before);ui['assets']['apps/catalog.flex']={'bytes':1,'sha256':'a'*64}
+        ui['authority']['authority/bundles/designer.otapp/UI/main.flex']={'bytes':1,'sha256':'b'*64}
+        self.assertTrue(agent.ui_only_change(before,ui))
+        for manifest in (before,after):
+            manifest.pop('component_behavior_abi')
+            manifest['authority']={k:v for k,v in manifest['authority'].items()if not k.endswith('/Code/component.wasm')}
+        self.assertTrue(agent.ui_only_change(before,after),'data-only library revisions stay supported')
+    def test_package_hot_path_keeps_schema_policy_host_and_private_closure_strict(self):
+        import copy
+        pair=self.pair();before,after=pair['previous'],pair['next'];root='authority/bundles/designer.otapp/'
+        cases=[
+            ('state schema',lambda m:m['authority'].__setitem__(root+'Schemas/state.flex',1)),
+            ('app contract',lambda m:m['app_contracts'].__setitem__('designer.otapp','f'*64)),
+            ('native executable',lambda m:m['assets'].__setitem__('native/armv7/dashboard-native',1)),
+            ('host policy',lambda m:m.__setitem__('host_session',2)),
+            ('state protocol',lambda m:m.__setitem__('sync_protocol','future-v99')),
+            ('unknown package payload',lambda m:m['authority'].__setitem__(root+'Host/runtime.so',1)),
+            ('path traversal',lambda m:m['authority'].__setitem__(root+'Dependencies/'+'c'*64+'.otlib/../../policy.flex',1)),
+            ('floating dependency',lambda m:m['authority'].__setitem__(root+'Dependencies/latest.otlib/Code/component.wasm',1)),
+            ('unknown library executable',lambda m:m['authority'].__setitem__(root+'Dependencies/'+'c'*64+'.otlib/Code/native.so',1)),
+            ('non-app authority addition',lambda m:m['authority'].__setitem__('authority/policy.flex',1)),
+        ]
+        for label,mutate in cases:
+            with self.subTest(case=label):
+                changed=copy.deepcopy(after);mutate(changed);self.assertFalse(agent.app_only_change(before,changed))
+        for field in ('component_behavior_abi','bundle_abi','app_contracts'):
+            a,b=copy.deepcopy(before),copy.deepcopy(after);a.pop(field);b.pop(field)
+            self.assertFalse(agent.app_only_change(a,b),field)
+        a,b=copy.deepcopy(before),copy.deepcopy(after)
+        a['app_contracts']['designer.otapp']=b['app_contracts']['designer.otapp']=['f'*64]
+        self.assertFalse(agent.app_only_change(a,b),'malformed contract type')
+        a,b=copy.deepcopy(before),copy.deepcopy(after)
+        a['authority']['authority/policy.flex']=b['authority']['authority/policy.flex']=1
+        self.assertTrue(agent.app_only_change(a,b));b['authority']['authority/policy.flex']=2
+        self.assertFalse(agent.app_only_change(a,b));b['authority'].pop('authority/policy.flex')
+        self.assertFalse(agent.app_only_change(a,b))
+    def test_registry_install_and_removal_still_take_the_separate_safe_path(self):
+        import copy
+        pair=self.pair();before,after=pair['previous'],pair['next']
+        added=copy.deepcopy(after);added['app_contracts']['new.otapp']='e'*64
+        for path in ('Info.flex','Schemas/state.flex','UI/main.flex','Integrity/files.flex','Integrity/publisher.flex'):
+            added['authority']['authority/bundles/new.otapp/'+path]={'bytes':1,'sha256':'e'*64}
+        self.assertFalse(agent.app_only_change(before,added));self.assertTrue(agent.app_install_change(before,added))
+        self.assertFalse(agent.app_only_change(added,before));self.assertTrue(agent.app_install_change(added,before))
+        bad=copy.deepcopy(added);bad['sync_protocol']='future-v99';self.assertFalse(agent.app_install_change(before,bad))
+
+    def test_native_supervisor_offers_library_catalog_without_replacing_the_host(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        before,after=self.pair().values();old,new='a'*64,'b'*64
+        created=[];offers=[];closed=[]
+        class Host:
+            def __init__(self,args,release,exe,screen=None):
+                created.append(release);self.process=SimpleNamespace(poll=lambda:None)
+            def wait_ready(self,require_stream=True):pass
+            def info(self):return {'ui_updates':True,'reload_ready':True,'input_busy':False,'stream_ready':True,'state_confirmed':True,'pending_commands':0,'ui_ref':'app:designer/ui'}
+            def update_ui(self,release,cache):
+                offers.append(release);agent.running=False;return True
+            def close(self,for_upgrade=False):closed.append(for_upgrade)
+        class Feed:
+            def __init__(self,args,current):pass
+            def take(self):return {'id':new}
+            def close(self):pass
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);cache=root/'cache';cache.mkdir()
+            for release,manifest in [(old,before),(new,after)]:
+                path=cache/release;path.mkdir();(path/'manifest.json').write_text(json.dumps(manifest))
+            (cache/'last-good.json').write_text(json.dumps({'id':old}))
+            args=SimpleNamespace(cache=cache,runtime_dir=root/'run',key=root/'key',openssl=OPENSSL,url='https://example.test',cache_bytes=agent.CACHE_BYTES)
+            running=agent.running;agent.running=True
+            try:
+                with patch.object(agent,'Host',Host),patch.object(agent,'cached',return_value=(old,root/'old')),patch.object(agent,'qualify',return_value=(new,root/'new')),patch.object(agent,'ReleaseFeed',Feed),patch.object(agent,'bootstrap_release',side_effect=AssertionError('Unexpected bootstrap/restart')):
+                    agent.main(args)
+            finally:agent.running=running
+            self.assertEqual(json.loads((cache/'last-good.json').read_text())['id'],new)
+        self.assertEqual(created,[old]);self.assertEqual(offers,[new]);self.assertEqual(closed,[False],'only final test shutdown closes the retained host')
+
 if __name__=='__main__':unittest.main()

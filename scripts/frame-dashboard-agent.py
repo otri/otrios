@@ -102,22 +102,58 @@ def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
         total-=size
     if total>limit:raise ValueError('Cache budget cannot fit pinned artifacts')
 
-def ui_only_change(previous,next,behavior=False):
+def compatible_bundles(previous,next):
+    if previous.get('bundle_abi')!='otrios-app-bundle-v1' or next.get('bundle_abi')!=previous['bundle_abi']:return False
+    def roots(value):
+        return {match[1]for name in value.get('authority',{})if(match:=re.match(r'^authority/bundles/([a-z-]+\.otapp)/',name))}
+    a,b=roots(previous),roots(next);contracts=previous.get('app_contracts')
+    if not a or a!=b or not isinstance(contracts,dict) or contracts!=next.get('app_contracts') or contracts.keys()!=a:return False
+    if any(not isinstance(value,str) or not re.fullmatch(r'[a-f0-9]{64}',value) for value in contracts.values()):return False
+    for root in a:
+        path=f'authority/bundles/{root}/Schemas/state.flex'
+        if path not in previous['authority'] or path not in next['authority'] or previous['authority'][path]!=next['authority'][path]:return False
+    return True
+
+def package_change(name,behavior,component):
+    root=re.match(r'^authority/bundles/([a-z-]+\.otapp)/',name)
+    if not root:return False
+    relative=name[root.end():]
+    if any(not re.fullmatch(r'[A-Za-z0-9_.-]+',part) or part in ('.','..') for part in relative.split('/')):return False
+    if relative in ('Info.flex','UI/main.flex','Integrity/files.flex','Integrity/publisher.flex') or relative.startswith('Notices/'):return True
+    if relative=='Code/behavior.wasm':return behavior
+    dependency=re.fullmatch(r'Dependencies/[a-f0-9]{64}\.otlib/(.+)',relative)
+    if not dependency:return False
+    path=dependency[1]
+    return path in ('Info.flex','OIB/library.flex','Integrity/files.flex','Integrity/publisher.flex') or path.startswith('Notices/') or (component and path=='Code/component.wasm')
+
+def catalog_change(previous,next,behavior=False,component=False):
     if previous.get('ui_abi')!='otrios-app-ui-v1' or next.get('ui_abi')!=previous['ui_abi']:return False
     if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
-    for section,allowed in [('assets','apps/catalog.flex'),('authority',None)]:
-        a,b=previous.get(section,{}),next.get(section,{})
-        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/ui\.flex',k)) or (behavior and section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/behavior\.wasm',k)))):return False
+    a,b=previous.get('assets'),next.get('assets')
+    if not isinstance(a,dict) or not isinstance(b,dict) or not a or a.keys()!=b.keys() or any(a[k]!=b[k]for k in a if k!='apps/catalog.flex'):return False
+    old,current=previous.get('authority'),next.get('authority')
+    if not isinstance(old,dict) or not isinstance(current,dict) or not old or not current:return False
+    packages=compatible_bundles(previous,next)
+    for name in old.keys()|current.keys():
+        if name in old and name in current and old[name]==current[name]:continue
+        if re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/ui\.flex',name) or (behavior and re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/behavior\.wasm',name)):
+            if name not in old or name not in current:return False
+            continue
+        if not packages or not package_change(name,behavior,component):return False
     return True
+
+def ui_only_change(previous,next,behavior=False):
+    return catalog_change(previous,next,behavior=behavior)
 
 def app_only_change(previous,next):
     behavior=previous.get('behavior_abi')=='otrios-app-behavior-v1' and next.get('behavior_abi')==previous['behavior_abi']
-    return ui_only_change(previous,next,behavior=behavior)
+    component=previous.get('component_behavior_abi')=='otrios-component-behavior-v1' and next.get('component_behavior_abi')==previous['component_behavior_abi']
+    return catalog_change(previous,next,behavior=behavior,component=component)
 
 def app_install_change(previous,next):
     """Registry installation reuses host bytes but may require a safe full reload."""
     if previous.get('bundle_abi')!='otrios-app-bundle-v1':return app_only_change(previous,next)
-    if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
+    if {k:v for k,v in previous.items() if k not in ('assets','authority','app_contracts')}!={k:v for k,v in next.items() if k not in ('assets','authority','app_contracts')}:return False
     a,b=previous.get('assets',{}),next.get('assets',{})
     if a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if k!='apps/catalog.flex'):return False
     pattern=r'authority/bundles/[a-z-]+\.otapp/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+'

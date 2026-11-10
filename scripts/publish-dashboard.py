@@ -15,7 +15,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
     web,native,out,key=map(pathlib.Path,(web,native,out,key));out.mkdir(parents=True,exist_ok=True)
     elf=native.read_bytes()
     if len(elf)<52 or elf[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(elf[18:20],'little')!=40:raise ValueError('Expected ARM32 little-endian ELF app')
-    assets={};authority={}
+    assets={};authority={};app_contracts={}
     catalog=pathlib.Path(catalog) if catalog else web.parent.parent/'apps/catalog.flex'
     if catalog.is_symlink():raise ValueError('Catalog symlink rejected')
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
@@ -74,6 +74,9 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
                 if source.is_symlink() or not source.is_dir() or not re.fullmatch(r'[a-z-]+\.otapp',source.name):raise ValueError('Invalid installed bundle directory')
                 result=subprocess.run([str(bundle_checker),'verify',str(source),'--key',str(public),'--openssl',openssl],check=True,capture_output=True,text=True,timeout=30)
                 if result.stdout.split()[1]+'.otapp'!=source.name:raise ValueError('Bundle folder/identity mismatch')
+                contract=subprocess.run([str(bundle_checker),'update-contract',str(source),'--key',str(public),'--openssl',openssl],check=True,capture_output=True,text=True,timeout=30).stdout.split()
+                if len(contract)!=3 or contract[:2]!=['CONTRACT',source.name[:-6]] or not re.fullmatch(r'[a-f0-9]{64}',contract[2]):raise ValueError('Invalid verified app update contract')
+                app_contracts[source.name]=contract[2]
                 for item in sorted(source.rglob('*')):
                     if item.is_symlink():raise ValueError('Bundle symlink rejected')
                     if not item.is_file():continue
@@ -86,8 +89,10 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
             if not count:raise ValueError('Empty installed bundle registry')
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
-        manifest={'behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v31','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
-        if bundles:manifest['bundle_abi']='otrios-app-bundle-v1'
+        manifest={'component_behavior_abi':'otrios-component-behavior-v1','behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v31','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        if bundles:
+            manifest['bundle_abi']='otrios-app-bundle-v1'
+            manifest['app_contracts']=app_contracts
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)

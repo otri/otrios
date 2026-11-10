@@ -16,18 +16,21 @@ import time
 
 
 REMOTE = r'''
-import json,pathlib,subprocess,time,urllib.request
+import hashlib,json,pathlib,subprocess,time,urllib.request
 root=pathlib.Path('/var/lib/otrios-authority')
 for attempt in range(120):
  pointer=json.loads((root/'releases/current.json').read_text())
  assert pointer['id']==expected,'Frame pointer differs from requested release'
  files=list(pathlib.Path('/run/otrios-direct-console/otrios').glob('ready-*.json'))
  ready=json.loads(max(files,key=lambda p:p.stat().st_mtime).read_text()) if files else {}
- if (ready.get('release')==ready.get('runtime_release')==expected
+ if (ready.get('release')==ready.get('ui_release')==expected
      and ready.get('state_confirmed') and ready.get('stream_ready')
      and not ready.get('input_busy') and ready.get('pending_commands')==0):break
  time.sleep(.5)
 else:raise RuntimeError('Native readiness deadline')
+manifest=json.loads((root/'releases'/expected/'manifest.json').read_text())
+native_sha=hashlib.sha256(pathlib.Path('/proc/'+str(ready['pid'])+'/exe').read_bytes()).hexdigest()
+assert native_sha==manifest['assets']['native/armv7/dashboard-native']['sha256'],'Native executable differs from active signed release'
 health=json.load(urllib.request.urlopen('http://127.0.0.1:8876/health',timeout=5))
 assert health['status']=='ok' and health['release']==expected,'Authority not ready'
 if resume:
@@ -36,8 +39,8 @@ if resume:
  status=subprocess.check_output(['systemctl','show','otrios-monitoring.service','--property=Result','--property=ExecMainStatus'],text=True)
  assert 'Result=success' in status and 'ExecMainStatus=0' in status,'Collector failed'
 services={s:subprocess.check_output(['systemctl','is-active',s],text=True).strip()for s in ['otrios-authority','otrios-dashboard-direct','otrios-tunnel']+(['otrios-monitoring.timer']if resume else [])}
-keys=['ui_ref','release','runtime_release','state_confirmed','stream_ready','input_busy','pending_commands','renderer','rotation','output','touch_devices','touch_calibrated','scanout_format','color_bits']
-print(json.dumps({'passed':True,'release':expected,'state_protocol':pointer['sync_protocol'],'health':health['status'],'ready':{k:ready[k]for k in keys},'services':services,'collector_resumed':resume,'collector_result':'success' if resume else None,'pixels_exported':False,'authority_restarted':False,'data_restored':False}))
+keys=['ui_ref','release','ui_release','runtime_release','pid','state_confirmed','stream_ready','input_busy','pending_commands','renderer','rotation','output','touch_devices','touch_calibrated','scanout_format','color_bits']
+print(json.dumps({'passed':True,'release':expected,'state_protocol':pointer['sync_protocol'],'health':health['status'],'ready':{k:ready[k]for k in keys},'native_executable_sha256':native_sha,'native_executable_matches_active_release':True,'services':services,'collector_resumed':resume,'collector_result':'success' if resume else None,'pixels_exported':False,'authority_restarted':False,'data_restored':False}))
 '''
 
 

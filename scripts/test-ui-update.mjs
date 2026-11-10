@@ -38,3 +38,55 @@ test('nested screen UI changes retain the executable closure',()=>{
  b.authority['authority/apps/layout-lab/../ui.flex']=asset(3);
  assert(!uiOnlyChange(a,b));
 });
+
+test('compatible signed bundle library revisions rotate exact dependencies through the catalog path',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {appOnlyChange}=await import('../web/shared/ui-update.mjs');
+ const pair=JSON.parse(await readFile(new URL('./fixtures/app-update-classification.json',import.meta.url)));
+ const a=pair.previous,b=pair.next;
+ assert(!uiOnlyChange(a,b),'UI-only cannot authorize executable dependency replacement');
+ assert(appOnlyChange(a,b));assert(appOnlyChange(b,a),'compatible signed rollback uses the same host path');
+ const ui=structuredClone(a);ui.assets['apps/catalog.flex']=asset(7);ui.authority['authority/bundles/designer.otapp/UI/main.flex']=asset(8);
+ assert(uiOnlyChange(a,ui),'ordinary package UI changes retain the exact executable closure');
+ const dataA=structuredClone(a),dataB=structuredClone(b);
+ delete dataA.component_behavior_abi;delete dataB.component_behavior_abi;
+ for(const m of [dataA,dataB])for(const path of Object.keys(m.authority))if(path.endsWith('/Code/component.wasm'))delete m.authority[path];
+ assert(uiOnlyChange(dataA,dataB),'data-only libraries do not require a component execution ABI');
+});
+
+test('bundle catalog replacement rejects changed contracts, schema, host policy and unknown private paths',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {appOnlyChange}=await import('../web/shared/ui-update.mjs');
+ const pair=JSON.parse(await readFile(new URL('./fixtures/app-update-classification.json',import.meta.url)));
+ const root='authority/bundles/designer.otapp/';
+ const cases=[
+  ['state schema',m=>m.authority[root+'Schemas/state.flex']=asset(8)],
+  ['app contract',m=>m.app_contracts['designer.otapp']='f'.repeat(64)],
+  ['host executable',m=>m.assets['native/armv7/dashboard-native']=asset(8)],
+  ['host policy',m=>m.host_session=2],
+  ['state protocol',m=>m.sync_protocol='future-v99'],
+  ['unknown package payload',m=>m.authority[root+'Host/runtime.so']=asset(8)],
+  ['path traversal',m=>m.authority[root+'Dependencies/'+'c'.repeat(64)+'.otlib/../../policy.flex']=asset(8)],
+  ['floating dependency',m=>m.authority[root+'Dependencies/latest.otlib/Code/component.wasm']=asset(8)],
+  ['unknown library executable',m=>m.authority[root+'Dependencies/'+'c'.repeat(64)+'.otlib/Code/native.so']=asset(8)],
+  ['non-app authority addition',m=>m.authority['authority/policy.flex']=asset(8)],
+ ];
+ for(const [label,mutate]of cases){const b=structuredClone(pair.next);mutate(b);assert(!appOnlyChange(pair.previous,b),label);}
+ for(const field of ['component_behavior_abi','bundle_abi','app_contracts']){
+  const a=structuredClone(pair.previous),b=structuredClone(pair.next);delete a[field];delete b[field];assert(!appOnlyChange(a,b),`missing ${field}`);
+ }
+ const malformedA=structuredClone(pair.previous),malformedB=structuredClone(pair.next);malformedA.app_contracts['designer.otapp']=malformedB.app_contracts['designer.otapp']=['f'.repeat(64)];assert(!appOnlyChange(malformedA,malformedB),'contract type must be a string');
+ const a=structuredClone(pair.previous),b=structuredClone(pair.next);a.authority['authority/policy.flex']=b.authority['authority/policy.flex']=asset(8);assert(appOnlyChange(a,b));
+ b.authority['authority/policy.flex']=asset(7);assert(!appOnlyChange(a,b),'non-app authority changed');delete b.authority['authority/policy.flex'];assert(!appOnlyChange(a,b),'non-app authority removed');
+ const add=structuredClone(pair.next);add.app_contracts['new.otapp']='e'.repeat(64);add.authority['authority/bundles/new.otapp/Schemas/state.flex']=asset(1);assert(!appOnlyChange(pair.previous,add),'registry install is a distinct path');
+});
+
+test('preparation admits a compatible package catalog without choosing a full reload',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {previous:a,next:b}=JSON.parse(await readFile(new URL('./fixtures/app-update-classification.json',import.meta.url)));
+ const bytes=new Uint8Array([4,5,6]);b.assets['apps/catalog.flex']={bytes:bytes.length,sha256:await digest(bytes)};
+ const raw=new TextEncoder().encode(JSON.stringify(b)),id=await digest(raw),fetch=globalThis.fetch;
+ globalThis.fetch=async url=>new Response(String(url).endsWith('catalog.flex')?bytes:raw);
+ try{const prepared=await prepareUiUpdate('https://demo.example','a'.repeat(64),id,{id:'a'.repeat(64),manifest:a});assert.deepEqual(prepared.bytes,bytes);assert.equal(prepared.manifest.id,id);}
+ finally{globalThis.fetch=fetch;}
+});

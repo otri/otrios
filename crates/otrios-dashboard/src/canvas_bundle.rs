@@ -415,6 +415,12 @@ fn main() -> Result<()> {
             })();
             if result.is_err() {let _=fs::remove_dir_all(output);}result
         }
+        Some("update-contract") if args.len() == 6 && args[2] == "--key" && args[4] == "--openssl" => {
+            let key = bundle_files::public_key(Path::new(&args[3]), false, &args[5])?;
+            let app = bundle::verify(read_tree(Path::new(&args[1]))?, &key)?;
+            println!("CONTRACT {} {}", app.summary().info.app.id, bundle::update_contract(&app)?);
+            Ok(())
+        }
         Some("compare") if args.len() == 7 && args[3] == "--key" && args[5] == "--openssl" => {
             let key = bundle_files::public_key(Path::new(&args[4]), false, &args[6])?;
             let before = bundle::verify(read_tree(Path::new(&args[1]))?, &key)?;

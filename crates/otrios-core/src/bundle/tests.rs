@@ -793,3 +793,74 @@ fn app_intake_requires_independent_trust_and_separates_reuse_from_host_installat
     assert_eq!(review.digest, verified.summary().digest);
     assert_eq!(verified.file(UI_PATH).unwrap(), ui);
 }
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn package_update_contract_retains_identity_policy_and_schema_without_content_pins() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[17; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let verified = |mut tree: BundleTree| {
+        sign_metadata_fixture(&mut tree, &key);
+        verify(tree, &public).unwrap()
+    };
+    let original = fixture(None);
+    let baseline = update_contract(&verified(original.clone())).unwrap();
+    let mut presentation = original.clone();
+    change_info(&mut presentation, |info| {
+        info.revision += 1;
+        info.app.title = "Renamed display".into();
+    });
+    let mut ui = canvas::decode_ui(&presentation[UI_PATH]).unwrap();
+    ui.title = "New presentation".into();
+    presentation.insert(UI_PATH.into(), canvas::encode_ui(&ui).unwrap());
+    assert_eq!(
+        update_contract(&verified(presentation)).unwrap(),
+        baseline,
+        "revision and display content do not change app identity or policy"
+    );
+    for kind in 0..4 {
+        let mut changed = original.clone();
+        match kind {
+            0 => change_info(&mut changed, |info| info.private = false),
+            1 => change_info(&mut changed, |info| {
+                info.app.state_ref = "app:sample/state/other".into()
+            }),
+            2 => change_info(&mut changed, |info| {
+                info.required_features.push("otrios-canvas-v3".into())
+            }),
+            _ => {
+                let mut ui = canvas::decode_ui(&changed[UI_PATH]).unwrap();
+                ui.state_schema.id = "sample-state-v2".into();
+                changed.insert(
+                    SCHEMA_PATH.into(),
+                    canvas::encode_schema(&ui.state_schema).unwrap(),
+                );
+                changed.insert(UI_PATH.into(), canvas::encode_ui(&ui).unwrap());
+            }
+        }
+        assert_ne!(
+            update_contract(&verified(changed)).unwrap(),
+            baseline,
+            "identity, delivery, schema and required semantics are stable hot-update boundaries"
+        );
+    }
+    let guest = |extra: &str| {
+        wat::parse_str(format!(
+            r#"(module
+        (func (export "abi_version") (result i32) i32.const 1)
+        (func (export "dispatch") (param i32 i32 i32 i32) (result i64) {extra} i64.const 0))"#
+        ))
+        .unwrap()
+    };
+    let first = update_contract(&verified(fixture(Some(&guest(""))))).unwrap();
+    let next = update_contract(&verified(fixture(Some(&guest("nop"))))).unwrap();
+    assert_eq!(
+        first, next,
+        "an existing app guest may change under its separate admitted ABI"
+    );
+    assert_ne!(
+        first, baseline,
+        "adding an app execution requirement changes the contract"
+    );
+}

@@ -497,6 +497,28 @@ pub fn with_oib_ui_and_libraries(
     Ok(tree)
 }
 
+/// Signed release classification binds compatible package replacement to the
+/// same app identity, delivery policy, state bytes and admitted requirements.
+/// Revisions and exact library pins select content and are deliberately absent.
+/// This is a compatibility fingerprint, not a signature or capability.
+pub fn update_contract(bundle: &VerifiedBundle) -> Result<String> {
+    let info = &bundle.summary.info;
+    let mut bytes = b"otrios-app-update-contract-v1\0".to_vec();
+    bytes.extend(encode(&(
+        &info.app.id,
+        &info.app.ui_ref,
+        &info.app.state_ref,
+        info.private,
+        &info.required_features,
+        &info.capabilities,
+        &info.entry_ui,
+        &info.state_schema,
+        &info.behavior,
+        hash(bundle.file(SCHEMA_PATH)?),
+    ))?);
+    Ok(hex(&hash(&bytes)))
+}
+
 /// Existing app upgrades preserve identity/admission and the live state schema.
 /// Explicit operational rollback selects a previous verified release snapshot,
 /// rather than disguising an older bundle as a forward update.
