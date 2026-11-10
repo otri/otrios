@@ -1122,6 +1122,11 @@ impl StateAdapter {
             available_instance_slots: self.oib_available_slots(),
         })
     }
+    /// Immutable validated package baseline. Live values, overrides and resident
+    /// instance compilation must never become the signed update comparator.
+    pub(in crate::canvas) fn admitted_oib_ui(&self) -> Option<&Ui> {
+        self.doc.oib_ui.as_deref()
+    }
     pub(in crate::canvas) fn admitted_oib_hash(&self) -> Option<Vec<u8>> {
         self.doc.oib_binding().ok().map(|b| b.ui_hash.clone())
     }

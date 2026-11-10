@@ -2411,7 +2411,16 @@ impl Client {
                     }
                     let ui = decode_ui(bytes)?;
                     if self.previous_catalog.is_some() {
-                        compatible_app_update(&self.active.as_ref().ok_or("Missing app")?.ui, &ui)?;
+                        let current = self.active.as_ref().ok_or("Missing app")?;
+                        let admitted = if super::oib::seed(&current.ui).is_some() {
+                            current
+                                .doc
+                                .admitted_oib_ui()
+                                .ok_or("Missing admitted OIB baseline")?
+                        } else {
+                            &current.ui
+                        };
+                        compatible_catalog_ui(admitted, &ui)?;
                     }
                     if ui.ui_ref != r.pair.0 {
                         return Err("Wrong UI reference".into());
@@ -4552,6 +4561,31 @@ struct Qualification {
     private: bool,
     writer: [u8; 16],
 }
+/// Compare signed baselines rather than resident compilation. An OIB library
+/// may arrive through catalog qualification before its live baseline delta;
+/// reuse the same semantic/source compatibility checks as authority adoption.
+fn compatible_catalog_ui(admitted: &Ui, next: &Ui) -> Result<()> {
+    let (Some(previous), Some(candidate)) = (super::oib::seed(admitted), super::oib::seed(next))
+    else {
+        return compatible_app_update(admitted, next);
+    };
+    if super::oib::contract::admission(admitted)? != super::oib::contract::admission(next)? {
+        return Err("OIB catalog update changed semantic admission".into());
+    }
+    if previous.graph != candidate.graph
+        || previous.resolved_libraries != candidate.resolved_libraries
+    {
+        super::oib::imports::compatible(previous, candidate)?;
+    }
+    // Remove only derived OIB output. Ordinary signed chrome state, app behavior,
+    // navigation and action contracts keep the existing compatibility boundary.
+    let mut before = super::oib::graph::strip(admitted)?;
+    let mut after = super::oib::graph::strip(next)?;
+    before.presentation = None;
+    after.presentation = None;
+    compatible_app_update(&before, &after)
+}
+
 fn qualify(
     ui: Ui,
     state_ref: &str,

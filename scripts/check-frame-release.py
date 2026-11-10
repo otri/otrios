@@ -59,7 +59,9 @@ def main():
     script = 'expected=' + repr(expected) + '\nresume=' + repr(args.resume_monitoring) + '\n' + REMOTE
     started = time.monotonic()
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
-                            check=True, capture_output=True, text=True, timeout=180)
+                            capture_output=True, text=True, timeout=180)
+    if result.returncode:
+        raise SystemExit(result.stderr.strip()[-2000:] or 'Frame readiness command failed')
     record = json.loads(result.stdout)
     record['elapsed_seconds'] = round(time.monotonic() - started, 3)
     args.output.parent.mkdir(parents=True, exist_ok=True)

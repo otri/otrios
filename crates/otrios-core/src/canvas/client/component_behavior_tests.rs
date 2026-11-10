@@ -771,3 +771,263 @@ fn catalogue_activation_commits_new_guest_and_resumed_locals_before_any_tick() {
 fn held_reconnect_preserves_old_guest_then_activates_without_third_guest_set() {
     exercise_direct_activation(true);
 }
+
+fn catalog_for_ui(client: &Client, ui: &Ui) -> Vec<u8> {
+    let mut catalog = client.catalog.as_ref().unwrap().clone();
+    let entry = catalog
+        .apps
+        .iter_mut()
+        .find(|e| e.app.ui_ref == ui.ui_ref)
+        .unwrap();
+    entry.ui_hash = hash(&crate::canvas::encode_ui(ui).unwrap());
+    crate::canvas::encode_catalog(&catalog).unwrap()
+}
+fn managed_binding() -> MountBinding {
+    MountBinding {
+        version: 2,
+        actor: [1; 32],
+        collection: "a".repeat(32),
+        editable: true,
+        ui_editable: true,
+        comments: false,
+        moderate: false,
+    }
+}
+fn adopted_client_with_width_override(
+    sync_first: bool,
+) -> (Client, crate::canvas::Document, Session, Ui, u8) {
+    let ui = library_ui(stateful_snapping_guest(100));
+    let next = replacement(&ui, stateful_snapping_guest(250));
+    let (mut client, mut authority, mut session) = mounted(&ui);
+    client.generation = client.epoch();
+    client.active.as_mut().unwrap().binding = Some(managed_binding());
+    let width = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: PropertyPath {
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+            property: PropertyId(2),
+        },
+    };
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .doc
+        .edit_oib_property(&width, Some(Value::Number(420.)))
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let (control, _, extent) = slider(&client, 20);
+    assert_eq!(extent, 420.);
+    client.event(client.epoch(), control, 437, 0).unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&next, generation, baseline)
+        .unwrap();
+    if sync_first {
+        pump(&mut client, &mut authority, &mut session);
+    }
+    let signed = fixture::admit(&next);
+    assert_eq!(slider(&client, 20).2, 420.);
+    assert_ne!(
+        client.active.as_ref().unwrap().ui.layout,
+        signed.layout,
+        "live Width420 compilation differs from pristine signed geometry"
+    );
+    assert!(
+        compatible_app_update(&client.active.as_ref().unwrap().ui, &signed).is_err(),
+        "the observed live-vs-signed comparison is an invalid compatibility comparator"
+    );
+    (client, authority, session, signed, control)
+}
+fn respond_to_catalog_mount(
+    client: &mut Client,
+    authority: &mut crate::canvas::Document,
+    signed: &Ui,
+    state_selection_ui: &Ui,
+) -> (u32, Session, Vec<u8>) {
+    let request = decode_client(&client.outgoing().unwrap().unwrap()).unwrap();
+    let ClientMessage::Mount {
+        epoch,
+        writer,
+        resume,
+        ..
+    } = request
+    else {
+        panic!("catalog update must request a real mount")
+    };
+    let (mut session, _) = authority.open_session(&writer, resume).unwrap();
+    session.set_oib_editable(true);
+    session
+        .set_selection(StateSelection::from_ui(state_selection_ui).unwrap())
+        .unwrap();
+    let ui = crate::canvas::encode_ui(signed).unwrap();
+    let response = encode_server(&ServerMessage::Mounted {
+        epoch,
+        ui_hash: hash(&ui),
+        ui,
+        code: vec![],
+        state: authority.generate(&mut session).unwrap().unwrap(),
+        binding: Some(managed_binding()),
+        initial_view: None,
+    })
+    .unwrap();
+    (epoch, session, response)
+}
+fn exercise_full_catalog_mount(sync_first: bool) {
+    let (mut client, mut authority, _old_session, signed, control) =
+        adopted_client_with_width_override(sync_first);
+    let before = fields(&client);
+    let calls = client.resource_usage().component_behavior_calls;
+    let expected = hex(&fixture::seed(&signed).resolved_libraries[0]
+        .component
+        .as_ref()
+        .unwrap()
+        .sha256);
+    if sync_first {
+        assert_eq!(
+            client.resource_usage().component_behavior_hashes,
+            vec![expected.clone()],
+            "live DocSync already adopted this guest before catalog receipt"
+        );
+    } else {
+        assert_ne!(
+            client.resource_usage().component_behavior_hashes,
+            vec![expected.clone()],
+            "catalog qualification precedes the old client's live baseline delta"
+        );
+    }
+    let admitted = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .admitted_oib_ui()
+        .unwrap();
+    assert!(compatible_catalog_ui(admitted, &signed).is_ok());
+    assert!(
+        client
+            .update_catalog(&catalog_for_ui(&client, &signed))
+            .unwrap()
+    );
+    let old_epoch = client.epoch();
+    let (epoch, _candidate_session, response) =
+        respond_to_catalog_mount(&mut client, &mut authority, &signed, &signed);
+    assert!(epoch > old_epoch);
+    assert!(!client.receive(&response).unwrap());
+    assert_eq!(
+        client.epoch(),
+        old_epoch,
+        "qualified candidate remains invisible before activation"
+    );
+    assert!(client.qualified.is_some());
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:accepted}if accepted==epoch)
+    );
+    assert!(
+        client
+            .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+            .unwrap()
+    );
+    assert_eq!(client.epoch(), epoch);
+    assert!(!client.catalog_update_pending());
+    assert_eq!(client.component_runtime.live_instances(), 2);
+    assert_eq!(
+        client.resource_usage().component_behavior_hashes,
+        vec![expected]
+    );
+    assert_eq!(fields(&client), before);
+    assert_eq!(slider(&client, 20).2, 420.);
+    assert!(client.resource_usage().component_behavior_calls >= calls);
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(
+        client.value(1).unwrap(),
+        600,
+        "latest250-step guest retains true host local across full handshake"
+    );
+    assert_eq!(client.resource_usage().component_behavior_calls, calls + 1);
+    assert_eq!(client.resource_usage().component_behavior_errors, 0);
+}
+#[test]
+fn full_catalog_mount_uses_admitted_baseline_after_live_adoption_and_width_override() {
+    exercise_full_catalog_mount(true);
+}
+#[test]
+fn full_catalog_mount_can_qualify_library_revision_before_live_baseline_delta() {
+    exercise_full_catalog_mount(false);
+}
+#[test]
+fn full_catalog_mount_still_rejects_changed_oib_grants_schema_and_delivery_metadata() {
+    for mutation in ["grants", "schema", "export", "delivery"] {
+        let (mut client, mut authority, _old_session, signed, _control) =
+            adopted_client_with_width_override(true);
+        let before_ui = client.active.as_ref().unwrap().ui.clone();
+        let before_values = fields(&client);
+        let before_hashes = client.resource_usage().component_behavior_hashes;
+        let before_catalog = client.catalog_hash.clone();
+        let mut changed = signed.clone();
+        if mutation == "delivery" {
+            let mut catalog = client.catalog.as_ref().unwrap().clone();
+            catalog.apps[0].private = true;
+            assert!(
+                client
+                    .update_catalog(&crate::canvas::encode_catalog(&catalog).unwrap())
+                    .is_err()
+            );
+        } else {
+            if mutation == "grants" {
+                fixture::seed_mut(&mut changed)
+                    .graph
+                    .as_mut()
+                    .unwrap()
+                    .grants
+                    .push(otrios_interfaces::oib::graph::ActionGrant {
+                        field: 1,
+                        kind: GestureKind::Activate,
+                        operation: otrios_interfaces::oib::graph::ActionOperation::Toggle,
+                    });
+            } else if mutation == "schema" {
+                changed.state_schema.id = "l2-different-state-schema".into();
+            } else {
+                let seed = fixture::seed_mut(&mut changed);
+                let body = &mut seed.resolved_libraries[0];
+                body.graph.behaviors[0].can_capture = false;
+                body.graph = crate::library::seal_graph(body.graph.clone()).unwrap();
+                body.revision = [3; 32];
+                let exports = body
+                    .graph
+                    .exports
+                    .iter()
+                    .map(|export| otrios_interfaces::oib::graph::LockedExport {
+                        export: export.id,
+                        contract: export.contract,
+                    })
+                    .collect();
+                let pin = &mut seed.graph.as_mut().unwrap().imports.as_mut().unwrap().locks[0];
+                pin.revision = [3; 32];
+                pin.exports = exports;
+            }
+            let changed = fixture::admit(&changed);
+            assert!(
+                client
+                    .update_catalog(&catalog_for_ui(&client, &changed))
+                    .unwrap()
+            );
+            let (_epoch, _candidate_session, response) =
+                respond_to_catalog_mount(&mut client, &mut authority, &changed, &signed);
+            assert!(
+                client.receive(&response).is_err(),
+                "{mutation} cannot pass signed baseline compatibility"
+            );
+        }
+        assert_eq!(client.active.as_ref().unwrap().ui, before_ui);
+        assert_eq!(fields(&client), before_values);
+        assert_eq!(
+            client.resource_usage().component_behavior_hashes,
+            before_hashes
+        );
+        assert_eq!(client.catalog_hash, before_catalog);
+        assert_eq!(slider(&client, 20).2, 420.);
+    }
+}
