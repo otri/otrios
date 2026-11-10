@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Publish one signed data-library pin through the unchanged-host app workflow."""
+"""Publish one signed component-library pin through the unchanged-host app workflow."""
 import argparse
 import fcntl
 import hashlib
@@ -43,12 +43,28 @@ def publish(args):
     # Freeze only requested authoring inputs; no app state or keys are copied.
     source = args.source.read_bytes()
     bindings = args.bindings.read_bytes()
+    source_metadata = json.loads(source)
+    component_name = source_metadata.get('component_wat')
+    component_path = None
+    component = None
+    if component_name is not None:
+        relative = pathlib.PurePosixPath(component_name)
+        if relative.is_absolute() or '..' in relative.parts or not relative.parts:
+            raise ValueError('Component WAT must be a relative source path')
+        component_path = args.source.parent.joinpath(*relative.parts)
+        component = component_path.read_bytes()
+        if len(component) > 64 * 1024:
+            raise ValueError('Component WAT input budget exceeded')
     if len(source) > 256 * 1024 or len(bindings) > 256 * 1024:
         raise ValueError('Library authoring input budget exceeded')
     with tempfile.TemporaryDirectory(prefix='oib-library-', dir=args.runtime / 'build') as directory:
         stage = pathlib.Path(directory)
         (stage / 'source.json').write_bytes(source)
         (stage / 'bindings.json').write_bytes(bindings)
+        if component is not None:
+            staged_component = stage.joinpath(*relative.parts)
+            staged_component.parent.mkdir(parents=True, exist_ok=True)
+            staged_component.write_bytes(component)
         tool('library-pack', stage / 'source.json', stage / 'unsigned.otlib')
         tool('library-sign', stage / 'unsigned.otlib', stage / 'signed.otlib',
              '--key', private, '--openssl', args.openssl)
@@ -60,7 +76,8 @@ def publish(args):
              '--key', private, '--openssl', args.openssl)
         candidate = tool('verify', stage / 'signed.otapp', '--key', key,
                          '--openssl', args.openssl).split()
-        if args.source.read_bytes() != source or args.bindings.read_bytes() != bindings:
+        if (args.source.read_bytes() != source or args.bindings.read_bytes() != bindings
+                or (component_path is not None and component_path.read_bytes() != component)):
             raise ValueError('Library authoring source changed during publication')
         result = installer.install(SimpleNamespace(
             runtime=args.runtime, baseline=baseline, bundle=stage / 'signed.otapp',
@@ -71,6 +88,7 @@ def publish(args):
                    'library': library[2], 'library_revision': library[3],
                    'source_sha256': hashlib.sha256(source).hexdigest(),
                    'bindings_sha256': hashlib.sha256(bindings).hexdigest(),
+                   'component_source_sha256': hashlib.sha256(component).hexdigest() if component is not None else None,
                    'baseline': release, 'release': result['id'],
                    'host_assets_unchanged': True, 'deployed': bool(args.deploy_config)}
         installer.publisher.atomic(args.runtime / 'build/oib-library-publication.json',

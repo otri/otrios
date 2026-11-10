@@ -167,12 +167,20 @@ pub fn resolve(seed: &Seed) -> Result<graph::Document> {
         return Err("Missing, duplicate or noncanonical resolved library bodies".into());
     }
     let mut imported_bytes = 0usize;
+    let mut imported_code = 0usize;
     for body in &seed.resolved_libraries {
         let pin = lock(&imports.locks, &body.library)?;
         if pin.revision != body.revision {
             return Err("Resolved library revision differs from its exact lock".into());
         }
         crate::library::validate_graph(&body.graph)?;
+        crate::library::validate_component(&body.graph, body.component.as_ref())?;
+        imported_code = imported_code
+            .checked_add(body.component.as_ref().map_or(0, |code| code.bytes.len()))
+            .ok_or("Imported component byte count overflow")?;
+        if imported_code > 4 * super::super::component_behavior::MAX_CODE_BYTES {
+            return Err("Imported component code budget".into());
+        }
         crate::library::required_classes_compatible(
             &body.graph.required_classes,
             &original.classes,
@@ -326,7 +334,7 @@ pub fn compatible(previous: &Seed, candidate: &Seed) -> Result<()> {
                 .iter()
                 .find(|body| body.library == new.library)
                 .ok_or("Missing candidate library body")?;
-            if previous_body.graph != candidate_body.graph {
+            if previous_body != candidate_body {
                 return Err(
                     "One exact library revision cannot name different canonical bodies".into(),
                 );

@@ -7,6 +7,7 @@ use otrios_interfaces::{
     oib::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
+pub(crate) mod component_behaviors;
 pub mod contract;
 pub mod document;
 pub mod graph;
@@ -257,6 +258,7 @@ pub fn validate(ui: &Ui) -> Result<()> {
         document::validate_layout(ui)?;
     }
     let layout = compile(ui, &BTreeMap::new())?;
+    component_behaviors::validate(ui, &layout)?;
     let blueprint = layout.blueprint();
     let mut found = blueprint.clone();
     let viewport = found

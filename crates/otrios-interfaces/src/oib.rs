@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 /// Bounded D2 authoring records; admitted through the existing instance request.
 pub mod authoring;
+/// RFC 0036 component behavior ABI records and canonical byte codec.
+pub mod component_behavior;
 /// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
 pub mod graph;

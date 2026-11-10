@@ -42,6 +42,7 @@ pub(crate) fn imported() -> Ui {
         .cloned()
         .collect();
     let library = library::seal_graph(Graph {
+        behaviors: vec![],
         format: otrios_interfaces::oib::library::FORMAT.into(),
         required_classes: graph.classes.clone(),
         definitions,
@@ -103,6 +104,7 @@ pub(crate) fn imported() -> Ui {
         library: id(),
         revision: [1; 32],
         graph: library,
+        component: None,
     }];
     ui
 }

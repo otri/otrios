@@ -85,6 +85,8 @@ pub struct ResolvedLibrary {
     pub library: super::library::LibraryId,
     pub revision: super::library::Revision,
     pub graph: super::library::Graph,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<super::library::ComponentCode>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

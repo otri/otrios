@@ -1,15 +1,16 @@
 {
   "info": {
-    "format": "otrios-oib-library-package-v1",
+    "format": "otrios-oib-library-package-v2",
     "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "required_features": [
+      "otrios-component-behavior-v1",
       "otrios-oib-library-v1"
     ],
     "entry_graph": "OIB/library.flex"
   },
   "graph": {
-    "format": "otrios-oib-library-v1",
+    "format": "otrios-oib-library-v2",
     "required_classes": [
       {
         "id": 1,
@@ -1727,6 +1728,37 @@
           212
         ]
       }
+    ],
+    "behaviors": [
+      {
+        "id": 1,
+        "definition": 12,
+        "node": 1,
+        "properties": [
+          {
+            "id": 1,
+            "source": {
+              "references": [],
+              "node": 1,
+              "property": 4
+            }
+          }
+        ],
+        "local": [],
+        "outlets": [
+          {
+            "id": 1,
+            "source": {
+              "references": [],
+              "node": 1,
+              "property": 4
+            },
+            "value_type": "Number"
+          }
+        ],
+        "can_capture": false
+      }
     ]
-  }
+  },
+  "component_wat": "slider.wat"
 }

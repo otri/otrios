@@ -355,7 +355,17 @@ fn match_library_bodies(
     if bodies.len() != locks.len() {
         return Err("App resolved library closure differs".into());
     }
+    let executable = bodies.iter().any(|body| body.component.is_some());
+    if info
+        .required_features
+        .iter()
+        .any(|f| f == otrios_interfaces::oib::component_behavior::FEATURE)
+        != executable
+    {
+        return Err("App component behavior feature/closure differ".into());
+    }
     let mut bytes = 0usize;
+    let mut code_bytes = 0usize;
     for (pin, nested) in library_trees(tree, locks)? {
         let summary = crate::library::inspect(&nested)?;
         let body = bodies
@@ -365,7 +375,12 @@ fn match_library_bodies(
         bytes = bytes
             .checked_add(nested[otrios_interfaces::oib::library::GRAPH_PATH].len())
             .ok_or("Imported byte count overflow")?;
+        code_bytes = code_bytes
+            .checked_add(summary.component.as_ref().map_or(0, |c| c.bytes.len()))
+            .ok_or("Imported component byte count overflow")?;
         if bytes > crate::library::MAX_IMPORTED_GRAPH_BYTES
+            || code_bytes > crate::library::MAX_IMPORTED_COMPONENT_BYTES
+            || body.component != summary.component
             || summary.info.library != pin.library
             || summary.revision != pin.revision
             || body.revision != pin.revision
@@ -455,11 +470,22 @@ pub fn with_oib_ui_and_libraries(
     }
     let mut info = before.info;
     info.libraries = locks.to_vec();
-    info.required_features
-        .retain(|f| f != otrios_interfaces::oib::library::FEATURE);
+    info.required_features.retain(|f| {
+        f != otrios_interfaces::oib::library::FEATURE
+            && f != otrios_interfaces::oib::component_behavior::FEATURE
+    });
     if !locks.is_empty() {
         info.required_features
             .push(otrios_interfaces::oib::library::FEATURE.into());
+        info.required_features.sort();
+    }
+    if canvas::oib::seed(ui).is_some_and(|seed| {
+        seed.resolved_libraries
+            .iter()
+            .any(|body| body.component.is_some())
+    }) {
+        info.required_features
+            .push(otrios_interfaces::oib::component_behavior::FEATURE.into());
         info.required_features.sort();
     }
     tree.remove(SIGNATURE_PATH);
@@ -694,6 +720,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-designer-v2"
                     | "otrios-layout-v5"
                     | "otrios-oib-library-v1"
+                    | "otrios-component-behavior-v1"
             )
         })
     {

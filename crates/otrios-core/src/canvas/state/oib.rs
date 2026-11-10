@@ -720,6 +720,12 @@ impl Document {
         };
         let prepared = std::sync::Arc::new(prepared);
         let resolved = prepared.to_ui_with_layout(&layout)?;
+        super::super::oib::component_behaviors::validate_context(
+            &resolved,
+            &layout,
+            &values,
+            |id| self.typed_value(id),
+        )?;
         let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
         // Sibling snapshots share this small MRU. Never accumulate historical
         // revisions, even when two owners compile concurrently.

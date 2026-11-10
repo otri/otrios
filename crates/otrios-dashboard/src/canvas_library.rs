@@ -23,6 +23,8 @@ use std::{collections::BTreeSet, fs, path::Path};
 struct PackageSource {
     info: LibraryInfo,
     graph: contract::Graph,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    component_wat: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +67,15 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         Some("library-pack") if args.len()==3 => {
             let mut source: PackageSource=json(&args[1])?;
             source.graph=library::seal_graph(source.graph)?;
-            let tree=library::pack(&source.info,&source.graph)?;
+            let tree=if let Some(path)=&source.component_wat {
+                let base=Path::new(&args[1]).parent().ok_or("Library source parent required")?;
+                let relative=Path::new(path);
+                if relative.is_absolute() || relative.components().any(|part|matches!(part,std::path::Component::ParentDir)) { return Err("Component WAT must be a relative source path".into()); }
+                let path=base.join(relative);
+                let text=read_file(&path,library::MAX_COMPONENT_BYTES)?;
+                let code=wat::parse_bytes(&text).map_err(|error|error.to_string())?;
+                library::pack_with_behavior(&source.info,&source.graph,&code)?
+            } else {library::pack(&source.info,&source.graph)?};
             write_library(&args[2],&tree)?;
             println!("PACKED {}",library::inspect(&tree)?.digest); Ok(())
         }
@@ -103,11 +113,11 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 if before==ids.len() {break;}
             }
             let graph=library::seal_graph(contract::Graph {
-                format:contract::FORMAT.into(), required_classes:graph.classes.clone(),
+                behaviors:vec![], format:contract::FORMAT.into(), required_classes:graph.classes.clone(),
                 definitions:graph.definitions.iter().filter(|def|ids.contains(&def.id)).cloned().collect(),
                 exports:spec.exports.into_iter().map(|e|Export{id:e.id,name:e.name,definition:e.definition,contract:[0;32]}).collect(),
             })?;
-            let source=PackageSource {info:LibraryInfo {format:contract::INFO_FORMAT.into(),library:spec.library,version:spec.version,required_features:vec![contract::FEATURE.into()],entry_graph:contract::GRAPH_PATH.into()},graph};
+            let source=PackageSource {info:LibraryInfo {format:contract::INFO_FORMAT.into(),library:spec.library,version:spec.version,required_features:vec![contract::FEATURE.into()],entry_graph:contract::GRAPH_PATH.into()},graph,component_wat:None};
             library::pack(&source.info,&source.graph)?;
             write_json(&args[3],&source)
         }
@@ -192,6 +202,7 @@ fn bind(args: &[String]) -> Result<()> {
         library: id.clone(),
         revision: lib.revision(),
         graph: lib.graph().clone(),
+        component: lib.component().cloned(),
     });
     seed.resolved_libraries
         .sort_by(|a, b| a.library.cmp(&b.library));

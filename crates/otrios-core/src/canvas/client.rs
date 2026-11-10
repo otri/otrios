@@ -75,6 +75,10 @@ struct Mount {
     designer: Option<oib_designer::Designer>,
     doc: StateAdapter,
     behavior: Option<Behavior>,
+    component_runtime: Arc<super::component_behavior::Runtime>,
+    components: super::oib::component_behaviors::Instances,
+    component_calls: u64,
+    component_errors: u64,
     input: InputRouter,
     captured_handlers: BTreeMap<u32, Handler>,
     state_ref: String,
@@ -207,6 +211,10 @@ pub struct ResourceUsage {
     pub ui_cache_bytes: usize,
     pub ui_cache_hits: u64,
     pub behavior_hash: Option<String>,
+    pub component_behavior_instances: usize,
+    pub component_behavior_hashes: Vec<String>,
+    pub component_behavior_calls: u64,
+    pub component_behavior_errors: u64,
     pub reflow_order: Vec<u16>,
     pub reflow_editing: bool,
     pub wire: WireUsage,
@@ -218,6 +226,7 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    component_runtime: Arc<super::component_behavior::Runtime>,
     designer_studio: oib_focus_layout::Studio,
     transfer_caps: super::host_ui::transfers::Capabilities,
     transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
@@ -819,6 +828,7 @@ impl Client {
             &self.cache,
             &[],
             Qualification {
+                component_runtime: self.component_runtime.clone(),
                 epoch: self.generation,
                 private,
                 writer,
@@ -1982,6 +1992,14 @@ impl Client {
                 .as_ref()
                 .and_then(|m| m.behavior.as_ref())
                 .map(|b| hex(b.code_hash())),
+            component_behavior_instances: self.active.as_ref().map_or(0, |m| m.components.len()),
+            component_behavior_hashes: self
+                .active
+                .as_ref()
+                .map(|m| m.components.code_hashes().iter().map(|h| hex(h)).collect())
+                .unwrap_or_default(),
+            component_behavior_calls: self.active.as_ref().map_or(0, |m| m.component_calls),
+            component_behavior_errors: self.active.as_ref().map_or(0, |m| m.component_errors),
             reflow_order: self
                 .active
                 .as_ref()
@@ -2405,6 +2423,7 @@ impl Client {
                         &self.cache,
                         &state,
                         Qualification {
+                            component_runtime: self.component_runtime.clone(),
                             epoch,
                             private: e.private || e.app.id == "monitoring",
                             writer: self.writer.ok_or("Missing writer nonce")?,
@@ -2894,6 +2913,16 @@ impl Client {
         self.dispatch_event(epoch, control, a, b)
     }
     fn dispatch_event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
+        self.dispatch_event_input(epoch, control, a, b, None)
+    }
+    fn dispatch_event_input(
+        &mut self,
+        epoch: u32,
+        control: u8,
+        a: u16,
+        b: u16,
+        input: Option<(otrios_interfaces::oib::component_behavior::Event, bool)>,
+    ) -> Result<bool> {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -2946,6 +2975,49 @@ impl Client {
             )
         {
             return Ok(false);
+        }
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|m| m.components.contains(control))
+        {
+            use otrios_interfaces::oib::component_behavior::{Event, Phase};
+            let (event, capture_allowed) = input.unwrap_or((
+                Event {
+                    phase: Phase::Activate,
+                    pointer: 0,
+                    a,
+                    b,
+                },
+                false,
+            ));
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            m.component_calls = m.component_calls.saturating_add(1);
+            match m
+                .components
+                .dispatch(&m.ui, &mut m.doc, control, event, capture_allowed)
+            {
+                Ok(outcome) => {
+                    if outcome.capture == Some(false) {
+                        m.input.cancel_pointer(event.pointer);
+                        m.captured_handlers.remove(&event.pointer);
+                        m.capture_validation = None;
+                        m.doc.flush_pending();
+                    }
+                    let changed = if outcome.changed { m.refresh()? } else { false };
+                    return Ok(changed || outcome.changed);
+                }
+                Err(_) => {
+                    // A rejected guest result has applied no commands. Keep the
+                    // app usable and cancel only this pointer's captured input.
+                    m.component_errors = m.component_errors.saturating_add(1);
+                    m.input.cancel_pointer(event.pointer);
+                    m.captured_handlers.remove(&event.pointer);
+                    m.capture_validation = None;
+                    m.doc.flush_pending();
+                    return Ok(true);
+                }
+            }
         }
         match h.operation {
             Operation::OibInstance { target, action } => {
@@ -3293,7 +3365,9 @@ impl Client {
             }
             return Ok(true);
         }
+        let prior_action = m.input.drag_action(event.id);
         let delivery = m.input.dispatch_at(scene.clone(), event, at);
+        let pointer_owned = prior_action.is_some() || m.input.dragging(event.id);
         if event.phase == PointerPhase::Down
             && let Some(Action::AppEvent(control)) = m.input.drag_action(event.id)
             && let Some(handler) = m.handler(control)
@@ -3350,7 +3424,7 @@ impl Client {
         if pad {
             m.pad_preview.clear();
         }
-        let changed = self.deliver(delivery)? || pad;
+        let changed = self.deliver(delivery, Some((event.id, pointer_owned)))? || pad;
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
@@ -3373,13 +3447,19 @@ impl Client {
         if !self.host_active && self.order_draggable(id) {
             return Ok(false);
         }
-        self.deliver(InputRouter::activate(self.scene()?.as_ref(), id))
+        self.deliver(InputRouter::activate(self.scene()?.as_ref(), id), None)
     }
-    fn deliver(&mut self, d: Delivery) -> Result<bool> {
+    fn deliver(&mut self, d: Delivery, pointer: Option<(u32, bool)>) -> Result<bool> {
         if let Some(g) = d.gesture
-            && g.phase != PointerPhase::Cancel
             && let Action::AppEvent(control) = g.action
         {
+            let component = self
+                .active
+                .as_ref()
+                .is_some_and(|m| m.components.contains(control));
+            if g.phase == PointerPhase::Cancel && !component {
+                return Ok(false);
+            }
             let kind = self
                 .active
                 .as_ref()
@@ -3387,23 +3467,52 @@ impl Client {
                 .map(|h| h.kind)
                 .ok_or("Unknown gesture")?;
             let norm = |v: f32| (v.clamp(0., 1.) * 1000.).round() as u16;
-            let (a, b) = match kind {
-                GestureKind::Slider => (norm(g.local[0] / g.extent[0]), 0),
-                GestureKind::Pad => (
+            let (a, b) = if component {
+                // Components receive generic local coordinates. A library dial
+                // or pad can interpret them without another host action kind.
+                (
                     norm(g.local[0] / g.extent[0]),
                     norm(g.local[1] / g.extent[1]),
-                ),
-                GestureKind::Dial => {
-                    let x = g.local[0] - g.extent[0] / 2.;
-                    let y = g.local[1] - g.extent[1] / 2.;
-                    (
-                        norm((x.atan2(-y) / std::f32::consts::TAU).rem_euclid(1.)),
-                        0,
-                    )
+                )
+            } else {
+                match kind {
+                    GestureKind::Slider => (norm(g.local[0] / g.extent[0]), 0),
+                    GestureKind::Pad => (
+                        norm(g.local[0] / g.extent[0]),
+                        norm(g.local[1] / g.extent[1]),
+                    ),
+                    GestureKind::Dial => {
+                        let x = g.local[0] - g.extent[0] / 2.;
+                        let y = g.local[1] - g.extent[1] / 2.;
+                        (
+                            norm((x.atan2(-y) / std::f32::consts::TAU).rem_euclid(1.)),
+                            0,
+                        )
+                    }
+                    GestureKind::Activate => (0, 0),
                 }
-                GestureKind::Activate => (0, 0),
             };
-            return self.dispatch_event(self.epoch(), control, a, b);
+            let input = if component {
+                use otrios_interfaces::oib::component_behavior::{Event, Phase};
+                let (id, owned) = pointer.unwrap_or((0, false));
+                Some((
+                    Event {
+                        phase: match g.phase {
+                            PointerPhase::Down => Phase::Down,
+                            PointerPhase::Move => Phase::Move,
+                            PointerPhase::Up => Phase::Up,
+                            PointerPhase::Cancel => Phase::Cancel,
+                        },
+                        pointer: id,
+                        a,
+                        b,
+                    },
+                    owned,
+                ))
+            } else {
+                None
+            };
+            return self.dispatch_event_input(self.epoch(), control, a, b, input);
         }
         match d.action {
             Some(Action::AppNavigate(id)) => {
@@ -4187,6 +4296,21 @@ impl Mount {
                 .map(|(colors, scene)| paint_layout_scene(scene, colors))
                 .transpose()?;
             let (ui, layout) = self.doc.oib_compiled(self.oib_selected)?;
+            // Stage all execution resources before replacing any presented UI.
+            let components = if self.components.matches(&ui, &layout)? {
+                None
+            } else {
+                Some(super::oib::component_behaviors::Instances::prepare(
+                    &ui,
+                    &layout,
+                    &self.component_runtime,
+                    Some(&self.components),
+                )?)
+            };
+            components
+                .as_ref()
+                .unwrap_or(&self.components)
+                .validate_current(&ui, &self.doc)?;
             let previous_ui = std::mem::replace(&mut self.ui, ui);
             let previous = std::mem::replace(&mut self.layout, layout);
             if painted.is_none()
@@ -4195,6 +4319,9 @@ impl Mount {
                 self.layout = previous;
                 self.ui = previous_ui;
                 return Err(error);
+            }
+            if let Some(components) = components {
+                self.components = components;
             }
             if let Some(seed) = super::oib::seed(&self.ui)
                 && let Some(scroll) = &mut self.panel_scroll
@@ -4406,6 +4533,7 @@ impl Mount {
     }
 }
 struct Qualification {
+    component_runtime: Arc<super::component_behavior::Runtime>,
     epoch: u32,
     private: bool,
     writer: [u8; 16],
@@ -4419,6 +4547,7 @@ fn qualify(
     identity: Qualification,
 ) -> Result<Mount> {
     let Qualification {
+        component_runtime,
         epoch,
         private,
         writer,
@@ -4838,6 +4967,10 @@ fn qualify(
         oib_selected: None,
         doc,
         behavior,
+        component_runtime,
+        components: Default::default(),
+        component_calls: 0,
+        component_errors: 0,
         input: InputRouter::default(),
         captured_handlers: BTreeMap::new(),
         state_ref: state_ref.into(),
@@ -4892,6 +5025,13 @@ fn qualify(
         m.oib_paint_basis = Some(m.doc.oib_paint_basis()?);
         m.refresh_oib_view()?;
     }
+    m.components = super::oib::component_behaviors::Instances::prepare(
+        &m.ui,
+        &m.layout,
+        &m.component_runtime,
+        None,
+    )?;
+    m.components.validate_current(&m.ui, &m.doc)?;
     m.refresh_designer()?;
     m.visible = selected_values(&m)?;
     m.sync_panel_scroll()?;
@@ -5711,3 +5851,6 @@ fn text_pointer(
     }
     Ok(Some(true))
 }
+
+#[cfg(test)]
+mod component_behavior_tests;

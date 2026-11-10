@@ -121,6 +121,75 @@ fn state_controls(client: &Client) -> Result<Value, Box<dyn std::error::Error>> 
     Ok(Value::Object(values))
 }
 
+fn component_usage(client: &Client) -> Value {
+    let usage = client.resource_usage();
+    json!({"instances":usage.component_behavior_instances,"hashes":usage.component_behavior_hashes,"calls":usage.component_behavior_calls,"errors":usage.component_behavior_errors})
+}
+fn slider_sample(
+    client: &mut Client,
+    step: &Value,
+    start: Instant,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    use otrios_interfaces::scene::{Action, PointerEvent, PointerPhase, TouchResponder};
+    let value = step["value"]
+        .as_u64()
+        .filter(|n| *n <= 1000)
+        .ok_or("Normalized sample required")?;
+    client.set_oib_designer_mode(DesignerMode::Test)?;
+    let scene = client.scene()?;
+    let mut target = None;
+    for located in scene.controls() {
+        let Some(TouchResponder::Drag(Action::AppEvent(control))) = located.node.responder else {
+            continue;
+        };
+        let Some(percent) = client.control_value(located.node.id)? else {
+            continue;
+        };
+        let point = [
+            located.origin[0] + located.node.frame.width * located.scale * value as f32 / 1000.,
+            located.origin[1] + located.node.frame.height * located.scale * 0.5,
+        ];
+        if scene
+            .hit_path(point)
+            .iter()
+            .any(|node| node.node.id == located.node.id)
+        {
+            target = Some((
+                located.node.id,
+                control,
+                (percent * 10.).round() as u16,
+                point,
+            ));
+            break;
+        }
+    }
+    let (node, control, original, point) = target.ok_or("No visible admitted slider")?;
+    let epoch = client.epoch();
+    let at = start.elapsed().as_millis() as u64;
+    for (phase, time) in [(PointerPhase::Down, at), (PointerPhase::Up, at + 80)] {
+        client.pointer_at(
+            epoch,
+            PointerEvent {
+                id: 241,
+                phase,
+                position: point,
+            },
+            time,
+        )?;
+    }
+    let actual = client
+        .control_value(node)?
+        .ok_or("Slider lost its admitted source")?
+        * 10.;
+    println!(
+        "{}",
+        json!({"phase":"slider-sample","requested":value,"actual":actual,"original":original,"components":component_usage(client),"measurement":"ARM core pointer sample through current live app; separate from evdev/GLES"})
+    );
+    // The baseline fixture values are exact integers; restore through its current guest.
+    client.event(epoch, control, original, 0)?;
+    Ok(true)
+}
+
 // Models withheld renderer capacity with one real core composition after a
 // bounded pointer burst. This is an ARM/IPC probe, not evdev or photon timing.
 fn slider_burst(
@@ -295,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     settle(&mut client, &mut socket, start)?;
     println!(
         "{}",
-        json!({"phase":"mounted","epoch":client.epoch(),"oib":client.resource_usage().oib,"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
+        json!({"phase":"mounted","epoch":client.epoch(),"components":component_usage(&client),"oib":client.resource_usage().oib,"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
     );
     for step in steps {
         let id = step["id"].as_u64().unwrap_or(10);
@@ -380,6 +449,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 client.inspect_oib_selection(selection)?
             }
             "slider-burst" => slider_burst(&mut client, step, start)?,
+            "slider-sample" => slider_sample(&mut client, step, start)?,
             "mode" => client.set_oib_designer_mode(match step["mode"].as_str() {
                 Some("edit") => DesignerMode::Edit,
                 Some("test") => DesignerMode::Test,
@@ -437,7 +507,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let usage = client.resource_usage();
         println!(
             "{}",
-            json!({"phase":"step","step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis(),"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
+            json!({"phase":"step","components":component_usage(&client),"step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis(),"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
         );
     }
     let _ = socket.close(None);

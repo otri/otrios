@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! RFC 0036 bounded data-only package authentication. App resolution separately
+//! RFC 0036 bounded graph and component-behavior package authentication. App resolution separately
 //! validates required classes, bindings, aggregate limits and the compiled scene.
 use crate::{
     bundle::{self, BundleTree},
@@ -19,6 +19,8 @@ pub const MAX_PACKAGE_BYTES: usize = 256 * 1024;
 pub const MAX_GRAPH_BYTES: usize = 16 * 1024;
 pub const MAX_IMPORTED_GRAPH_BYTES: usize = 32 * 1024;
 pub const MAX_LIBRARIES: usize = 4;
+pub const MAX_COMPONENT_BYTES: usize = 64 * 1024;
+pub const MAX_IMPORTED_COMPONENT_BYTES: usize = MAX_LIBRARIES * MAX_COMPONENT_BYTES;
 const DIGEST_DOMAIN: &[u8] = b"otrios-oib-library-v1\0";
 const SIGNING_DOMAIN: &[u8] = b"otrios-oib-library-signature-v1\0";
 const CONTRACT_DOMAIN: &[u8] = b"OTriOS\0oib-library-export-contract-v1\0";
@@ -27,6 +29,7 @@ const CONTRACT_DOMAIN: &[u8] = b"OTriOS\0oib-library-export-contract-v1\0";
 pub struct InspectedLibrary {
     pub info: LibraryInfo,
     pub graph: Graph,
+    pub component: Option<ComponentCode>,
     pub revision: Revision,
     pub digest: String,
     pub files: usize,
@@ -71,7 +74,8 @@ fn canonical<T: Serialize>(value: &T, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn validate_info(info: &LibraryInfo) -> Result<()> {
-    if info.format != INFO_FORMAT
+    let executable = info.format == BEHAVIOR_INFO_FORMAT;
+    if !matches!(info.format.as_str(), INFO_FORMAT | BEHAVIOR_INFO_FORMAT)
         || !valid_id(&info.library)
         || !text(&info.version, 64)
         || info.entry_graph != GRAPH_PATH
@@ -81,9 +85,17 @@ fn validate_info(info: &LibraryInfo) -> Result<()> {
         || info.required_features.iter().any(|f| {
             !matches!(
                 f.as_str(),
-                LIBRARY_FEATURE | "otrios-oib-v2" | "otrios-layout-v5"
+                LIBRARY_FEATURE
+                    | "otrios-oib-v2"
+                    | "otrios-layout-v5"
+                    | "otrios-component-behavior-v1"
             )
         })
+        || info
+            .required_features
+            .iter()
+            .any(|f| f == otrios_interfaces::oib::component_behavior::FEATURE)
+            != executable
     {
         return Err("Unsupported OIB library metadata/feature".into());
     }
@@ -91,18 +103,31 @@ fn validate_info(info: &LibraryInfo) -> Result<()> {
 }
 pub fn encode_info(info: &LibraryInfo) -> Result<Vec<u8>> {
     validate_info(info)?;
-    let mut bytes = INFO_HEADER.to_vec();
+    let mut bytes = if info.format == BEHAVIOR_INFO_FORMAT {
+        BEHAVIOR_INFO_HEADER
+    } else {
+        INFO_HEADER
+    }
+    .to_vec();
     bytes.extend(canonical(info, 4096)?);
     Ok(bytes)
 }
 pub fn decode_info(bytes: &[u8]) -> Result<LibraryInfo> {
-    if !bytes.starts_with(INFO_HEADER) {
+    let expected = if bytes.starts_with(INFO_HEADER) {
+        INFO_FORMAT
+    } else if bytes.starts_with(BEHAVIOR_INFO_HEADER) {
+        BEHAVIOR_INFO_FORMAT
+    } else {
         return Err("Unsupported OIB library package kind/version".into());
-    }
+    };
     let info: LibraryInfo = bundle::metadata_limit(&bytes[INFO_HEADER.len()..], 4096, 16)?;
     validate_info(&info)?;
+    if info.format != expected {
+        return Err("Library metadata header/format mismatch".into());
+    }
     Ok(info)
 }
+
 fn value_type(value: &Value) -> ValueType {
     match value {
         Value::Number(_) => ValueType::Number,
@@ -169,7 +194,8 @@ pub fn required_classes_compatible(
 /// admission still runs against the importing app's class table and grants.
 pub fn validate_graph(graph: &Graph) -> Result<()> {
     let _profile = crate::canvas::profiling::span("library.graph.validate");
-    if graph.format != FORMAT
+    if !matches!(graph.format.as_str(), FORMAT | BEHAVIOR_FORMAT)
+        || (graph.format == BEHAVIOR_FORMAT) == graph.behaviors.is_empty()
         || graph.required_classes.is_empty()
         || graph.required_classes.len() > MAX_CLASS_DESCRIPTORS
         || graph.definitions.is_empty()
@@ -345,11 +371,166 @@ pub fn validate_graph(graph: &Graph) -> Result<()> {
         }
         reachable(graph, export.definition)?;
     }
+    validate_behaviors(graph)?;
     if canonical(graph, MAX_GRAPH_BYTES)?.len() > MAX_GRAPH_BYTES {
         return Err("Library graph byte budget".into());
     }
     Ok(())
 }
+fn behavior_property<'a>(
+    graph: &'a Graph,
+    start: DefinitionId,
+    path: &PropertyPath,
+) -> Result<&'a PropertyDescriptor> {
+    if path.references.len() > 8 || path.node.0 == 0 || path.property.0 == 0 {
+        return Err("Invalid component behavior property path".into());
+    }
+    let mut def = definition(graph, start)?;
+    for reference in &path.references {
+        let id = def
+            .nodes
+            .iter()
+            .find(|node| node.id == *reference)
+            .and_then(|node| node.reference.as_ref())
+            .ok_or("Missing behavior property reference")?
+            .definition;
+        def = definition(graph, id)?;
+    }
+    let node = def
+        .nodes
+        .iter()
+        .find(|node| node.id == path.node)
+        .ok_or("Missing behavior property node")?;
+    let mut class = Some(node.class);
+    while let Some(id) = class {
+        let descriptor = graph
+            .required_classes
+            .iter()
+            .find(|class| class.id == id)
+            .ok_or("Missing behavior class")?;
+        if let Some(property) = descriptor
+            .properties
+            .iter()
+            .find(|property| property.id == path.property)
+        {
+            return Ok(property);
+        }
+        class = descriptor.base;
+    }
+    Err("Missing behavior property descriptor".into())
+}
+fn validate_behaviors(graph: &Graph) -> Result<()> {
+    use otrios_interfaces::oib::component_behavior::{MAX_COMMANDS, MAX_FIELDS};
+    if graph.behaviors.len() > 8 || !ordered(graph.behaviors.iter().map(|b| b.id)) {
+        return Err("Component behavior declaration budget/order".into());
+    }
+    let mut attached = BTreeSet::new();
+    for behavior in &graph.behaviors {
+        let def = definition(graph, behavior.definition)?;
+        if behavior.id == 0
+            || !attached.insert((behavior.definition, behavior.node))
+            || def
+                .nodes
+                .iter()
+                .find(|node| node.id == behavior.node)
+                .and_then(|node| node.visual.as_ref())
+                .and_then(|visual| visual.action.as_ref())
+                .is_none()
+            || behavior.properties.len() > MAX_FIELDS
+            || behavior.local.len() > MAX_FIELDS
+            || behavior.outlets.is_empty()
+            || behavior.outlets.len() > MAX_COMMANDS
+            || !ordered(behavior.properties.iter().map(|p| p.id))
+            || !ordered(behavior.local.iter().map(|p| p.id))
+            || !ordered(behavior.outlets.iter().map(|p| p.id))
+        {
+            return Err("Invalid component behavior attachment/declaration".into());
+        }
+        for property in &behavior.properties {
+            if property.id == 0 {
+                return Err("Zero component property identity".into());
+            }
+            behavior_property(graph, behavior.definition, &property.source)?;
+        }
+        for property in &behavior.local {
+            if property.id == 0 || !finite(&property.default) {
+                return Err("Invalid component local-property declaration".into());
+            }
+            otrios_interfaces::oib::component_behavior::encode_output(
+                &otrios_interfaces::oib::component_behavior::Output {
+                    commands: vec![
+                        otrios_interfaces::oib::component_behavior::Command::SetLocal {
+                            property: property.id,
+                            value: property.default.clone(),
+                        },
+                    ],
+                },
+            )?;
+        }
+        for outlet in &behavior.outlets {
+            if outlet.id == 0
+                || behavior_property(graph, behavior.definition, &outlet.source)?.value_type
+                    != outlet.value_type
+            {
+                return Err("Invalid typed component outlet".into());
+            }
+        }
+    }
+    Ok(())
+}
+/// Validate exact transported code as part of whole-library candidate admission.
+/// The small immutable cache avoids recompilation during repeated graph queries;
+/// each Client still owns separate execution budgets and occurrence stores.
+pub fn validate_component(graph: &Graph, component: Option<&ComponentCode>) -> Result<()> {
+    use crate::canvas::component_behavior::{Compiled, Runtime};
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex, OnceLock},
+    };
+    type Entry = (Revision, Arc<Compiled>);
+    static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    static CACHE: Mutex<VecDeque<Entry>> = Mutex::new(VecDeque::new());
+    if graph.behaviors.is_empty() {
+        return if component.is_none() {
+            Ok(())
+        } else {
+            Err("Undeclared component code in data-only library".into())
+        };
+    }
+    if graph.format != BEHAVIOR_FORMAT {
+        return Err("Component behavior requires library graph v2".into());
+    }
+    let component = component.ok_or("Missing declared component code")?;
+    if component.abi != otrios_interfaces::oib::component_behavior::ABI
+        || component.bytes.is_empty()
+        || component.bytes.len() > MAX_COMPONENT_BYTES
+        || Revision::from(Sha256::digest(&component.bytes)) != component.sha256
+    {
+        return Err("Invalid component code ABI/digest/budget".into());
+    }
+    let mut cache = CACHE
+        .lock()
+        .map_err(|_| "Component admission cache poisoned")?;
+    if let Some(index) = cache
+        .iter()
+        .position(|(digest, _)| *digest == component.sha256)
+    {
+        let entry = cache
+            .remove(index)
+            .ok_or("Component admission cache changed")?;
+        cache.push_back(entry);
+        return Ok(());
+    }
+    if cache.len() == 8 {
+        cache.pop_front();
+    }
+    let compiled = RUNTIME
+        .get_or_init(Runtime::default)
+        .compile(&component.bytes, component.sha256)?;
+    cache.push_back((component.sha256, compiled));
+    Ok(())
+}
+
 fn reachable(graph: &Graph, root: DefinitionId) -> Result<BTreeSet<DefinitionId>> {
     fn visit(
         graph: &Graph,
@@ -502,12 +683,45 @@ pub fn export_contract(graph: &Graph, export: ExportId) -> Result<Revision> {
         &(export.id, export.definition, classes, definitions),
         MAX_PACKAGE_BYTES,
     )?);
+    if !graph.behaviors.is_empty() {
+        let behaviors = graph
+            .behaviors
+            .iter()
+            .filter(|b| closure.contains(&b.definition))
+            .map(|b| {
+                (
+                    b.id,
+                    b.definition,
+                    b.node,
+                    &b.properties,
+                    b.local
+                        .iter()
+                        .map(|p| (p.id, value_type(&p.default)))
+                        .collect::<Vec<_>>(),
+                    &b.outlets,
+                    b.can_capture,
+                )
+            })
+            .collect::<Vec<_>>();
+        if !behaviors.is_empty() {
+            bytes.extend(canonical(
+                &(otrios_interfaces::oib::component_behavior::ABI, behaviors),
+                MAX_GRAPH_BYTES,
+            )?);
+        }
+    }
     Ok(Sha256::digest(&bytes).into())
 }
 pub fn seal_graph(mut graph: Graph) -> Result<Graph> {
     graph.required_classes.sort_by_key(|c| c.id);
     graph.definitions.sort_by_key(|d| d.id);
     graph.exports.sort_by_key(|e| e.id);
+    graph.behaviors.sort_by_key(|b| b.id);
+    for behavior in &mut graph.behaviors {
+        behavior.properties.sort_by_key(|p| p.id);
+        behavior.local.sort_by_key(|p| p.id);
+        behavior.outlets.sort_by_key(|p| p.id);
+    }
     for class in &mut graph.required_classes {
         class.properties.sort_by_key(|p| p.id);
         class.owned_child_classes.sort();
@@ -548,13 +762,25 @@ pub fn decode_graph(bytes: &[u8]) -> Result<Graph> {
 }
 fn payload_path(path: &str) -> bool {
     bundle::valid_path(path)
-        && (path == INFO_PATH || path == GRAPH_PATH || path.starts_with("Notices/"))
+        && (path == INFO_PATH
+            || path == GRAPH_PATH
+            || path == CODE_PATH
+            || path.starts_with("Notices/"))
 }
 pub fn pack(info: &LibraryInfo, graph: &Graph) -> Result<BundleTree> {
+    pack_parts(info, graph, None)
+}
+pub fn pack_with_behavior(info: &LibraryInfo, graph: &Graph, bytes: &[u8]) -> Result<BundleTree> {
+    pack_parts(info, graph, Some(bytes))
+}
+fn pack_parts(info: &LibraryInfo, graph: &Graph, bytes: Option<&[u8]>) -> Result<BundleTree> {
     let mut tree = BundleTree::from([
         (INFO_PATH.into(), encode_info(info)?),
         (GRAPH_PATH.into(), encode_graph(graph)?),
     ]);
+    if let Some(bytes) = bytes {
+        tree.insert(CODE_PATH.into(), bytes.to_vec());
+    }
     tree.insert(
         FILES_PATH.into(),
         bundle::encode(&bundle::file_manifest(&tree))?,
@@ -572,6 +798,15 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedLibrary> {
     )?;
     let info = decode_info(tree.get(INFO_PATH).ok_or("Missing library Info")?)?;
     let graph = decode_graph(tree.get(GRAPH_PATH).ok_or("Missing library graph")?)?;
+    let component = tree.get(CODE_PATH).map(|bytes| ComponentCode {
+        abi: otrios_interfaces::oib::component_behavior::ABI,
+        sha256: Sha256::digest(bytes).into(),
+        bytes: bytes.clone(),
+    });
+    if (info.format == BEHAVIOR_INFO_FORMAT) != (graph.format == BEHAVIOR_FORMAT) {
+        return Err("Library package/graph behavior version mismatch".into());
+    }
+    validate_component(&graph, component.as_ref())?;
     let mut hash = Sha256::new();
     hash.update(DIGEST_DOMAIN);
     hash.update(&tree[FILES_PATH]);
@@ -588,6 +823,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedLibrary> {
     Ok(InspectedLibrary {
         info,
         graph,
+        component,
         revision,
         digest: hex(&revision),
         files: tree.len(),
@@ -625,6 +861,9 @@ impl VerifiedLibrary {
     pub fn graph(&self) -> &Graph {
         &self.summary.graph
     }
+    pub fn component(&self) -> Option<&ComponentCode> {
+        self.summary.component.as_ref()
+    }
     pub fn revision(&self) -> Revision {
         self.summary.revision
     }
@@ -660,3 +899,6 @@ pub fn verify(tree: BundleTree, key: &[u8; 32]) -> Result<VerifiedLibrary> {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod behavior_tests;

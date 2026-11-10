@@ -1176,7 +1176,11 @@ impl StateAdapter {
         for ((id, number), slot) in values.iter().zip(&mut numeric) {
             *slot = (*id, Value::Number(f32::from(*number)));
         }
-        let changed = self.queue(&numeric[..values.len()])?;
+        self.defer_typed(&numeric[..values.len()])
+    }
+    /// Stage an already typed component result with ordinary gesture coalescing.
+    pub fn defer_typed(&mut self, values: &[(u16, Value)]) -> Result<bool> {
+        let changed = self.queue(values)?;
         if changed && self.deadline.is_none() {
             self.deadline = Some(self.last_issue.map_or(self.clock, |at| {
                 at.saturating_add(self.dispatch.interval_ms).max(self.clock)

@@ -546,7 +546,7 @@ pub fn validate_edit(seed: &Seed, id: u64, value: Option<&Value>) -> Result<()> 
     }
     Ok(())
 }
-fn validate_property_value(p: &PropertyDescriptor, value: &Value) -> Result<()> {
+pub(super) fn validate_property_value(p: &PropertyDescriptor, value: &Value) -> Result<()> {
     let valid = match (p.value_type, value) {
         (ValueType::Number, Value::Number(n)) => {
             n.is_finite()

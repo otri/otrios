@@ -42,6 +42,7 @@ fn graph() -> Graph {
         visual_child_classes: vec![ClassId(1)],
     };
     seal_graph(Graph {
+        behaviors: vec![],
         format: FORMAT.into(),
         required_classes: vec![class],
         definitions: vec![ComponentDefinition {
@@ -287,6 +288,7 @@ fn nested_package_binding_keeps_unrelated_payloads_and_checks_independent_trust(
     let seed = canvas::oib::seed(&source).unwrap();
     let src = seed.graph.as_ref().unwrap();
     let body = seal_graph(Graph {
+        behaviors: vec![],
         format: FORMAT.into(),
         required_classes: src.classes.clone(),
         definitions: src
@@ -335,6 +337,7 @@ fn nested_package_binding_keeps_unrelated_payloads_and_checks_independent_trust(
         library: lock.library.clone(),
         revision: lock.revision,
         graph: body.clone(),
+        component: None,
     }];
     let bytes = canvas::encode_ui(&source).unwrap();
     let entry = CatalogEntry {

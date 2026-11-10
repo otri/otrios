@@ -92,6 +92,10 @@ impl InputRouter {
             .values()
             .any(|capture| matches!(capture.responder, TouchResponder::Drag(_)))
     }
+    /// Release one admitted pointer without affecting other captured controls.
+    pub fn cancel_pointer(&mut self, pointer: u32) {
+        self.captures.remove(&pointer);
+    }
     pub fn cancel_all(&mut self) {
         self.captures.clear();
     }

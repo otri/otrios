@@ -713,6 +713,7 @@ fn client_for_scene(d: Designer, scene: Scene) -> Client {
         &VecDeque::new(),
         &[],
         Qualification {
+            component_runtime: Default::default(),
             epoch: 1,
             private: false,
             writer: [1; 16],
@@ -1055,6 +1056,7 @@ fn mounted_fixture_session_with_ui(
         &VecDeque::new(),
         &[],
         Qualification {
+            component_runtime: Default::default(),
             epoch: 1,
             private: false,
             writer: [1; 16],
@@ -1429,6 +1431,7 @@ fn nonzero_selector_evaluates_numeric_state_and_rejects_other_types() {
             &VecDeque::new(),
             &[],
             Qualification {
+                component_runtime: Default::default(),
                 epoch: 1,
                 private: false,
                 writer: [1; 16],
