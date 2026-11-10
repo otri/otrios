@@ -1,0 +1,61 @@
+{
+  "measurement": "host vertex upload counters for every presentation prepared between Apply touch sample and confirmed native presentation return",
+  "trials": [
+    {
+      "color": "#5588FF",
+      "generation": 46,
+      "presentations": [
+        {
+          "serial": 13,
+          "upload_calls": 1,
+          "upload_bytes": 45984
+        },
+        {
+          "serial": 14,
+          "upload_calls": 0,
+          "upload_bytes": 0
+        },
+        {
+          "serial": 15,
+          "upload_calls": 1,
+          "upload_bytes": 47008
+        },
+        {
+          "serial": 16,
+          "upload_calls": 1,
+          "upload_bytes": 45984
+        }
+      ],
+      "total_upload_calls": 3,
+      "total_upload_bytes": 138976
+    },
+    {
+      "color": "#FF8855",
+      "generation": 47,
+      "presentations": [
+        {
+          "serial": 18,
+          "upload_calls": 1,
+          "upload_bytes": 45984
+        },
+        {
+          "serial": 19,
+          "upload_calls": 0,
+          "upload_bytes": 0
+        },
+        {
+          "serial": 20,
+          "upload_calls": 1,
+          "upload_bytes": 47008
+        },
+        {
+          "serial": 21,
+          "upload_calls": 1,
+          "upload_bytes": 45984
+        }
+      ],
+      "total_upload_calls": 3,
+      "total_upload_bytes": 138976
+    }
+  ]
+}

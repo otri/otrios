@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "architecture": "armv7 Linux",
+  "release": "56307a589d7c7e8f1ecee83063e593d34b2bf4a039d6a733f28056602f632d68",
+  "probe_sha256": "b221730557da9b5defd769bdf2eed167f22b9b603b09a18dc121bfd3418287c1",
+  "burst": {
+    "changed_resources": 1,
+    "changed_source_vertex_bytes": 36784,
+    "composition_dropped": 0,
+    "composition_phases": {
+      "client.layout.resolve": 1,
+      "layout.update_content": 1,
+      "render.retained.compose": 2,
+      "render.retained.cull": 2,
+      "render.retained.mesh.paint": 1,
+      "render.retained.normalize": 2,
+      "render.retained.rebuild": 2
+    },
+    "held_dropped": 0,
+    "held_phases": {},
+    "held_us": 94964,
+    "measurement": "pointer samples with ticks but without scene/composition queries, then one core composition; not physical input or GLES presentation",
+    "normalized_values_restored": true,
+    "one_composition_us": 3422,
+    "phase": "slider-burst",
+    "samples": 100
+  },
+  "final_confirmed": true,
+  "final_generation": 49,
+  "final_state_controls": {
+    "Audio enabled": {
+      "checked": true,
+      "control_percent": null,
+      "node": 38,
+      "normalized": 1000
+    },
+    "Brightness": {
+      "checked": false,
+      "control_percent": 62.0,
+      "node": 49,
+      "normalized": 620
+    },
+    "Display enabled": {
+      "checked": false,
+      "control_percent": null,
+      "node": 55,
+      "normalized": 0
+    },
+    "Volume": {
+      "checked": false,
+      "control_percent": 40.0,
+      "node": 32,
+      "normalized": 400
+    }
+  }
+}

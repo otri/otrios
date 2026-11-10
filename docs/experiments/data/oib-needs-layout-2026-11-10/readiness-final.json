@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "release": "56307a589d7c7e8f1ecee83063e593d34b2bf4a039d6a733f28056602f632d68",
+  "state_protocol": "otrios-canvas-sync-v30",
+  "health": "ok",
+  "ready": {
+    "ui_ref": "app:oib-designer/ui",
+    "release": "56307a589d7c7e8f1ecee83063e593d34b2bf4a039d6a733f28056602f632d68",
+    "runtime_release": "56307a589d7c7e8f1ecee83063e593d34b2bf4a039d6a733f28056602f632d68",
+    "state_confirmed": true,
+    "stream_ready": true,
+    "input_busy": false,
+    "pending_commands": 0,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "touch_devices": 1,
+    "touch_calibrated": true,
+    "scanout_format": "RGB565",
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ]
+  },
+  "services": {
+    "otrios-authority": "active",
+    "otrios-dashboard-direct": "active",
+    "otrios-tunnel": "active",
+    "otrios-monitoring.timer": "active"
+  },
+  "collector_resumed": true,
+  "collector_result": "success",
+  "pixels_exported": false,
+  "authority_restarted": false,
+  "data_restored": false,
+  "elapsed_seconds": 12.919
+}

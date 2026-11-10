@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [OIB content invalidation and layout — 2026-11-10](oib-needs-layout-2026-11-10.md):
+  deferred slider updates, dependency-qualified content updates, input ownership,
+  inspector identity and exact boundary encoding reuse.
+
 - [OIB resource reuse — 2026-11-10](oib-resource-reuse-2026-11-10.md):
   immutable import reuse, retained geometry resources, signed native/Web delivery
   and measured Apply/upload behavior.

@@ -1,0 +1,436 @@
+{
+  "format": "otrios-oib-hotspots-analysis-v1",
+  "native_pan_origin_unix_us": 1794268559312043,
+  "trials": [
+    {
+      "color": "#5588FF",
+      "generation": 46,
+      "serial": 16,
+      "total_sample_to_present_ms": 256.562,
+      "poll_observed_ms": 263.75,
+      "segments_ms": {
+        "touch_hold": 80.387,
+        "up_input_queue": 2.853,
+        "apply_handler": 12.509,
+        "handler_to_offer": 0.986,
+        "offer_to_response_arrival": 69.99,
+        "receive_queue": 0.256,
+        "client_receive": 42.663,
+        "compose": 7.565,
+        "frame_metadata": 0.131,
+        "produced_to_renderer_prepare": 1.17,
+        "renderer_prepare_upload": 1.272,
+        "gl_draw_submit": 10.819,
+        "present_wait": 24.078
+      },
+      "unassigned_ms": 1.8830000000000382,
+      "native_phases": {
+        "layout.encode": {
+          "calls": 1,
+          "inclusive_ms": 11.103731,
+          "exclusive_ms": 11.103731
+        },
+        "render.retained.cull": {
+          "calls": 6,
+          "inclusive_ms": 10.297566,
+          "exclusive_ms": 10.297566
+        },
+        "native.compose": {
+          "calls": 3,
+          "inclusive_ms": 29.924948,
+          "exclusive_ms": 10.070941
+        },
+        "oib.validate": {
+          "calls": 1,
+          "inclusive_ms": 25.636872,
+          "exclusive_ms": 7.919027
+        },
+        "render.retained.mesh.paint": {
+          "calls": 2,
+          "inclusive_ms": 5.017533,
+          "exclusive_ms": 5.017533
+        },
+        "client.designer.rebuild": {
+          "calls": 1,
+          "inclusive_ms": 6.572406,
+          "exclusive_ms": 4.906409
+        },
+        "oib.info": {
+          "calls": 2,
+          "inclusive_ms": 5.207116,
+          "exclusive_ms": 4.503909
+        },
+        "oib.compiled.miss": {
+          "calls": 1,
+          "inclusive_ms": 16.183972,
+          "exclusive_ms": 2.799703
+        },
+        "oib.values": {
+          "calls": 8,
+          "inclusive_ms": 2.775785,
+          "exclusive_ms": 2.775785
+        },
+        "oib.instances.metadata": {
+          "calls": 2,
+          "inclusive_ms": 2.606911,
+          "exclusive_ms": 2.606911
+        },
+        "render.retained.normalize": {
+          "calls": 6,
+          "inclusive_ms": 2.525828,
+          "exclusive_ms": 2.525828
+        },
+        "client.mount.activate_ui": {
+          "calls": 1,
+          "inclusive_ms": 4.185992,
+          "exclusive_ms": 2.471288
+        },
+        "client.receive": {
+          "calls": 1,
+          "inclusive_ms": 42.631093,
+          "exclusive_ms": 1.892623
+        },
+        "state.adapter.receive": {
+          "calls": 1,
+          "inclusive_ms": 27.413702,
+          "exclusive_ms": 1.77683
+        },
+        "oib.compiled.paint": {
+          "calls": 1,
+          "inclusive_ms": 12.461729,
+          "exclusive_ms": 1.357998
+        },
+        "client.layout.resolve": {
+          "calls": 2,
+          "inclusive_ms": 2.034954,
+          "exclusive_ms": 1.3542049999999999
+        },
+        "oib.compiled.shared_encoding": {
+          "calls": 1,
+          "inclusive_ms": 0.92254,
+          "exclusive_ms": 0.92254
+        },
+        "native.outgoing": {
+          "calls": 17,
+          "inclusive_ms": 0.9065,
+          "exclusive_ms": 0.9065
+        },
+        "render.retained.rebuild": {
+          "calls": 6,
+          "inclusive_ms": 5.891947999999999,
+          "exclusive_ms": 0.8744149999999999
+        },
+        "oib.compiled.hit": {
+          "calls": 1,
+          "inclusive_ms": 0.810248,
+          "exclusive_ms": 0.810248
+        },
+        "layout.resolve": {
+          "calls": 1,
+          "inclusive_ms": 0.680749,
+          "exclusive_ms": 0.680749
+        },
+        "oib.structural_root": {
+          "calls": 1,
+          "inclusive_ms": 0.653041,
+          "exclusive_ms": 0.653041
+        },
+        "render.retained.compose": {
+          "calls": 6,
+          "inclusive_ms": 19.228967,
+          "exclusive_ms": 0.513625
+        },
+        "oib.compiled": {
+          "calls": 2,
+          "inclusive_ms": 18.08126,
+          "exclusive_ms": 0.441875
+        },
+        "client.oib_view.rebuild": {
+          "calls": 2,
+          "inclusive_ms": 5.308616000000001,
+          "exclusive_ms": 0.1015
+        },
+        "native.state_receive": {
+          "calls": 1,
+          "inclusive_ms": 42.706051,
+          "exclusive_ms": 0.074958
+        }
+      },
+      "authority_phases": {
+        "authority.store.sync": {
+          "calls": 1,
+          "inclusive_ms": 24.464374,
+          "exclusive_ms": 24.464374
+        },
+        "oib.validate": {
+          "calls": 1,
+          "inclusive_ms": 20.481673,
+          "exclusive_ms": 17.763345
+        },
+        "oib.structural_root": {
+          "calls": 4,
+          "inclusive_ms": 7.596154,
+          "exclusive_ms": 7.596154
+        },
+        "oib.activate": {
+          "calls": 1,
+          "inclusive_ms": 31.64082,
+          "exclusive_ms": 2.701994
+        },
+        "state.document.receive": {
+          "calls": 1,
+          "inclusive_ms": 34.793731,
+          "exclusive_ms": 2.170579
+        },
+        "oib.compiled.hit": {
+          "calls": 2,
+          "inclusive_ms": 1.798413,
+          "exclusive_ms": 1.798413
+        },
+        "authority.process": {
+          "calls": 1,
+          "inclusive_ms": 63.134932,
+          "exclusive_ms": 1.701872
+        },
+        "oib.values": {
+          "calls": 4,
+          "inclusive_ms": 1.225582,
+          "exclusive_ms": 1.225582
+        },
+        "authority.store.append": {
+          "calls": 1,
+          "inclusive_ms": 26.020121,
+          "exclusive_ms": 1.223831
+        },
+        "oib.write": {
+          "calls": 1,
+          "inclusive_ms": 32.623152,
+          "exclusive_ms": 0.982332
+        },
+        "authority.updates": {
+          "calls": 2,
+          "inclusive_ms": 0.704082,
+          "exclusive_ms": 0.704082
+        },
+        "oib.compiled": {
+          "calls": 2,
+          "inclusive_ms": 2.911703,
+          "exclusive_ms": 0.555332
+        },
+        "authority.store.journal_delta": {
+          "calls": 1,
+          "inclusive_ms": 0.331916,
+          "exclusive_ms": 0.331916
+        }
+      },
+      "base_triangle_vertices": 1566,
+      "base_glyph_vertices": 320,
+      "uploaded_vertex_bytes": 45984
+    },
+    {
+      "color": "#FF8855",
+      "generation": 47,
+      "serial": 21,
+      "total_sample_to_present_ms": 230.102,
+      "poll_observed_ms": 239.784,
+      "segments_ms": {
+        "touch_hold": 80.355,
+        "up_input_queue": 3.857,
+        "apply_handler": 12.215,
+        "handler_to_offer": 0.997,
+        "offer_to_response_arrival": 58.279,
+        "receive_queue": 0.408,
+        "client_receive": 26.575,
+        "compose": 7.31,
+        "frame_metadata": 0.095,
+        "produced_to_renderer_prepare": 2.023,
+        "renderer_prepare_upload": 0.879,
+        "gl_draw_submit": 9.301,
+        "present_wait": 26.274
+      },
+      "unassigned_ms": 1.5340000000000487,
+      "native_phases": {
+        "native.compose": {
+          "calls": 3,
+          "inclusive_ms": 20.287716,
+          "exclusive_ms": 9.391069
+        },
+        "oib.validate": {
+          "calls": 1,
+          "inclusive_ms": 9.148401,
+          "exclusive_ms": 7.014863
+        },
+        "render.retained.mesh.paint": {
+          "calls": 2,
+          "inclusive_ms": 5.127491,
+          "exclusive_ms": 5.127491
+        },
+        "client.designer.rebuild": {
+          "calls": 1,
+          "inclusive_ms": 6.966447,
+          "exclusive_ms": 5.044658
+        },
+        "oib.info": {
+          "calls": 2,
+          "inclusive_ms": 5.346533,
+          "exclusive_ms": 4.645951
+        },
+        "render.retained.normalize": {
+          "calls": 6,
+          "inclusive_ms": 2.884578,
+          "exclusive_ms": 2.884578
+        },
+        "oib.instances.metadata": {
+          "calls": 2,
+          "inclusive_ms": 2.8694129999999998,
+          "exclusive_ms": 2.8694129999999998
+        },
+        "oib.values": {
+          "calls": 8,
+          "inclusive_ms": 2.641038,
+          "exclusive_ms": 2.641038
+        },
+        "client.mount.activate_ui": {
+          "calls": 1,
+          "inclusive_ms": 3.996993,
+          "exclusive_ms": 2.252246
+        },
+        "client.receive": {
+          "calls": 1,
+          "inclusive_ms": 26.537245,
+          "exclusive_ms": 1.899913
+        },
+        "state.adapter.receive": {
+          "calls": 1,
+          "inclusive_ms": 10.813522,
+          "exclusive_ms": 1.665121
+        },
+        "oib.compiled.hit": {
+          "calls": 2,
+          "inclusive_ms": 1.602997,
+          "exclusive_ms": 1.602997
+        },
+        "client.layout.resolve": {
+          "calls": 2,
+          "inclusive_ms": 2.008121,
+          "exclusive_ms": 1.3824969999999999
+        },
+        "render.retained.rebuild": {
+          "calls": 6,
+          "inclusive_ms": 6.055573000000001,
+          "exclusive_ms": 0.928082
+        },
+        "native.outgoing": {
+          "calls": 13,
+          "inclusive_ms": 0.8537069999999999,
+          "exclusive_ms": 0.8537069999999999
+        },
+        "render.retained.cull": {
+          "calls": 6,
+          "inclusive_ms": 0.6903739999999999,
+          "exclusive_ms": 0.6903739999999999
+        },
+        "layout.resolve": {
+          "calls": 1,
+          "inclusive_ms": 0.625624,
+          "exclusive_ms": 0.625624
+        },
+        "oib.structural_root": {
+          "calls": 1,
+          "inclusive_ms": 0.617458,
+          "exclusive_ms": 0.617458
+        },
+        "render.retained.compose": {
+          "calls": 6,
+          "inclusive_ms": 10.126357,
+          "exclusive_ms": 0.495832
+        },
+        "oib.compiled": {
+          "calls": 2,
+          "inclusive_ms": 2.63462,
+          "exclusive_ms": 0.43254
+        },
+        "client.oib_view.rebuild": {
+          "calls": 2,
+          "inclusive_ms": 5.466115,
+          "exclusive_ms": 0.11958200000000001
+        },
+        "native.state_receive": {
+          "calls": 1,
+          "inclusive_ms": 26.620954,
+          "exclusive_ms": 0.083709
+        }
+      },
+      "authority_phases": {
+        "authority.store.sync": {
+          "calls": 1,
+          "inclusive_ms": 23.435668,
+          "exclusive_ms": 23.435668
+        },
+        "oib.validate": {
+          "calls": 1,
+          "inclusive_ms": 12.386187,
+          "exclusive_ms": 8.643235
+        },
+        "state.document.receive": {
+          "calls": 1,
+          "inclusive_ms": 26.256663,
+          "exclusive_ms": 5.216741
+        },
+        "oib.structural_root": {
+          "calls": 4,
+          "inclusive_ms": 3.201327,
+          "exclusive_ms": 3.201327
+        },
+        "oib.activate": {
+          "calls": 1,
+          "inclusive_ms": 19.931882,
+          "exclusive_ms": 3.061037
+        },
+        "oib.compiled.hit": {
+          "calls": 2,
+          "inclusive_ms": 2.667286,
+          "exclusive_ms": 2.667286
+        },
+        "oib.values": {
+          "calls": 4,
+          "inclusive_ms": 1.729289,
+          "exclusive_ms": 1.729289
+        },
+        "authority.process": {
+          "calls": 1,
+          "inclusive_ms": 53.654907,
+          "exclusive_ms": 1.675621
+        },
+        "authority.store.append": {
+          "calls": 1,
+          "inclusive_ms": 25.078915,
+          "exclusive_ms": 1.394747
+        },
+        "oib.write": {
+          "calls": 1,
+          "inclusive_ms": 21.039922,
+          "exclusive_ms": 1.10804
+        },
+        "authority.updates": {
+          "calls": 2,
+          "inclusive_ms": 0.743166,
+          "exclusive_ms": 0.743166
+        },
+        "oib.compiled": {
+          "calls": 2,
+          "inclusive_ms": 4.022368,
+          "exclusive_ms": 0.6297079999999999
+        },
+        "authority.store.journal_delta": {
+          "calls": 1,
+          "inclusive_ms": 0.2485,
+          "exclusive_ms": 0.2485
+        }
+      },
+      "base_triangle_vertices": 1566,
+      "base_glyph_vertices": 320,
+      "uploaded_vertex_bytes": 45984
+    }
+  ]
+}

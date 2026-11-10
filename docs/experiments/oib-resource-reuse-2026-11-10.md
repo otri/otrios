@@ -2,6 +2,7 @@
 # OIB resource reuse — 2026-11-10
 
 This follows [incremental presentation](oib-incremental-presentation-2026-11-10.md).
+The next pass is [content invalidation and layout](oib-needs-layout-2026-11-10.md).
 Implementation and focused checks are complete; deployment evidence follows below.
 
 The normalized binding now retains its resolved baseline graph and canonical

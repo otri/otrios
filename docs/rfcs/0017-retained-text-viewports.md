@@ -50,6 +50,15 @@ remain unchanged, with at most 32 resources per layer and a conservative 16 MiB
 combined UI budget. Oversized, document and reflow candidates retain the compatible
 monolithic path. Painter order, clips and semantic input identities remain intact.
 
+[Content invalidation and identity reuse](../experiments/oib-needs-layout-2026-11-10.md)
+separate geometry ownership from semantic node IDs. At most one prior painter
+ordinal is considered when IDs change, and exact normalized primitive geometry
+and scale must match. Current IDs, responders and semantics remain authoritative;
+unchanged ordered meshes may retain their GPU resource. Fixed-bound content and
+placement changes can update a retained Scene at presentation, while size,
+visibility and uncertain dependency changes request full layout. Captured input
+may use a separate immutable tree only under an explicit stable-bounds proof.
+
 ## Coverage sampling
 
 The disposable 1,024² RGBA8 atlas remains bounded at 4 MiB and 4,096 entries.

@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "release": "56307a589d7c7e8f1ecee83063e593d34b2bf4a039d6a733f28056602f632d68",
+  "measurement": "software evdev touch-down to native confirmed presentation; 80ms touch hold and 5ms polling; not photon latency",
+  "original_property": "Accent: #FF8855 (override)",
+  "final_property": "Accent: #FF8855 (override)",
+  "records": [
+    {
+      "color": "#5588FF",
+      "touch_down_unix_us": 1794268625670948,
+      "touch_to_confirmed_presented_ms": 274.735,
+      "generation": 48
+    },
+    {
+      "color": "#FF8855",
+      "touch_down_unix_us": 1794268626044307,
+      "touch_to_confirmed_presented_ms": 235.705,
+      "generation": 49
+    }
+  ],
+  "live_state_reset": false,
+  "input_idle": true
+}
