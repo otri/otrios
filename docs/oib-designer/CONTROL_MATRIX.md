@@ -86,7 +86,7 @@ failure cases. Repeat broader checks for concrete new risks, not mechanically.
 | F05 Long inspector | Q01/Q05/Q11 | Retained scrolling, software keyboard, long text and scene budgets |
 | F06 Continuous data | Q04/Q09/Q14 | Capture, multi-value bounds, samples, readouts and paint-only updates |
 
-User narratives are J01–J24 in [UX_JOURNEYS.md](UX_JOURNEYS.md). F01 is the initial
+User narratives are J01–J27 in [UX_JOURNEYS.md](UX_JOURNEYS.md). F01 is the initial
 teaching path. F02/F04 force empty/error/destructive outcomes. F03/F05 expose editor
 navigation and input friction. F06 is where performance evidence must distinguish
 input→model, layout, upload, present and perceived response.

@@ -1,0 +1,38 @@
+✔ catalog lifecycle: Text (1.71725ms)
+✔ catalog lifecycle: Button (0.279042ms)
+✔ catalog lifecycle: Toggle (0.273917ms)
+✔ catalog lifecycle: Slider (0.253458ms)
+✔ catalog lifecycle: TextField (0.495125ms)
+✔ catalog lifecycle: NumberField (0.253166ms)
+✔ catalog lifecycle: Select (0.174292ms)
+✔ catalog lifecycle: Segments (0.180625ms)
+✔ catalog lifecycle: Progress (0.563542ms)
+✔ catalog lifecycle: Tabs (0.353041ms)
+✔ catalog lifecycle: List (0.250708ms)
+✔ catalog lifecycle: Dialog (0.165416ms)
+✔ catalog lifecycle: Stepper (0.143875ms)
+✔ catalog lifecycle: RangeSlider (0.346625ms)
+✔ catalog lifecycle: Menu (0.166959ms)
+✔ catalog lifecycle: Status (0.156209ms)
+✔ LabelledSlider from blank exposes numeric value and preserves order (0.446708ms)
+✔ draft isolation, discard and undo/redo (0.10875ms)
+✔ in-use definition delete blocked, retire preserves references (0.352584ms)
+✔ remove instance then definition does not cascade (0.185417ms)
+✔ cycles and typed exposure rejected without mutation (0.137625ms)
+✔ stale Apply preserves candidate and confirmed data (0.1135ms)
+✔ invalid layout rejected before commit (0.067625ms)
+✔ publish separate from apply; local overrides reset to new baseline (0.133875ms)
+✔ last definition deletion stages, applies and leaves usable empty library (0.143666ms)
+✔ rename collision rejected; retirement requires Apply (0.095167ms)
+✔ axis sizing modes and fixed dimensions validate independently (0.888083ms)
+✔ pending deletion rejects unrelated edits and undo resumes authoring (0.095583ms)
+✔ layer name does not replace Text content (0.064833ms)
+✔ range endpoint requires pair; composite exposure cannot guess Text (0.205875ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.603125

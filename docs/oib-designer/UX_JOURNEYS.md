@@ -103,6 +103,9 @@ before leaving the component. A breadcrumb shows the full nested definition path
 | J22 | Change workspace/preview size | Responsive editor without authored mutation |
 | J23 | Handle capability/resource limits | Actionable admission failures |
 | J24 | First-use and catalog progression | Small complete flows instead of a tool tour |
+| J25 | Preset lifecycle | Explicit insertion defaults, existing-instance semantics |
+| J26 | Style/variable lifecycle | Create/fork/retire/delete with typed references |
+| J27 | Visibility lifecycle | Hidden/Collapsed versus deletion and opacity |
 
 ## J01. Open the library and workspace
 
@@ -888,6 +891,130 @@ restart a failed step without resetting the library or unrelated app state.
 **Acceptance.** A new author can finish one useful composed control and understand
 Definition versus Instance, Apply versus Publish, and preview versus business
 state. The second control can be built without the guide.
+
+## J25. Create and maintain insertion presets
+
+**Entry/preconditions.** A component definition has an admitted exposed API. The
+author wants named insertion defaults, such as Volume and Brightness, without
+forking the definition. A preset is an insertion recipe, not another definition.
+
+**Steps and feedback.**
+
+1. Library → selected component → New preset. Enter a unique name and choose the
+   exact owning definition. The editor lists its exposed properties and compatible
+   styles; private internal fields are not preset endpoints.
+2. Set only the desired assignments. Leave other fields inherited from the
+   definition. Preview both modes and a sample instance without changing app data.
+3. Apply creates the preset in the working document. Publish/export is separate.
+4. Inserting the preset creates a new linked component instance, copying the
+   preset's authored assignments once. Copy expressions/references, not today's
+   resolved colors. Later shared styles/variables still resolve through their refs.
+5. Editing preset defaults affects **future insertion only**. Existing instances
+   keep their assignments. The editor states this before Apply; an optional
+   “Update selected instances” is a separate reviewed local edit with explicit
+   field mappings and override preservation, not automatic propagation.
+6. Duplicate creates a fresh preset ID. Fork an imported preset into an authorized
+   local owner, retaining admitted definition/style refs or explicitly remapping
+   them. Retirement removes it from new insertion; unretire is explicit.
+7. Delete an unexported local preset after reviewing remaining insertion/export
+   references. Historical instance provenance is informational, not a live preset
+   dependency. Existing instances still reference their component/style and survive.
+   Public export removal takes breaking admission even if locally unused.
+
+**Saved effects versus preview.** Saved preset assignments reference stable typed
+properties. Each instance owns its copied assignments, optionally with informational
+preset origin. Preset edits never rewrite existing instances or business values.
+
+**Cancel/back/error.** Cancel/Discard leaves the old preset. Definition contract
+changes require explicit missing-field/type repair. Deleted style/variable refs
+cannot silently become literals. Incompatible mappings or stale Apply reject the
+complete candidate, retaining the local proposal for correction.
+
+**Acceptance.** Create → insert A → change preset → insert B proves A retains its
+old assignments and B gets new defaults. Both still receive changes from shared
+style references. Duplicate/fork identities differ; retire/delete leaves A/B valid.
+
+## J26. Create and maintain styles and variables
+
+**Entry/preconditions.** The author has write permission for a design system, or
+can fork an imported source into an authorized local system. Controls declare a
+compatible style contract. Color variables are the initial supported variable type.
+
+**Steps and feedback.**
+
+1. Library → Variables → New color variable. Enter a unique descriptive name and
+   both Light/Dark values. Initializing both from one color is explicit. Preview
+   resolves the pair but does not write another client's mode preference.
+2. Apply creates a stable variable ID. Rename changes its display name only.
+   Duplicate creates a new ID/pair; no alias chain is invented.
+3. Library → Styles → New style. Select a compatible contract such as
+   button.appearance.v1, name it, and populate required default fields from
+   literals or typed variable refs. An incomplete required field blocks Apply.
+4. Add supported color-state patches through named scopes. A state patch does not
+   introduce another layout or behavior definition. Preview default, selected,
+   pressed, disabled and independent focus in both modes, including contrast.
+5. Apply, then choose the new style on a component. The impact view shows local
+   known occurrences and surviving instance overrides. Export/publish remains
+   separate from the shared document edit.
+6. Duplicate/fork style creates a new style ID. By default it preserves references
+   to the same admitted variables. An explicit “Copy variables too” remaps owned
+   variable IDs in one candidate; it never copies only resolved Dark colors.
+7. Retire a style/variable from new picks while retaining resolution of existing
+   references. Unretire restores discoverability. Deleting a referenced record is
+   blocked until explicit replacement repairs every local reference in the same
+   batch. A required published export cannot be removed compatibly.
+
+**Saved effects versus preview.** Stable IDs and exact owners identify records.
+Field source references, state patches and mode pairs save atomically. Shared
+variable changes reach their bound uses; instance literals remain local. Retirement
+is discoverability metadata and does not change existing resolved values.
+
+**Cancel/back/error.** Dirty navigation offers Apply/Discard/Stay. Unknown owner,
+wrong variable type, missing mode, duplicate name, incompatible style contract,
+reference budget or stale generation is a specific rejection. Read-only imports
+are inspected/forked, never edited by renaming their labels.
+
+**Acceptance.** Create pair → bind style → use twice → rename variable → update
+both modes → override one occurrence → reset proves identity/inheritance. Duplicate
+with shared versus copied variables has the displayed effect. Retire keeps old
+uses; attempted in-use deletion blocks without dropping references or state patches.
+
+## J27. Change visibility without deleting content
+
+**Entry/preconditions.** Visibility capability is admitted for the selected node.
+It exposes Visible, Hidden (keep space) and Collapsed (remove from flow). Before
+that capability is qualified, the field is explicitly unavailable with a reason.
+
+**Steps and feedback.**
+
+1. Select the node in Layers. Choose Hidden; its bounds remain in layout while
+   paint, hit targets and semantic focusability disappear from the Test preview.
+   Layers retains a Hidden marker and the same source identity.
+2. Choose Collapsed; siblings reflow as though the node had no flow footprint.
+   Its source, slot content, app values, overrides and connections remain intact.
+3. Choose Visible; the same IDs and retained values return. Focus is not forcibly
+   stolen from the user's current valid control.
+4. Apply confirms the source change. A running preview gesture on a now-hidden
+   control receives Cancel before the candidate's input map activates. Focus moves
+   to the nearest visible eligible owner/control, otherwise the canvas.
+5. Inspect opacity separately. Zero opacity changes paint, not layout/input. Warn
+   when an ordinary interactive control becomes invisible. Explicit modal input
+   barriers remain barriers until the modal lifecycle deliberately dismisses them.
+
+**Saved effects versus preview.** Visibility is a typed source property, independent
+of enabled, opacity and color modes. State simulation is local; changing the saved
+visibility field is a draft edit. No class/instance deletion occurs.
+
+**Cancel/back/error.** Undo/Discard restores visibility and layout. A required slot
+cannot be invalidated by pretending a collapsed child is deleted. Unsupported
+visibility or inaccessible focus fallback is diagnosed before activation. Never
+partially remove a modal barrier while leaving background controls active.
+
+**Acceptance.** Hidden retains outer layout dimensions; Collapsed reflows; reveal
+retains IDs and business values. Hidden controls cannot receive hits/focus. Capture
+cancels once, modal focus returns correctly, and opacity-zero barrier input remains
+explicit. These require real runtime fixtures; they are not implemented by the
+current HTML prototype.
 
 ## 4. Cross-journey design review checklist
 

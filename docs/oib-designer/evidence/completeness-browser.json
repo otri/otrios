@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-11",
+  "tool": "html_preview",
+  "scope": "Prototype completeness follow-up; synthetic DOM interactions, not native runtime qualification",
+  "width": 1280,
+  "contentHeight": 782,
+  "capturedHeight": 782,
+  "consoleMessages": [
+    {
+      "level": "info",
+      "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":28,\"assertions\":180,\"passed\":28,\"failed\":[],\"viewport\":{\"width\":1280,\"height\":800},\"shellHeight\":765.78125,\"overflow\":false}"
+    }
+  ],
+  "screenshot": {
+    "mimeType": "image/png",
+    "width": 1280,
+    "height": 782
+  }
+}

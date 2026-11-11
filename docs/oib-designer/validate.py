@@ -11,7 +11,7 @@ for path in files:
             continue
         assert (path.parent / target.split('#')[0]).exists(), (path, target)
 journeys = re.findall(r'^## J(\d\d)\.', (root / 'UX_JOURNEYS.md').read_text(), re.M)
-assert journeys == [f'{i:02}' for i in range(1, 25)], journeys
+assert journeys == [f'{i:02}' for i in range(1, 28)], journeys
 technical = re.findall(r'^## T(\d\d)\.', (root / 'TECHNICAL_DESIGN.md').read_text(), re.M)
 assert technical == [f'{i:02}' for i in range(1, 14)], technical
 matrix = re.findall(r'^\| Q(\d\d) \|', (root / 'CONTROL_MATRIX.md').read_text(), re.M)
@@ -22,4 +22,4 @@ for marker, name in [('MODEL', 'model.cjs'), ('UI', 'ui.js')]:
     expected = expected.replace(f'/* {marker} */', (prototype / name).read_text())
 assert (prototype / 'index.html').read_text() == expected, 'Rebuild prototype'
 assert 'of 96. It has no inserted' not in (root / 'UX_JOURNEYS.md').read_text()
-print(f'PASS: local file links in {len(files)} documents, J01–J24, T01–T13, Q01–Q16, reproducible HTML, blank-state consistency')
+print(f'PASS: local file links in {len(files)} documents, J01–J27, T01–T13, Q01–Q16, reproducible HTML, blank-state consistency')

@@ -104,6 +104,7 @@ stays visible as a draft; never convert a half-typed number into zero.
 | Layout item | Width/height Fixed/Hug/Fill, fixed lengths, per-axis min/max |
 | Auto Layout | Horizontal/Vertical, alignment, packed/space-between, gap, padding |
 | Overflow | Clip, supported scroll axis, definite viewport requirement |
+| Visibility | Visible/Hidden/Collapsed, independent of enabled and opacity; explicit capability gate |
 | Style | Compatible named style picker; source and contract |
 | Appearance | Background/text/icon/stroke, opacity, radius; precise per-field source |
 | Variables | Bind compatible color or literal, owner/name/mode pair editor |
@@ -124,8 +125,11 @@ retained scroll/selection anchors must survive virtualized row changes.
 
 ## S06. Layout control details
 
-Sizing modes are per axis, never a combined mystery “fit” switch. Fixed reveals a
-length input; Hug/Fill show measured output read-only. Min/max is an optional bounds
+Sizing modes are per axis, never a combined mystery “fit” switch. Fixed reveals an independent
+length input on **both** axes: Fixed W and Fixed H. Hug/Fill show measured output
+read-only; retained Fixed lengths are disabled outside Fixed mode and restored
+when returning. Filling height requires a definite parent viewport just as filling
+width requires a definite parent width. There is no hard-coded Fill or Fixed H. Min/max is an optional bounds
 disclosure. Parent padding offers linked X/Y initially, with independent edges as
 an explicit toggle. Unlinking copies the current values once; relinking requires
 choosing the common value rather than silently dropping asymmetry.
@@ -220,3 +224,12 @@ reference flow includes them; use only the existing OTriOS authorization model.
 A complete task ends with the intended confirmed result, recognizable success,
 and an available next action. A visually attractive screen without cancellation,
 empty state, error handling, input semantics and update behavior is not qualified.
+
+## S11. Coverage rule for future inspector changes
+
+Every exposed concept needs a field → source address → validation → preview →
+Apply → reload/reset → test path. Cross-check width/height, min/max, leading/trailing
+edges, Light/Dark, definition/instance, default/state and enabled/disabled as pairs.
+A disabled capability with an explanation is preferable to a working-looking
+control with a hidden constant. Read [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md)
+for the first audit and explicit prototype exclusions.

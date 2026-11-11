@@ -53,7 +53,7 @@ Node {
   property_sources, style_use?, semantics?, action_routes?
 }
 Instance {
-  id, definition_ref, preset_ref?, owner, visual_parent, slot?,
+  id, definition_ref, preset_origin?, owner, visual_parent, slot?,
   local_property_overrides, local_style_overrides
 }
 DefinitionRef = Local(definition_id) | Imported(library_id, export_id, exact_revision)
@@ -78,6 +78,23 @@ an instance override or deliberate navigation to its owning definition; it never
 silently mutates the imported body. Make local copy/fork creates new definition
 identities and explicit mappings, without claiming ownership of an imported ID.
 
+### T02.1 Preset defaults and reusable-record lifecycle
+
+Presets are insertion recipes: definition reference plus typed exposed-property/
+style assignments. Insertion copies those expressions/refs into the new instance
+once; later preset edits affect future insertions only. Optional preset_origin is
+informational provenance, not a live dependency. Shared style/variable refs inside
+the copied assignments still resolve normally. Updating selected existing instances
+requires an explicit mapped candidate, never implicit propagation of preset edits.
+
+New/duplicate/fork definitions, presets, styles and variables receive fresh stable
+IDs in their authorized owner. Rename preserves identity. Retirement of a reusable
+record affects insertion/picking only; current refs remain resolvable. Deletion is
+blocked for live local refs unless repaired atomically, and exported-contract
+removal still requires new admission. Duplicate styles preserve variable refs by
+default; copying variables is an explicit ID-remapping option. See J25/J26 for
+complete narratives. Concrete lifecycle metadata joins the versioned schema gate.
+
 ## T03. Layout authoring contract
 
 ### T03.1 Core fields
@@ -96,7 +113,10 @@ minimum is zero, absent maximum is the admitted finite coordinate bound. Reject
 negative padding, invalid bounds and min > max. Core gap is nonnegative; overlapping
 items require explicit Free placement rather than negative-gap surprises. Text
 uses its admitted measured intrinsic metrics and wraps only when a finite width
-is supplied. An empty container's Hug size is padding plus its minimum.
+is supplied. Bounds apply to the outer border box. An empty container's Hug size is the
+clamped padding/stroke extent: max(minimum, intrinsic content + padding + stroke),
+subject to max >= min. A blank root with min-height 48, no stroke and vertical
+padding 16+16 is therefore 48 high, not 80. Editor drop-zone text is excluded.
 
 No layout property implies semantic interactivity. A 16-unit icon can be inside a
 48-unit control target. Target enlargement must remain within its owning control
@@ -164,7 +184,32 @@ geometry are admitted together. Rotation is not a workaround for flow direction.
 Free positioning is core; general constraints, alignment-to-arbitrary-sibling,
 baseline constraint graphs and absolute percentage anchoring are deferred.
 
-### T03.4 Wrap and grid extension gates
+### T03.4 Visibility, opacity and interaction
+
+Proposed source visibility is Visible, Hidden or Collapsed, independent of enabled
+and opacity. Visible participates normally. Hidden retains measured layout space
+but emits no paint/hit targets and cannot receive focus. Collapsed is excluded from
+flow measurement/placement and emits no paint/hit targets; stable source IDs, app
+values and instance overrides remain. Revealing it restores those identities.
+Visibility changes never delete nodes or disconnect app bindings.
+
+Changing to Hidden/Collapsed cancels that occurrence's captured preview gesture
+and moves focus to the nearest visible enabled ancestor/control, otherwise the
+canvas. Selection moves to its nearest visible owner; Layers still lists the node
+with its visibility state so it remains editable. Removing a whole modal routes
+through the modal lifecycle and restores its prior valid focus target. Do not
+accidentally expose a background interaction during a partially updated scene.
+
+Opacity affects paint alone; zero opacity does not implicitly remove layout or
+input. This preserves explicit invisible modal/input barriers. Warn about an
+invisible ordinary interactive control, and provide visibility or input policy as
+the intentional fix. Decorative nodes continue to require explicit pass-through.
+Hidden requires paint/input/semantic invalidation; Collapsed additionally requires
+layout. Neither can use the existing Color-only paint proof. Visibility is a typed
+source property, not an RFC 0037 color-state patch or a color variable. Its concrete
+codec and focus/input conformance must be qualified before enabling its inspector.
+
+### T03.5 Wrap and grid extension gates
 
 Core Horizontal/Vertical must be complete before enabling Wrap/Grid. Their entries
 can be shown as unavailable with a concrete explanation, not as controls that save

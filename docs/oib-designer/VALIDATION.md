@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prototype validation and implementation progress
 
-Date: 2026-11-11. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Date: 2026-11-11. Latest results: **V05 completeness audit** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
 Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
 acceptance is unchanged. This task made no live deployment or state changes.
 
@@ -113,3 +113,29 @@ Next concrete task is M1 contract/measurement fixtures, followed by M2 atomic
 working-copy Apply. Finalize mixed property/structural transactions and serialized
 addresses before exposing UI promises. This package supplies the restart guide,
 journey IDs, technical gates and representative ledger needed to resume that work.
+
+## V05. Completeness audit follow-up
+
+The Fixed-W-only finding triggered [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md),
+which supersedes any implication that V01–V04 established inspector completeness.
+The design now has **27 journeys**, including preset/style/variable lifecycle and
+visibility semantics. Prototype visibility, complete style resolution and nested
+child layout remain explicitly unimplemented.
+
+The corrected prototype adds independent Fixed W/H, measured sizes, finite-parent
+Fill, both-axis bounds, distribution and clipping; removes hidden size clamps;
+separates layer name/content; excludes editor hints from Hug measurement; freezes
+pending deletion edits; and rejects guessed exposure types.
+
+Commands repeated: build.py, node --check for model/UI/browser tests, node --test,
+validate.py and git diff --check. **30 model tests** passed. Browser injection at
+1280×800 passed **28 scenarios / 180 assertions**, including nine width/height
+mode combinations, actual Fixed W/H and Fill dimensions, invalid bounds/blank
+numbers, source-independent layer naming, blank outer height 48, Edit/Test size
+stability, distributed alignment, clipping and Pending deletion/Undo.
+
+Actual browser output and current model results are in
+[evidence/completeness-browser.json](evidence/completeness-browser.json) and
+[evidence/completeness-model-tests.txt](evidence/completeness-model-tests.txt).
+No broader production or native qualification was performed. Earlier evidence
+files intentionally retain their earlier counts and narrower tested source.

@@ -8,10 +8,11 @@ foundation without rewriting those qualification records.
 
 ## Restart here after context compaction
 
-1. Read this file, then [VALIDATION.md](VALIDATION.md) for actual progress and gaps.
+1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V05, and
+   [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md) for actual progress and gaps.
 2. Read [DESIGN.md](../../DESIGN.md) for visual direction and
    [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization.
-3. Use [UX_JOURNEYS.md](UX_JOURNEYS.md) J01–J24 for user narratives and
+3. Use [UX_JOURNEYS.md](UX_JOURNEYS.md) J01–J27 for user narratives and
    [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md) T01–T13 for contracts and algorithms.
 4. Use [CONTROL_MATRIX.md](CONTROL_MATRIX.md) Q01–Q16 as the implementation and
    qualification ledger. Do not equate a prototype pass with a runtime pass.
@@ -52,6 +53,7 @@ foundation without rewriting those qualification records.
 | TECHNICAL_DESIGN.md | Proposed record, layout, transaction and dependency semantics |
 | CONTROL_MATRIX.md | Representative control breadth and implementation/test backlog |
 | REFERENCES.md | Reviewed references, inaccessible sources and alignment differences |
+| COMPLETENESS_AUDIT.md | Field coverage, asymmetry findings and explicit remaining gaps |
 | VALIDATION.md | Commands, evidence scope, findings and remaining qualification |
 | prototype/ | Original disposable HTML/JS UX model; not a runtime implementation |
 
@@ -62,7 +64,7 @@ stable J/T/Q IDs in follow-up tasks and commits rather than copying whole files.
 
 ## Current state and next work
 
-The design includes 24 journeys and 16 representative control rows. The prototype
+The design includes 27 journeys and 16 representative control rows. The prototype
 covers a subset using native HTML controls, in-memory state, simple CSS layout and
 simulated generation/publication. It intentionally uses no services, third-party
 component source, production credentials, signing or Wasmi execution.

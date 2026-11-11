@@ -82,6 +82,17 @@ one supplied color; the saved record still contains both. Missing modes, missing
 required fields, unknown IDs, type mismatches and unsupported fields reject the
 candidate. A field's authored default is explicit, not a missing-reference fallback.
 
+### Reusable-record lifecycle
+
+Styles and variables carry Active/Retired discoverability metadata in the proposed
+versioned schema. Retirement blocks new picks, preserving all existing resolution.
+Deletion of referenced records requires explicit replacement in the same candidate;
+export removal takes new admission. Duplicate styles share existing variable refs
+by default; copying their variables explicitly allocates/remaps IDs. Complete
+creation/fork/retire/delete narratives are J26 in the
+[Designer journeys](../oib-designer/UX_JOURNEYS.md). Presets are separate insertion
+recipes; they do not add another implicit style cascade layer.
+
 ## Style example
 
 The YAML below illustrates authoring semantics, not accepted current package bytes.
