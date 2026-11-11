@@ -5529,3 +5529,146 @@ fn working_copy_composition_test_uses_private_source_without_publishing_new_cont
     assert!(m.doc.generate().unwrap().is_none());
     assert_eq!(authority.oib_allocations().unwrap(), before);
 }
+
+#[test]
+fn working_copy_toolbar_pointer_routes_all_commands_and_keeps_cancelled_taps_local() {
+    use super::super::oib_workspace::{APPLY, DISCARD, NEW_COMPONENT, REDO, UNDO};
+    fn touch(client: &mut Client, id: u32, end: PointerPhase, outside: bool) {
+        let scene = client.scene().unwrap();
+        let path = scene.path(id).unwrap();
+        let node = path.last().unwrap();
+        let point = [node.origin[0] + 24., node.origin[1] + 24.];
+        assert!(scene.hit_path(point).iter().any(|n| n.node.id == id));
+        assert!(
+            client
+                .pointer_at(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 11,
+                        phase: PointerPhase::Down,
+                        position: point
+                    },
+                    10
+                )
+                .unwrap()
+        );
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 11,
+                    phase: end,
+                    position: if outside { [800., 230.] } else { point },
+                },
+                20,
+            )
+            .unwrap();
+        assert!(!client.input_busy());
+    }
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    client.set_viewport([1280., 800.]).unwrap();
+    let before = authority.oib_status().unwrap().structural_generation;
+    touch(&mut client, NEW_COMPONENT, PointerPhase::Up, true);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    touch(&mut client, NEW_COMPONENT, PointerPhase::Up, false);
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    touch(&mut client, UNDO, PointerPhase::Cancel, false);
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    touch(&mut client, UNDO, PointerPhase::Up, false);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    touch(&mut client, REDO, PointerPhase::Up, false);
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    touch(&mut client, DISCARD, PointerPhase::Up, false);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    touch(&mut client, NEW_COMPONENT, PointerPhase::Up, false);
+    touch(&mut client, APPLY, PointerPhase::Up, false);
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        before + 1
+    );
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+}

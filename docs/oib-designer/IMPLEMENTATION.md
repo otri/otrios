@@ -337,3 +337,20 @@ catalog/live qualification separately before claiming the full goal.
 - Core library Clippy with `-D warnings` passed before final source formatting. The final run is recorded with publication evidence below.
 
 The original repository remains on main; implementation stays on the feature branch. No full preflight, data preservation inventory, separate signing campaign or new PR was run. Initial B5 publication is a coherent slice; full typed API/slots, conditional post-Apply history, imported linking, impact/retirement and B6/B7 qualification remain open.
+
+### Initial B5 publication and pointer correction
+
+Commit `685854f` built and published through the existing Frame/Web path as release
+`15b4f1a4a4d2a8e476a0bb9a7acc4ee445d0d94d6fa161dba960d700b48c8adb`.
+The attached browser upgraded automatically; native ready reported that exact
+release, stream ready, confirmed state, authoring enabled and zero guest errors.
+The automatic builder was restored on the completed source commit.
+
+The first physical browser click on New component exposed missing outer-toolbar
+pointer capture. Semantic activation tests had not exercised that route. The
+correction shares one explicit outside-panel action classification between Down
+capture and matching Up hit validation, including all five lifecycle commands.
+A real Client pointer regression now covers New/Undo/Redo/Discard/Apply,
+release-outside and Cancel, proving no publication until Apply. Final Designer
+suite: **68 passed**, one existing ignored diagnostic; strict core library Clippy
+passed. The corrected release still requires live pointer acceptance below.

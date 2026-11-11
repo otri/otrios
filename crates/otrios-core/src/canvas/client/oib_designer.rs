@@ -71,6 +71,24 @@ enum LocalAction {
     RestoreDesign(PropertyAddress, u64),
     Resolve(PropertyAddress),
 }
+impl LocalAction {
+    fn outside_panels(&self) -> bool {
+        matches!(
+            self,
+            Self::Workspace(_)
+                | Self::Appearance(_)
+                | Self::Mode(_)
+                | Self::EditComponent(_)
+                | Self::Placement(_)
+                | Self::DeleteComponent(_)
+                | Self::NewComponent
+                | Self::Undo
+                | Self::Redo
+                | Self::DiscardWorkingCopy
+                | Self::ApplyWorkingCopy
+        )
+    }
+}
 #[derive(Clone)]
 struct ManagedComponent {
     instance: u64,
@@ -871,17 +889,11 @@ impl Designer {
     }
     fn tap_action(&self, capture: &Capture, scene: &Scene, point: [f32; 2]) -> Option<LocalAction> {
         if capture.panel.is_none() {
-            if matches!(
-                capture.action,
-                Some(
-                    LocalAction::Workspace(_)
-                        | LocalAction::Appearance(_)
-                        | LocalAction::Mode(_)
-                        | LocalAction::EditComponent(_)
-                        | LocalAction::Placement(_)
-                        | LocalAction::DeleteComponent(_)
-                )
-            ) {
+            if capture
+                .action
+                .as_ref()
+                .is_some_and(LocalAction::outside_panels)
+            {
                 return scene
                     .hit_path(point)
                     .iter()
@@ -2805,17 +2817,7 @@ impl Client {
                     .iter()
                     .rev()
                     .find_map(|p| designer.local_action(p.node.id));
-                if matches!(
-                    action,
-                    Some(
-                        LocalAction::Workspace(_)
-                            | LocalAction::Appearance(_)
-                            | LocalAction::Mode(_)
-                            | LocalAction::EditComponent(_)
-                            | LocalAction::Placement(_)
-                            | LocalAction::DeleteComponent(_)
-                    )
-                ) {
+                if action.as_ref().is_some_and(LocalAction::outside_panels) {
                     designer.capture = Some(Capture {
                         pointer: event.id,
                         start: event.position,
