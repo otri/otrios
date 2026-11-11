@@ -27,9 +27,13 @@ pub enum AuthoredOrigin {
 pub enum SourceRole {
     LiveOverride,
     AuthoredLiteral(AuthoredOrigin),
-    Forward { from: PropertyAddress },
+    Forward {
+        from: PropertyAddress,
+    },
     AppBinding(Binding),
     SharedRegister,
+    /// Boxed to keep ordinary non-style trace rows small.
+    Style(Box<super::super::styles::Contribution>),
     NodeDefault,
     DefinitionDefault,
     ClassDefault,
@@ -101,6 +105,7 @@ fn defaults(
     start: DefinitionId,
     path: &PropertyPath,
     masked: bool,
+    style: Option<(&PropertyAddress, &super::super::styles::Contribution)>,
     hops: &mut Vec<SourceHop>,
 ) -> Result<()> {
     let (def, node) = path_node(doc, start, &path.references, path.node)?;
@@ -119,6 +124,15 @@ fn defaults(
             masked,
         });
     }
+    if let Some((at, style)) = style {
+        hops.push(SourceHop {
+            address: at.clone(),
+            role: SourceRole::Style(Box::new(style.clone())),
+            cell: None,
+            value: Some(Value::Color(style.source.color)),
+            masked: masked || authored.is_some(),
+        });
+    }
     hops.push(SourceHop {
         address,
         role: if node.id == def.root && def.properties.iter().any(|p| p.id == path.property) {
@@ -128,7 +142,7 @@ fn defaults(
         },
         cell: None,
         value: Some(property(doc, start, path)?.default),
-        masked: masked || authored.is_some(),
+        masked: masked || authored.is_some() || style.is_some(),
     });
     Ok(())
 }
@@ -141,6 +155,27 @@ pub fn property_sources(
     allocations: &[Allocation],
     address: &PropertyAddress,
     active_values: &BTreeMap<u64, Option<Value>>,
+) -> Result<PropertySources> {
+    property_sources_impl(seed, allocations, address, active_values, None)
+}
+/// Trace the same native style fallback used by graph compilation. The style
+/// frame must belong to this exact canonical source and allocation set.
+pub fn property_sources_styled(
+    seed: &Seed,
+    allocations: &[Allocation],
+    address: &PropertyAddress,
+    active_values: &BTreeMap<u64, Option<Value>>,
+    styles: &super::super::styles::Frame,
+) -> Result<PropertySources> {
+    styles.validate(seed, allocations)?;
+    property_sources_impl(seed, allocations, address, active_values, Some(styles))
+}
+fn property_sources_impl(
+    seed: &Seed,
+    allocations: &[Allocation],
+    address: &PropertyAddress,
+    active_values: &BTreeMap<u64, Option<Value>>,
+    styles: Option<&super::super::styles::Frame>,
 ) -> Result<PropertySources> {
     let mut expanded = seed.clone();
     expanded.designer = Some(expanded_metadata(seed, allocations)?);
@@ -198,7 +233,14 @@ pub fn property_sources(
                     value,
                 });
             }
-            defaults(doc, *definition, &path, result.overridden, &mut result.hops)?;
+            defaults(
+                doc,
+                *definition,
+                &path,
+                result.overridden,
+                None,
+                &mut result.hops,
+            )?;
         }
         PropertyAddress::Occurrence { instance: id, path } => {
             let root = instance(doc, *id)?;
@@ -211,24 +253,20 @@ pub fn property_sources(
             result.overridden = local
                 .and_then(|c| active_values.get(&c))
                 .is_some_and(Option::is_some);
-            result.value = resolve(
-                &expanded,
+            let resolution = Resolution {
+                seed: &expanded,
                 root,
-                &source,
-                path,
-                active_values,
-                None,
-                &mut BTreeSet::new(),
-            )?;
-            result.inherited = resolve(
-                &expanded,
-                root,
-                &source,
-                path,
-                active_values,
-                local,
-                &mut BTreeSet::new(),
-            )?;
+                source: &source,
+                values: active_values,
+                ignore: None,
+                styles,
+            };
+            result.value = resolution.at(path, &mut BTreeSet::new())?;
+            result.inherited = Resolution {
+                ignore: local,
+                ..resolution
+            }
+            .at(path, &mut BTreeSet::new())?;
             let mut current = path.clone();
             let mut seen = BTreeSet::new();
             let mut masked = false;
@@ -309,7 +347,16 @@ pub fn property_sources(
                             });
                             masked |= value.is_some();
                         }
-                        defaults(doc, root.definition, &current, masked, &mut result.hops)?;
+                        defaults(
+                            doc,
+                            root.definition,
+                            &current,
+                            masked,
+                            styles
+                                .and_then(|styles| styles.color(&at))
+                                .map(|style| (&at, style)),
+                            &mut result.hops,
+                        )?;
                         break;
                     }
                 };
@@ -329,7 +376,16 @@ pub fn property_sources(
                         masked: true,
                     });
                 }
-                defaults(doc, root.definition, &current, true, &mut result.hops)?;
+                defaults(
+                    doc,
+                    root.definition,
+                    &current,
+                    true,
+                    styles
+                        .and_then(|styles| styles.color(&at))
+                        .map(|style| (&at, style)),
+                    &mut result.hops,
+                )?;
                 match next {
                     Some(next) => current = next,
                     None => break,

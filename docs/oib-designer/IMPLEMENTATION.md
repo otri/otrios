@@ -1420,3 +1420,42 @@ is not wired into active source packages or renderer evaluation. The next concre
 work is the native style source in canonical property evaluation/tracing, then
 compiler consumption and versioned source/package admission. Broader B5/B6/B7/B8
 requirements remain open; neither T24 nor T25 completes a representative control.
+
+
+## T26 / B6b2 native style evaluation and compilation — 2026-11-11
+
+Implemented a separate bounded Frame of typed style contributions, native style
+fallback in canonical property evaluation, matching Style source traces, and
+explicit normal graph compilation through `expand_styled`. This supersedes the
+T25 mapping-only precedence query; it now shares the native evaluator. A Terra
+read-only review identified the forwarded-outer/masked-inner case, covered by a
+new regression test. No causal color injection or authored-default flattening.
+
+Four new integration tests compile the real Designer graph and cover actual
+Light/Dark template color outputs, paint-stripped blueprint equality, stable
+selectors/handlers, outer/inner styles and forwarding, occurrence override and
+inherited/Reset, stale source/allocation and duplicate rejection, aggregate
+override budgets, active focus-overlay rejection and existing bound controls.
+Scene geometry equality is not GPU-resource/capture acceptance. No live style
+journey or deployment yet: source/package and mounted-client activation remain
+explicit gates in T26. Current live release remains T23.
+
+Because the common property fallback implementation changed, ran the full core
+library suite once: `cargo test -p otrios-core --features canvas --lib --locked
+--offline` passed **579 tests**, with four existing ignored diagnostics. After
+boxing style provenance to avoid inflating non-style rows, the focused style
+regression was repeated; final checks are recorded below.
+
+T26 final checks:
+
+- `cargo test -p otrios-core --features canvas --lib canvas::oib::styles --locked --offline`: **16 passed** after the provenance boxing change.
+- `cargo check --workspace --all-targets --features canvas --locked --offline`: passed.
+- `cargo clippy -p otrios-core --features signed-bundles --lib --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and diff check: passed.
+
+The earlier broad core result covers the resolver rewrite before the final boxed
+provenance representation; the focused suite covers that final representation.
+No native/browser style UI, Wasmi color-property consumption or GPU retention
+acceptance is claimed. The next source/package and mounted-client integration
+must feed one pinned style context to compilation, inspector and guest reads.
+The complete responsive Designer goal remains open.

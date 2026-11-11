@@ -1133,3 +1133,75 @@ contracts in compatibility fingerprints, and synchronize the state protocol on
 that wire change. Native focus overlays, mode propagation, retained paint proof,
 Designer editing, contrast and live qualification remain the B6c/B6d gates in T24.
 Existing scene/control limits still apply jointly.
+
+
+## T26. B6b2 native style fallback and explicit compiler integration
+
+T26 implements the native resolver/compiler portion queued in T25. Source/package
+activation, mounted client use and Designer editing remain gated; the presence
+of `graph::expand_styled` does not advertise an admitted package feature.
+
+### One bounded receiving-context frame
+
+`styles::Frame` admits a set of component occurrences against an immutable catalog
+and canonical Seed. Each occurrence supplies the already selected receiving mode,
+state and document/instance overrides. The frame pins the source graph, exact
+resolved library bodies and allocations; compilation/query rejects another source
+or allocation. It holds typed contributions by actual PropertyAddress, separate
+from causal values. Duplicate component scopes and competing contributions to one
+property reject. Aggregate override entries are checked against 4096 before
+resolving any occurrence; normalized expanded body/focus entries are bounded to
+8192. Existing allocation limits remain. Failed construction publishes nothing.
+
+The frame does not infer mode inheritance, host preference, hover/focus or gesture
+state. The future mounted presentation layer must supply one coherent context
+from its actual component tree, and keep that frame pinned across compilation,
+property inspection and guest property reads.
+
+### Canonical evaluation and trace
+
+The existing property resolver now has an optional native style context. Its
+order remains occurrence register → authored literal/forward/app binding → shared
+register → authored node default → mapped style → descriptor fallback. Forwarding
+recurses through the same resolver and can reach an outer styled source; it never
+uses a precomputed inner color to bypass the outer route. App binding remains an
+unresolved typed binding and cannot become a style literal. Clears are absent
+values, preserving Reset semantics. Validate every resolved value against the
+existing path's descriptor, including forwarding destinations.
+
+`property_sources_styled` computes value and inherited value with this exact
+resolver, and inserts a Style provenance hop at each applicable occurrence path.
+Live/shared/node sources mask that hop. Literal/forward/binding routes mask local
+style/defaults; a winning outer style reached through forwarding stays unmasked.
+The style hop retains exact StyleRef, field, winning expression, layer, state
+scope and mode. Its payload is boxed so non-style trace rows retain small enum
+storage. The older Mapped query now uses this native trace instead of maintaining
+its own precedence approximation.
+
+### Explicit real graph compilation
+
+`graph::expand_styled` validates the frame pin, then uses it in normal component
+parameter/property lowering. It does not populate causal registers, overwrite
+node defaults, flatten styles into saved source, change selectors/handlers or
+replace the ordinary compiler. Calls without a frame retain the existing path.
+Active focus-overlay fields still reject at compilation until that renderer
+capability is implemented; they cannot silently disappear. Focus resolution and
+inspection remain available as separate data.
+
+Tests compile the real Designer composition with Light/Dark colors and compare
+complete blueprints after removing paint: geometry, controls and semantics stay
+equal, and selectors/handlers stay equal. They also prove outer-style forwarding,
+masked inner style, local override/inherited/reset, stale-frame/duplicate rejection,
+aggregate bounds and retained binding/focus gates. This is core compiler evidence,
+not GPU retention, native touch or signed browser/Frame acceptance.
+
+### Next activation gate
+
+Store the catalog/use/mode/override source in the canonical versioned source and
+verified library closure, include field mappings/contracts in compatibility
+fingerprints, synchronize the state protocol for the wire change, then construct
+one frame in the mounted presentation path. Feed that same style context into
+guest property reads and inspector queries, not just shape compilation. Implement
+mode propagation and native focus overlays before claiming the corresponding
+capabilities. Retained-paint dependency proofs, source-aware editing, contrast and
+representative live journeys remain T24/B6c–B6d work.

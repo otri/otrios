@@ -17,6 +17,7 @@ pub(in crate::canvas) use binding::binding_kind;
 pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
 pub use sources::{
     AuthoredOrigin, PropertyRegisterView, PropertySources, SourceHop, SourceRole, property_sources,
+    property_sources_styled,
 };
 
 #[derive(Clone, Debug)]
@@ -146,6 +147,15 @@ pub(super) fn graph_property(
     path: &PropertyPath,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<(Option<u64>, Option<Value>, Option<Binding>)> {
+    graph_property_styled(seed, root, path, values, None)
+}
+pub(super) fn graph_property_styled(
+    seed: &Seed,
+    root: InstanceId,
+    path: &PropertyPath,
+    values: &BTreeMap<u64, Option<Value>>,
+    styles: Option<&super::styles::Frame>,
+) -> Result<(Option<u64>, Option<Value>, Option<Binding>)> {
     let doc = metadata(seed)?;
     let root = instance(doc, root)?;
     let source = sources(doc, root)?;
@@ -153,15 +163,15 @@ pub(super) fn graph_property(
     let value = if binding.is_some() {
         None
     } else {
-        resolve(
+        Resolution {
             seed,
             root,
-            &source,
-            path,
+            source: &source,
             values,
-            None,
-            &mut BTreeSet::new(),
-        )?
+            ignore: None,
+            styles,
+        }
+        .at(path, &mut BTreeSet::new())?
     };
     Ok((occurrence_cell(doc, root.id, path), value, binding))
 }
@@ -503,33 +513,74 @@ fn resolve(
     ignore: Option<u64>,
     seen: &mut BTreeSet<PropertyPath>,
 ) -> Result<Option<Value>> {
-    if !seen.insert(path.clone()) || seen.len() > 64 {
-        return Err("Cyclic OIB property forwarding".into());
+    Resolution {
+        seed,
+        root,
+        source,
+        values,
+        ignore,
+        styles: None,
     }
-    let doc = metadata(seed)?;
-    let descriptor = property(doc, root.definition, path)?;
-    let cell = occurrence_cell(doc, root.id, path);
-    let result = if let Some(value) = cell
-        .filter(|c| Some(*c) != ignore)
-        .and_then(|c| values.get(&c))
-        .and_then(|v| v.clone())
-    {
-        Some(value)
-    } else {
-        match source.get(path) {
-            Some(Source::Literal(v)) => Some(v.clone()),
-            Some(Source::Forward(from)) => resolve(seed, root, source, from, values, ignore, seen)?,
-            Some(Source::Bound(_)) => None,
-            None => terminal_cell(doc, root.definition, path)?
-                .and_then(|c| values.get(&c))
-                .and_then(|v| v.clone())
-                .or(Some(fallback(doc, root.definition, path)?)),
+    .at(path, seen)
+}
+struct Resolution<'a> {
+    seed: &'a Seed,
+    root: &'a ComponentInstance,
+    source: &'a Sources,
+    values: &'a BTreeMap<u64, Option<Value>>,
+    ignore: Option<u64>,
+    styles: Option<&'a super::styles::Frame>,
+}
+impl Resolution<'_> {
+    fn at(&self, path: &PropertyPath, seen: &mut BTreeSet<PropertyPath>) -> Result<Option<Value>> {
+        if !seen.insert(path.clone()) || seen.len() > 64 {
+            return Err("Cyclic OIB property forwarding".into());
         }
-    };
-    if let Some(v) = &result {
-        validate_property_value(&descriptor, v)?;
+        let doc = metadata(self.seed)?;
+        let descriptor = property(doc, self.root.definition, path)?;
+        let cell = occurrence_cell(doc, self.root.id, path);
+        let result = if let Some(value) = cell
+            .filter(|c| Some(*c) != self.ignore)
+            .and_then(|c| self.values.get(&c))
+            .and_then(|v| v.clone())
+        {
+            Some(value)
+        } else {
+            match self.source.get(path) {
+                Some(Source::Literal(value)) => Some(value.clone()),
+                Some(Source::Forward(from)) => self.at(from, seen)?,
+                Some(Source::Bound(_)) => None,
+                None => {
+                    let shared = terminal_cell(doc, self.root.definition, path)?
+                        .and_then(|cell| self.values.get(&cell))
+                        .and_then(|value| value.clone());
+                    let (_, node) =
+                        path_node(doc, self.root.definition, &path.references, path.node)?;
+                    let authored = node
+                        .defaults
+                        .iter()
+                        .find(|default| default.property == path.property)
+                        .map(|default| default.value.clone());
+                    let address = PropertyAddress::Occurrence {
+                        instance: self.root.id,
+                        path: path.clone(),
+                    };
+                    let styled = self
+                        .styles
+                        .and_then(|styles| styles.color(&address))
+                        .map(|contribution| Value::Color(contribution.source.color));
+                    shared
+                        .or(authored)
+                        .or(styled)
+                        .or(Some(descriptor.default.clone()))
+                }
+            }
+        };
+        if let Some(value) = &result {
+            validate_property_value(&descriptor, value)?;
+        }
+        Ok(result)
     }
-    Ok(result)
 }
 pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) -> Result<Value> {
     let doc = metadata(seed)?;

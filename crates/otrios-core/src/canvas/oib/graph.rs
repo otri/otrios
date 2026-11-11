@@ -654,6 +654,7 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
         selectors,
         handlers: vec![],
         values: BTreeMap::new(),
+        styles: None,
         next_node: node_base,
         next_control: control_base,
     };
@@ -722,6 +723,7 @@ struct Compiler<'a> {
     selectors: Vec<Selector>,
     handlers: Vec<Handler>,
     values: BTreeMap<u64, Option<Value>>,
+    styles: Option<&'a super::styles::Frame>,
     next_node: u16,
     next_control: u8,
 }
@@ -829,8 +831,13 @@ impl Compiler<'_> {
                 let mut references = prefix.to_vec();
                 references.extend(&path.references);
                 full.references = references;
-                let (cell, literal, binding) =
-                    document::graph_property(&self.seed, InstanceId(p.id), &full, &self.values)?;
+                let (cell, literal, binding) = document::graph_property_styled(
+                    &self.seed,
+                    InstanceId(p.id),
+                    &full,
+                    &self.values,
+                    self.styles,
+                )?;
                 if let Some(binding) = binding {
                     let Binding::Local(local) = binding;
                     let original = self
@@ -1440,7 +1447,40 @@ pub(crate) fn expand_prepared(
     live: &BTreeSet<u64>,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<PreparedUi> {
+    expand_prepared_with_styles(prepared, allocations, live, values, None)
+}
+/// Explicit style-aware compilation. This does not advertise package support or
+/// serialize style state; source/package activation remains a separate gate.
+pub fn expand_styled(
+    ui: &Ui,
+    allocations: &[Allocation],
+    live: &BTreeSet<u64>,
+    values: &BTreeMap<u64, Option<Value>>,
+    styles: &super::styles::Frame,
+) -> Result<Ui> {
+    expand_prepared_with_styles(
+        PreparedUi::from_ui(ui)?,
+        allocations,
+        live,
+        values,
+        Some(styles),
+    )?
+    .finish()
+}
+fn expand_prepared_with_styles(
+    prepared: PreparedUi,
+    allocations: &[Allocation],
+    live: &BTreeSet<u64>,
+    values: &BTreeMap<u64, Option<Value>>,
+    styles: Option<&super::styles::Frame>,
+) -> Result<PreparedUi> {
     let _profile = crate::canvas::profiling::span("oib.graph.expand");
+    if let Some(styles) = styles {
+        styles.validate_compiler(
+            super::seed(&prepared.ui).ok_or("Missing styled source")?,
+            allocations,
+        )?;
+    }
     if live.len() > MAX_LIVE_INSTANCES {
         return Err(error("OIB live instance capacity exhausted"));
     }
@@ -1482,6 +1522,7 @@ pub(crate) fn expand_prepared(
         selectors: source_selectors(original)?,
         handlers: vec![],
         values: values.clone(),
+        styles,
         next_node: base,
         next_control: control,
     };

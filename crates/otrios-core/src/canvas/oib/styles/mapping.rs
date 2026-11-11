@@ -29,14 +29,14 @@ pub enum PropertyPaint {
     Style {
         field: FieldId,
         source: ResolvedField,
-        /// Existing fallback chain is masked by this style contribution.
-        fallback: PropertySources,
+        /// Native canonical trace, including the winning style and masked fallbacks.
+        trace: PropertySources,
     },
     /// Includes unresolved app bindings. Do not turn these into literal colors.
     Explicit(PropertySources),
 }
-/// One component occurrence's winning property sources. This is a mapping query,
-/// not a replacement for native style-aware compiler/property evaluation.
+/// One component occurrence's property sources from the native styled resolver.
+/// This query does not publish edits or activate a package capability.
 pub struct Projection {
     properties: BTreeMap<PropertyAddress, PropertyPaint>,
     focus: BTreeMap<FieldId, ResolvedField>,
@@ -131,13 +131,15 @@ impl<'a> Mapped<'a> {
             binding,
         })
     }
-    pub fn resolve(
+    pub(super) fn contributions(
         &self,
         scope: &ObjectAddress,
         allocations: &[Allocation],
-        values: &BTreeMap<u64, Option<Value>>,
         context: Context<'_>,
-    ) -> Result<Projection> {
+    ) -> Result<(
+        BTreeMap<PropertyAddress, Contribution>,
+        BTreeMap<FieldId, ResolvedField>,
+    )> {
         let expanded = document::expanded_metadata(self.seed, allocations)?;
         let root = expanded
             .instances
@@ -157,10 +159,7 @@ impl<'a> Mapped<'a> {
             context.document,
             context.instance,
         )?;
-        let mut result = Projection {
-            properties: BTreeMap::new(),
-            focus: resolved.focus,
-        };
+        let mut colors = BTreeMap::new();
         for mapping in &self.binding.fields {
             let source = resolved
                 .body
@@ -174,40 +173,58 @@ impl<'a> Mapped<'a> {
                     instance: scope.instance,
                     path,
                 };
-                let mut trace =
-                    document::property_sources(self.seed, allocations, &address, values)?;
-                // The existing chain decides property precedence. In particular,
-                // forwarding and app bindings are not flattened into defaults.
-                let explicit = trace.binding.is_some()
-                    || trace.hops.iter().any(|hop| {
-                        !hop.masked
-                            && match hop.role {
-                                SourceRole::LiveOverride | SourceRole::SharedRegister => {
-                                    hop.value.is_some()
-                                }
-                                SourceRole::AuthoredLiteral(_)
-                                | SourceRole::Forward { .. }
-                                | SourceRole::AppBinding(_)
-                                | SourceRole::NodeDefault => true,
-                                SourceRole::DefinitionDefault | SourceRole::ClassDefault => false,
-                            }
-                    });
-                let paint = if explicit {
-                    PropertyPaint::Explicit(trace)
-                } else {
-                    for hop in &mut trace.hops {
-                        hop.masked = true;
-                    }
-                    PropertyPaint::Style {
+                colors.insert(
+                    address,
+                    Contribution {
+                        style: self.binding.style.clone(),
                         field: mapping.field,
                         source: source.clone(),
-                        fallback: trace,
-                    }
-                };
-                if result.properties.insert(address, paint).is_some() {
-                    return Err("Duplicate mapped style address".into());
-                }
+                    },
+                );
             }
+        }
+        Ok((colors, resolved.focus))
+    }
+    pub fn resolve(
+        &self,
+        scope: &ObjectAddress,
+        allocations: &[Allocation],
+        values: &BTreeMap<u64, Option<Value>>,
+        context: Context<'_>,
+    ) -> Result<Projection> {
+        let frame = Frame::new(
+            self.seed,
+            allocations,
+            self.catalog,
+            &[Occurrence {
+                component: &self.binding,
+                scope,
+                context,
+            }],
+        )?;
+        let mut result = Projection {
+            properties: BTreeMap::new(),
+            focus: frame.focus().get(scope).cloned().unwrap_or_default(),
+        };
+        for address in frame.colors().keys() {
+            let trace =
+                document::property_sources_styled(self.seed, allocations, address, values, &frame)?;
+            let winning = trace.hops.iter().find_map(|hop| match &hop.role {
+                SourceRole::Style(contribution) if !hop.masked => {
+                    Some(contribution.as_ref().clone())
+                }
+                _ => None,
+            });
+            let paint = if let Some(winning) = winning {
+                PropertyPaint::Style {
+                    field: winning.field,
+                    source: winning.source,
+                    trace,
+                }
+            } else {
+                PropertyPaint::Explicit(trace)
+            };
+            result.properties.insert(address.clone(), paint);
         }
         Ok(result)
     }

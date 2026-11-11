@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0037: OIB design systems, named styles and variable modes
 
-Date: 2026-11-11. Status: **color-only schema/resolver foundation implemented;
-package/compiler/editor integration and runtime activation remain proposed**.
+Date: 2026-11-11. Status: **color-only schema/resolver and explicit core compiler integration implemented;
+source/package/editor integration and runtime activation remain proposed**.
 Visual reference: [DESIGN.md](../../DESIGN.md). Builds on
 [RFC 0035](0035-oib-component-designer.md),
 [RFC 0036](0036-upgradable-oib-component-libraries.md) and the

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! RFC 0037 immutable color-style admission and resolution. Not yet a package
-//! capability: compiler property mapping and editor integration remain gated.
+//! capability: source/package activation and editor integration remain gated.
 use super::super::{Result, err};
 use otrios_interfaces::oib::{designer::ClassId, styles::*};
 use sha2::{Digest, Sha256};
@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod mapping;
 pub use mapping::{Context, Mapped, Projection, PropertyPaint};
+mod frame;
+pub use frame::{Contribution, Frame, Occurrence};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableUse {
