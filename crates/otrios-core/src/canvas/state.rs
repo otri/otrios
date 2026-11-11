@@ -21,6 +21,8 @@ struct Root {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Receipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    apply: Option<otrios_interfaces::oib::authoring::ApplyReceipt>,
     writer: Vec<u8>,
     sequence: u64,
     digest: Vec<u8>,
@@ -333,6 +335,16 @@ impl Document {
                             if r.writer.len() != 32 || r.digest.len() != 32 || r.time < 0 {
                                 return Err("Invalid receipt".into());
                             }
+                            if let Some(apply) = &r.apply
+                                && (apply.sequence == 0
+                                    || apply.sequence > r.sequence
+                                    || apply.digest.len() != 32
+                                    || (apply.sequence == r.sequence && apply.digest != r.digest)
+                                    || matches!(&apply.result, otrios_interfaces::oib::authoring::ApplyResult::Rejected { message } if message.is_empty() || message.len() > 256)
+                                    || matches!(&apply.result, otrios_interfaces::oib::authoring::ApplyResult::Accepted { generation, structural_generation } if *generation == 0 || *structural_generation == 0))
+                            {
+                                return Err("Invalid OIB Apply receipt".into());
+                            }
                         }
                         3 => {
                             self.field(u16::try_from(slot + 1).map_err(err)?)?;
@@ -585,6 +597,7 @@ impl Document {
             })
             .ok_or("Writer receipt capacity exhausted")?;
         let receipt = Receipt {
+            apply: None,
             writer: hash(writer),
             sequence: 0,
             digest: vec![0; 32],
@@ -657,6 +670,70 @@ impl Document {
             .writer
             .ok_or("State write without admitted writer")?;
         match request {
+            StateRequest::OibApply { sequence, apply } => {
+                if !session.oib_edit {
+                    return Err("OIB editing requires Space Admin admission".into());
+                }
+                let slot = session.slot.ok_or("Missing OIB writer receipt")?;
+                let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
+                if receipt.writer != hash(&writer) {
+                    return Err("OIB writer receipt retired".into());
+                }
+                let digest = hash(&bytes(&("oib-apply-v1", &apply))?);
+                if sequence <= receipt.sequence {
+                    if sequence != receipt.sequence || receipt.digest != digest {
+                        return Err("Changed OIB replay".into());
+                    }
+                    return Ok(false);
+                }
+                if sequence
+                    != receipt
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Writer sequence exhausted")?
+                {
+                    return Err("OIB intent sequence gap".into());
+                }
+                let (mut candidate, result) = match self.oib_apply_candidate(writer, &apply) {
+                    Ok(candidate) => {
+                        let status = candidate.oib_status()?;
+                        (
+                            candidate,
+                            otrios_interfaces::oib::authoring::ApplyResult::Accepted {
+                                generation: status.generation,
+                                structural_generation: status.structural_generation,
+                            },
+                        )
+                    }
+                    Err(mut message) => {
+                        while message.len() > 256 {
+                            message.pop();
+                        }
+                        (
+                            self.clone(),
+                            otrios_interfaces::oib::authoring::ApplyResult::Rejected { message },
+                        )
+                    }
+                };
+                receipt.sequence = sequence;
+                receipt.digest = digest.clone();
+                receipt.time = self.wall;
+                receipt.apply = Some(otrios_interfaces::oib::authoring::ApplyReceipt {
+                    sequence,
+                    digest,
+                    result,
+                });
+                candidate.change(
+                    &[],
+                    vec![Edit {
+                        path: path(2, slot),
+                        schema: self.extra_schema(2, slot),
+                        value: Some(bytes(&receipt)?),
+                    }],
+                )?;
+                self.tree = candidate.tree;
+                Ok(true)
+            }
             StateRequest::OibInstance {
                 epoch,
                 sequence,
@@ -867,6 +944,7 @@ impl Document {
 
 #[derive(Clone)]
 struct Flight {
+    oib_apply: Option<otrios_interfaces::oib::authoring::Apply>,
     oib_epoch: Option<Vec<u8>>,
     oib: Vec<otrios_interfaces::oib::Change>,
     oib_instance: Option<otrios_interfaces::oib::InstanceOperation>,
@@ -1071,15 +1149,31 @@ impl StateAdapter {
             self.flight = None;
             self.acknowledged = 0;
         }
-        let sequence = if let Some(slot) = self.slot {
+        let record = if let Some(slot) = self.slot {
             let record: Receipt = decode(&payload(&self.doc.tree, &path(2, slot))?)?;
             if record.writer != hash(&self.writer) {
                 return Err("Writer receipt retired; uncertain intent not replayed".into());
             }
-            record.sequence
+            Some(record)
         } else {
-            0
+            None
         };
+        let sequence = record.as_ref().map_or(0, |r| r.sequence);
+        if let Some(flight) = &self.flight
+            && let Some(apply) = &flight.oib_apply
+            && sequence >= flight.sequence
+        {
+            let expected = Self::oib_apply_digest(apply)?;
+            if record
+                .as_ref()
+                .and_then(|r| r.apply.as_ref())
+                .is_none_or(|r| r.sequence != flight.sequence || r.digest != expected)
+            {
+                return Err(
+                    "Apply receipt identity changed; uncertain working copy retained".into(),
+                );
+            }
+        }
         self.acknowledged = self.acknowledged.max(sequence);
         if self.flight.as_ref().is_some_and(|f| f.sequence <= sequence) {
             self.flight = None;
@@ -1158,7 +1252,10 @@ impl StateAdapter {
     pub fn pending_count(&self) -> usize {
         self.pending.len()
             + self.flight.as_ref().map_or(0, |f| {
-                f.values.len() + f.oib.len() + usize::from(f.oib_instance.is_some())
+                f.values.len()
+                    + f.oib.len()
+                    + usize::from(f.oib_instance.is_some())
+                    + usize::from(f.oib_apply.is_some())
             })
     }
     pub fn state_usage(&self) -> StateUsage {
@@ -1176,7 +1273,10 @@ impl StateAdapter {
         DispatchUsage {
             pending_fields: self.pending.len(),
             issued_fields: self.flight.as_ref().map_or(0, |f| {
-                f.values.len() + f.oib.len() + usize::from(f.oib_instance.is_some())
+                f.values.len()
+                    + f.oib.len()
+                    + usize::from(f.oib_instance.is_some())
+                    + usize::from(f.oib_apply.is_some())
             }),
             pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
             issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
@@ -1289,6 +1389,7 @@ impl StateAdapter {
             self.pending_since = None;
             let values = std::mem::take(&mut self.pending).into_iter().collect();
             self.flight = Some(Flight {
+                oib_apply: None,
                 oib_epoch: None,
                 sequence: self
                     .acknowledged
@@ -1305,6 +1406,13 @@ impl StateAdapter {
             && !f.sent
         {
             f.sent = true;
+            if let Some(apply) = &f.oib_apply {
+                return encode_state_request(&StateRequest::OibApply {
+                    sequence: f.sequence,
+                    apply: apply.clone(),
+                })
+                .map(Some);
+            }
             if let Some(operation) = &f.oib_instance {
                 return encode_state_request(&StateRequest::OibInstance {
                     epoch: f.oib_epoch.clone().ok_or("Missing captured OIB epoch")?,
@@ -1943,6 +2051,7 @@ mod tests {
         for slot in 0..RECEIPTS {
             let token = (slot as u128).to_le_bytes();
             let receipt = Receipt {
+                apply: None,
                 writer: hash(&token),
                 sequence: 1,
                 digest: vec![0; 32],

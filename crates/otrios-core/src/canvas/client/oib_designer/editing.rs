@@ -95,6 +95,7 @@ pub(super) fn inspector(
     editable: bool,
     revision: u64,
     structural_revision: u64,
+    structural_generation: u64,
     notice: Option<&str>,
     details: Option<&PropertySources>,
     registers: &[PropertyRegisterView],
@@ -107,7 +108,7 @@ pub(super) fn inspector(
     layout_bounds: bool,
     padding_independent: bool,
 ) -> Result<(Vec<SceneNode>, f32)> {
-    let layout_target = layout_editor::target(seed, properties, structural_revision)
+    let layout_target = layout_editor::target(seed, properties, structural_generation)
         .filter(|_| editable && layout_enabled);
     let separate = layout_target
         .as_ref()
@@ -161,7 +162,7 @@ pub(super) fn inspector(
             0.,
             y,
             320.,
-            "Discard unapplied edit",
+            "Revert unapplied edit",
             LocalAction::Discard(address),
         )?);
         y += 56.;
@@ -172,6 +173,7 @@ pub(super) fn inspector(
             drafts,
             properties,
             target,
+            structural_revision,
             &mut y,
             layout_bounds,
             separate,
@@ -342,24 +344,18 @@ pub(super) fn inspector(
             y += 56.;
         }
         {
-            nodes.push(b.focus_button(
-                0.,
-                y,
-                148.,
-                "Apply",
-                LocalAction::Apply(address.clone()),
-            )?);
+            nodes.push(b.focus_button(0., y, 148., "Done", LocalAction::Apply(address.clone()))?);
             nodes.push(b.focus_button(
                 164.,
                 y,
                 148.,
-                "Cancel",
+                "Revert",
                 LocalAction::Discard(address.clone()),
             )?);
             y += 56.;
         }
         if draft.error.is_some() {
-            nodes.push(label(b, y, "Invalid value - edit or Cancel", ACCENT)?);
+            nodes.push(label(b, y, "Invalid value - edit or Revert", ACCENT)?);
             y += 40.;
         }
         if p.overridden && matches!(address, PropertyAddress::Occurrence { .. }) {
@@ -381,7 +377,7 @@ pub(super) fn inspector(
                 y,
                 320.,
                 "Restore authored design",
-                LocalAction::RestoreDesign(address.clone(), structural_revision),
+                LocalAction::RestoreDesign(address.clone(), structural_generation),
             )?);
             y += 56.;
         }
@@ -721,7 +717,7 @@ pub(in crate::canvas::client) fn keyboard_key(id: u32) -> Option<u16> {
 pub(super) fn repaint(m: &mut Mount) -> Result<()> {
     let mut d = m.designer.take().ok_or("Missing designer")?;
     let result = (|| {
-        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let authoring_seed = m.design_doc().oib_authoring_seed()?;
         let seed = &authoring_seed;
         let properties = d.properties.clone();
         let objects = d.objects.clone();
@@ -733,7 +729,7 @@ pub(super) fn repaint(m: &mut Mount) -> Result<()> {
             seed,
             objects,
             &properties,
-            &m.doc.oib_conflicts(),
+            &m.design_doc().oib_conflicts(),
             status,
             m.binding.as_ref().is_none_or(|b| b.ui_editable),
             false,
@@ -757,9 +753,9 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let authoring_seed = m.design_doc().oib_authoring_seed()?;
         let seed = &authoring_seed;
-        let trace = sources(&m.doc, seed, address)?;
+        let trace = sources(m.design_doc(), seed, address)?;
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         d.details = if d.details.as_ref().is_some_and(|d| &d.address == address) {
             None
@@ -830,13 +826,13 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let authoring_seed = m.design_doc().oib_authoring_seed()?;
         let seed = &authoring_seed;
         let trace = crate::canvas::oib::document::property_sources(
             seed,
-            &m.doc.oib_allocations()?,
+            &m.design_doc().oib_allocations()?,
             address,
-            &m.doc.oib_active()?,
+            &m.design_doc().oib_active()?,
         )?;
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         d.details = Some(trace);
@@ -856,22 +852,29 @@ impl Client {
         if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
             return Ok(false);
         }
-        let result = m.doc.choose_oib_property(view, value);
-        let accepted = result.as_ref().is_ok_and(|v| *v);
+        m.sync_working_copy()?;
+        let result = m
+            .working_copy
+            .as_mut()
+            .ok_or("Missing working copy")?
+            .stage_choice(view, value);
+        let accepted = result.as_ref().is_ok_and(|changed| *changed);
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         if accepted {
             d.drafts.cancel(&view.address);
         }
         d.editor_notice = match result {
             Err(_) => Some("Choices changed - inspect again".into()),
-            Ok(false) => Some("Waiting for confirmation".into()),
-            Ok(true) => None,
+            Ok(_) => None,
         };
         d.revision = None;
-        m.refresh()?;
+        if accepted {
+            m.working_changed()?;
+        }
         repaint(m)?;
         Ok(accepted)
     }
+
     pub(in crate::canvas::client) fn designer_preview_color(
         &mut self,
         address: &PropertyAddress,
@@ -942,6 +945,13 @@ impl Client {
         Ok(true)
     }
     pub(in crate::canvas::client) fn designer_focus_field(&mut self, id: u32) -> Result<bool> {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|m| m.working_copy.as_ref().is_some_and(|w| w.applying()))
+        {
+            return Ok(false);
+        }
         if self.input_busy() {
             return Ok(false);
         }
@@ -1000,87 +1010,85 @@ impl Client {
         if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
             return Ok(false);
         }
-        let authoring_seed = m.doc.oib_authoring_seed()?;
+        m.sync_working_copy()?;
+        let authoring_seed = m.design_doc().oib_authoring_seed()?;
         let seed = &authoring_seed;
         let fresh = match address {
-            PropertyAddress::Placement { object, .. } => m.doc.oib_placement_properties(object)?,
-            PropertyAddress::Structural { .. } => {
-                m.doc.oib_structural_properties(&selection(address))?
+            PropertyAddress::Placement { object, .. } => {
+                m.design_doc().oib_placement_properties(object)?
             }
+            PropertyAddress::Structural { .. } => m
+                .design_doc()
+                .oib_structural_properties(&selection(address))?,
             _ => super::super::super::oib::document::properties(
                 seed,
-                &m.doc.oib_allocations()?,
+                &m.design_doc().oib_allocations()?,
                 &selection(address),
-                &m.doc.oib_active()?,
+                &m.design_doc().oib_active()?,
             )?,
         }
         .into_iter()
         .find(|p| p.address.as_ref() == Some(address));
+        let structural = matches!(
+            address,
+            PropertyAddress::Structural { .. } | PropertyAddress::Placement { .. }
+        );
+        let stale_working = m.working_copy.as_ref().is_some_and(|w| w.stale(&m.doc));
         let d = m.designer.as_mut().ok_or("Missing designer")?;
+        // Candidate admission uses base+1 for every private command. The editor
+        // metadata is the working-copy revision and therefore also distinguishes
+        // successive private changes while preserving the draft's captured base.
+        let revision = if structural {
+            d.editor_structural_revision
+        } else {
+            d.editor_revision
+        };
         let result = fresh
             .ok_or("Property unavailable".to_string())
             .and_then(|fresh| {
                 d.drafts
-                    .prepare(
-                        address,
-                        &fresh,
-                        if matches!(
-                            address,
-                            PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. }
-                        ) {
-                            m.doc.oib_structural_generation().unwrap_or(0)
-                        } else {
-                            m.doc.oib_generation().unwrap_or(0)
-                        },
-                    )
+                    .prepare(address, &fresh, revision)
                     .map_err(|e| format!("{e:?}"))
             });
         let mut accepted = false;
         match result {
             Ok(candidate) => {
-                let value = Some(candidate.value.clone());
-                let structural = matches!(
-                    address,
-                    PropertyAddress::Structural { .. } | PropertyAddress::Placement { .. }
-                );
-                let result = if structural
-                    && Some(candidate.base_revision) != m.doc.oib_structural_generation()
+                let result = if structural && (candidate.base_revision != revision || stale_working)
                 {
-                    Err("Document changed; discard this draft and review the current design".into())
+                    Err("Document changed; Revert this field and review the current design".into())
                 } else {
-                    match address {
-                        PropertyAddress::Structural { .. } => m.doc.edit_oib_structural_property(
-                            address,
-                            value,
-                            candidate.base_revision,
-                        ),
-                        PropertyAddress::Placement { object, property } => {
-                            m.doc.edit_oib_placement_property_at(
-                                object,
-                                *property,
-                                value,
-                                candidate.base_revision,
-                            )
-                        }
-                        _ => m.doc.edit_oib_property(address, value),
-                    }
+                    m.stage_property(address, Some(candidate.value.clone()))
                 };
                 let failure = result.as_ref().err().cloned();
-                accepted = result.unwrap_or(false);
-                d.drafts
-                    .acknowledge(&candidate, accepted)
-                    .map_err(|e| format!("Property acknowledgement: {e:?}"))?;
-                d.editor_notice =
-                    failure.or_else(|| (!accepted).then(|| "Waiting for confirmation".into()));
+                // An identical staged value is already part of the working
+                // copy. Done still acknowledges the field without a new edit.
+                accepted = result.is_ok();
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                let current_revision = if structural {
+                    d.editor_structural_revision
+                } else {
+                    d.editor_revision
+                };
+                let acknowledgement = if accepted {
+                    d.drafts.acknowledge_at(&candidate, true, current_revision)
+                } else {
+                    d.drafts.acknowledge(&candidate, false)
+                };
+                acknowledgement.map_err(|e| format!("Property acknowledgement: {e:?}"))?;
+                d.editor_notice = failure;
             }
-            Err(_) => d.editor_notice = Some("Invalid / unavailable edit retained".into()),
+            Err(_) => {
+                m.designer.as_mut().ok_or("Missing designer")?.editor_notice =
+                    Some("Invalid / unavailable edit retained".into())
+            }
         }
         if blur {
-            d.drafts.clear_focus();
+            m.designer
+                .as_mut()
+                .ok_or("Missing designer")?
+                .drafts
+                .clear_focus();
             m.keyboard.hide();
-        }
-        if accepted {
-            m.refresh()?;
         }
         repaint(m)?;
         Ok(accepted)
@@ -1152,6 +1160,9 @@ impl Client {
         let Some(m) = &mut self.active else {
             return Ok(None);
         };
+        if m.working_copy.as_ref().is_some_and(|w| w.applying()) {
+            return Ok(Some(false));
+        }
         let Some(d) = &mut m.designer else {
             return Ok(None);
         };
@@ -1220,5 +1231,86 @@ impl Client {
             };
         }
         self.blur_text_input(epoch, id)
+    }
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    #[test]
+    fn done_stages_repeated_focused_edits_without_live_writes() {
+        let (mut client, _authority, _session) = super::super::tests::mounted_fixture_session(true);
+        let address = super::super::tests::editor_address(3);
+        client.inspect_oib_selection(selection(&address)).unwrap();
+        let live_root = client.active.as_ref().unwrap().doc.oib_root();
+        let live_generation = client.active.as_ref().unwrap().doc.oib_generation();
+        let field = super::super::tests::focus_address(&mut client, address.clone());
+        for text in ["Private label", "Second label"] {
+            assert!(
+                client
+                    .edit_text_input(
+                        client.epoch(),
+                        field,
+                        &Edit::Replace {
+                            text: text.into(),
+                            cursor: text.len() as u32,
+                            anchor: text.len() as u32,
+                            selection_only: false,
+                        }
+                    )
+                    .unwrap()
+            );
+            assert!(client.designer_commit_property(&address, false).unwrap());
+            let m = client.active.as_ref().unwrap();
+            assert_eq!(
+                m.designer
+                    .as_ref()
+                    .unwrap()
+                    .drafts
+                    .focused()
+                    .unwrap()
+                    .address,
+                address
+            );
+            assert_eq!(m.doc.oib_root(), live_root);
+            assert_eq!(m.doc.oib_generation(), live_generation);
+            let source = m.design_doc();
+            let properties = crate::canvas::oib::document::properties(
+                &source.oib_authoring_seed().unwrap(),
+                &source.oib_allocations().unwrap(),
+                &selection(&address),
+                &source.oib_active().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                properties
+                    .iter()
+                    .find(|p| p.address.as_ref() == Some(&address))
+                    .unwrap()
+                    .value,
+                Some(Value::Text(text.into()))
+            );
+        }
+        assert!(
+            client
+                .active
+                .as_ref()
+                .unwrap()
+                .working_copy
+                .as_ref()
+                .unwrap()
+                .dirty()
+        );
+        assert!(
+            client
+                .active
+                .as_mut()
+                .unwrap()
+                .doc
+                .generate()
+                .unwrap()
+                .is_none()
+        );
     }
 }

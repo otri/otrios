@@ -352,12 +352,11 @@ impl StateAdapter {
         Ok(result)
     }
 
-    pub(in crate::canvas) fn edit_oib_structural_property(
-        &mut self,
+    pub(in crate::canvas) fn oib_structural_operation(
+        &self,
         address: &PropertyAddress,
         supplied: Option<Value>,
-        generation: u64,
-    ) -> Result<bool> {
+    ) -> Result<DocumentEdit> {
         let PropertyAddress::Structural { target, property } = address else {
             return Err("Not a graph source field".into());
         };
@@ -573,9 +572,6 @@ impl StateAdapter {
             }
             _ => return Err("Unsupported graph source field".into()),
         };
-        self.edit_oib_structure(EditBatch {
-            generation,
-            operations: vec![operation],
-        })
+        Ok(operation)
     }
 }

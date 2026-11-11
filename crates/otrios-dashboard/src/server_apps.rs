@@ -2261,6 +2261,7 @@ impl Hub {
                         canvas::decode_state_request(&bytes)?,
                         otrios_interfaces::canvas::StateRequest::OibWrite { .. }
                             | otrios_interfaces::canvas::StateRequest::OibInstance { .. }
+                            | otrios_interfaces::canvas::StateRequest::OibApply { .. }
                     ) && !self.ui_allowed(scope, binding)
                     {
                         return Err("OIB editing requires Space Admin".into());

@@ -563,3 +563,28 @@ measurement/rounding fixtures, and measure editor panel/resource budgets on Fram
 These are explicit implementation gates. They do not reopen the user-facing
 lifecycle model or justify exotic fallback engines. If a gate fails, narrow the
 slice and display the limitation rather than maintain two layout systems.
+
+## T14. B5 implementation checkpoint — 2026-11-11
+
+**IN PROGRESS; not deployed.** The current implementation uses one live adapter
+for confirmed state and a private local working copy. Its bounded OIB Apply admits
+at most 16 operations and 8 KiB, stages source and causal changes together on a
+private candidate, and publishes atomically after validation. The state wire
+format is v33, while the opening release-control envelope remains v1. Undo
+history before Apply is local and bounded to 64 KiB.
+
+The working copy pins its epoch, confirmed baseline, structural generation and
+exact causal contexts; new targets receive a seeded context. A durable per-writer
+digest receipt supports identifying and reconciling an Apply. Candidate preview
+uses the same source privately and creates a private virtual instance of the
+selected definition with sample values. Semantic value projection does not edit
+imported bodies. Edit/Test mode and local drafts describe editor state; neither is
+a canonical source generation or evidence of a confirmed publication.
+
+Local focused evidence currently covers Apply (11 passed), working choice (1),
+preview/clip (12), workspace (6), focus (4), and layout (4). The integrated Designer suite passed 66 tests (one existing ignored timing diagnostic). One real-process macOS server/WebSocket test passed for authorization, mixed publication, lost reply, restart and replay; this is not Linux IPC or live Frame acceptance. Conditional post-Apply Undo, typed API/slots UI,
+retirement/dependency lifecycle remain B5 gates. Apply/Discard/Stay leave confirmation passed three focused receipt/rejection/concurrent-edit/input-barrier tests. Full B6
+styles, catalog qualification and live Frame/Web acceptance remain open.
+Implementation entry points are `canvas/state/oib/apply.rs`,
+`client/oib_working_copy.rs`, `client/oib_editor.rs` and `oib/graph_preview.rs`;
+finish those gates and focused validation before the signed deployment workflow.

@@ -516,6 +516,17 @@ impl PropertyDrafts {
         Ok(candidate)
     }
     pub fn acknowledge(&mut self, candidate: &Candidate, accepted: bool) -> Result<(), Error> {
+        self.acknowledge_at(candidate, accepted, candidate.source_revision)
+    }
+    /// A private staging transaction can refresh the source before its field is
+    /// acknowledged. Keep the token check, then bind accepted input to that
+    /// refreshed source so the next edit in the same focused field is current.
+    pub fn acknowledge_at(
+        &mut self,
+        candidate: &Candidate,
+        accepted: bool,
+        current_revision: u64,
+    ) -> Result<(), Error> {
         let draft = self
             .drafts
             .iter_mut()
@@ -529,7 +540,8 @@ impl PropertyDrafts {
             draft.load(&candidate.value);
             draft.dirty = false;
             draft.error = None;
-            draft.base_revision = candidate.source_revision;
+            draft.base_revision = current_revision;
+            draft.source_revision = current_revision;
         }
         Ok(())
     }
@@ -592,5 +604,80 @@ fn raw_values(value: &Value) -> Vec<(Part, String)> {
             (Part::Opacity, (f32::from(*a) * 100. / 255.).to_string()),
         ],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use otrios_interfaces::oib::designer::{
+        InspectorGroup, InstanceId, NodeId, PropertyId, PropertyPath, PropertyPolicy,
+    };
+    #[test]
+    fn acknowledged_local_revision_supports_repeated_edits_in_focused_field() {
+        let address = PropertyAddress::Occurrence {
+            instance: InstanceId(1),
+            path: PropertyPath {
+                references: vec![],
+                node: NodeId(1),
+                property: PropertyId(1),
+            },
+        };
+        let mut info = PropertyInfo {
+            address: Some(address.clone()),
+            cell: Some(1),
+            descriptor: PropertyDescriptor {
+                id: PropertyId(1),
+                name: "width".into(),
+                label: "Width".into(),
+                value_type: ValueType::Number,
+                default: Value::Number(10.),
+                number_range: None,
+                number_step: None,
+                units: None,
+                group: InspectorGroup::Appearance,
+                editor: PropertyEditor::NumberSuggestions,
+                policy: PropertyPolicy {
+                    live_literal: true,
+                    app_binding: false,
+                },
+            },
+            value: Some(Value::Number(10.)),
+            inherited: None,
+            origin: "component".into(),
+            source: "literal".into(),
+            overridden: false,
+        };
+        let mut drafts = PropertyDrafts::new(100, 200);
+        let field = drafts.open(&info, 1).unwrap().fields[0].id;
+        drafts.focus(field).unwrap();
+        for (revision, value) in [(1, "20"), (2, "30")] {
+            drafts
+                .edit(
+                    field,
+                    &Edit::Replace {
+                        text: value.into(),
+                        cursor: 2,
+                        anchor: 2,
+                        selection_only: false,
+                    },
+                )
+                .unwrap();
+            let candidate = drafts.prepare(&address, &info, revision).unwrap();
+            assert_eq!(candidate.base_revision, revision);
+            info.value = Some(candidate.value.clone());
+            // Working-copy refresh occurs while the raw field is still dirty.
+            drafts.refresh(&address, Some(&info), revision + 1).unwrap();
+            drafts
+                .acknowledge_at(&candidate, true, revision + 1)
+                .unwrap();
+            assert_eq!(drafts.focused().unwrap().address, address);
+            assert_eq!(drafts.draft(&address).unwrap().base_revision, revision + 1);
+            assert!(!drafts.draft(&address).unwrap().dirty);
+            assert_eq!(
+                drafts.acknowledge_at(&candidate, true, revision + 2),
+                Err(Error::StaleCandidate)
+            );
+        }
     }
 }

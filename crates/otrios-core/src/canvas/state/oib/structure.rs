@@ -62,76 +62,7 @@ impl Document {
         let mut candidate = self.clone();
         let original = self.tree.hash();
         let result = (|| {
-            candidate.oib_validate_structure(batch)?;
-            let definitions: Vec<_> = batch
-                .operations
-                .iter()
-                .filter_map(|operation| {
-                    if let DocumentEdit::Definition(operation) = operation {
-                        Some(operation.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if !definitions.is_empty() {
-                candidate.oib_stage_definitions(&definitions)?;
-            }
-            let presets: Vec<_> = batch
-                .operations
-                .iter()
-                .filter_map(|operation| {
-                    if let DocumentEdit::Preset(operation) = operation {
-                        Some(operation.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if !presets.is_empty() {
-                candidate.oib_stage_presets(&presets)?;
-            }
-            let hierarchy: Vec<_> = batch
-                .operations
-                .iter()
-                .filter_map(|operation| {
-                    if let DocumentEdit::Hierarchy(operation) = operation {
-                        Some(operation.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if !hierarchy.is_empty() {
-                candidate.oib_hierarchy_stage(&hierarchy)?;
-            }
-            if let [DocumentEdit::Restore { defaults }] = batch.operations.as_slice() {
-                if *defaults {
-                    let signed = candidate.oib_binding()?;
-                    let resolved = candidate.oib_baseline_graph()?;
-                    let (mut restored, desired) =
-                        reset::restore(&signed.seed, &resolved, &candidate.oib_source()?)?;
-                    restored.instances = desired.iter().map(Into::into).collect();
-                    let mut edits = vec![candidate.oib_source_edit(|source| *source = restored)?];
-                    for allocation in desired {
-                        edits.push(Edit {
-                            path: cell_path(5, allocation.id),
-                            schema: candidate.oib_instance_schema(allocation.id),
-                            value: Some(bytes(&true)?),
-                        });
-                    }
-                    candidate.change(&[], edits)?;
-                } else {
-                    candidate.oib_restore_residents(false, writer)?;
-                }
-            }
-            let reset_defaults = matches!(
-                batch.operations.as_slice(),
-                [DocumentEdit::Restore { defaults: true }]
-            );
-            if candidate.tree.hash() != original || reset_defaults {
-                candidate.oib_prepare_final_structure(reset_defaults, writer)?;
-            }
+            candidate.oib_stage_structure(writer, batch)?;
             if candidate.tree.hash() != original {
                 // activate_oib compiles the complete draft once. A failed
                 // compilation stays private and the whole candidate is dropped.
@@ -178,6 +109,87 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// Stage one already-bounded structural batch without activating it.
+    /// The caller owns the private candidate and decides its single publication.
+    pub(super) fn oib_stage_structure(
+        &mut self,
+        writer: Actor,
+        batch: &InstanceOperation,
+    ) -> Result<bool> {
+        let original = self.tree.hash();
+        self.oib_validate_structure(batch)?;
+        let definitions: Vec<_> = batch
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                if let DocumentEdit::Definition(operation) = operation {
+                    Some(operation.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !definitions.is_empty() {
+            self.oib_stage_definitions(&definitions)?;
+        }
+        let presets: Vec<_> = batch
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                if let DocumentEdit::Preset(operation) = operation {
+                    Some(operation.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !presets.is_empty() {
+            self.oib_stage_presets(&presets)?;
+        }
+        let hierarchy: Vec<_> = batch
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                if let DocumentEdit::Hierarchy(operation) = operation {
+                    Some(operation.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !hierarchy.is_empty() {
+            self.oib_hierarchy_stage(&hierarchy)?;
+        }
+        if let [DocumentEdit::Restore { defaults }] = batch.operations.as_slice() {
+            if *defaults {
+                let signed = self.oib_binding()?;
+                let resolved = self.oib_baseline_graph()?;
+                let (mut restored, desired) =
+                    reset::restore(&signed.seed, &resolved, &self.oib_source()?)?;
+                restored.instances = desired.iter().map(Into::into).collect();
+                let mut edits = vec![self.oib_source_edit(|source| *source = restored)?];
+                for allocation in desired {
+                    edits.push(Edit {
+                        path: cell_path(5, allocation.id),
+                        schema: self.oib_instance_schema(allocation.id),
+                        value: Some(bytes(&true)?),
+                    });
+                }
+                self.change(&[], edits)?;
+            } else {
+                self.oib_restore_residents(false, writer)?;
+            }
+        }
+        let reset_defaults = matches!(
+            batch.operations.as_slice(),
+            [DocumentEdit::Restore { defaults: true }]
+        );
+        if self.tree.hash() != original || reset_defaults {
+            self.oib_prepare_final_structure(reset_defaults, writer)?;
+        }
+        Ok(self.tree.hash() != original)
     }
 
     fn oib_stage_definitions(&mut self, operations: &[DefinitionEdit]) -> Result<()> {

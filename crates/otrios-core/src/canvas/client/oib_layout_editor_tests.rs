@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Inspector controls author canonical layout and publish through real receipts.
+//! Inspector controls stage canonical layout and publish only through global Apply.
 use super::tests::{focus_address, mounted_fixture_session};
 use super::*;
 use otrios_interfaces::{
@@ -27,6 +27,35 @@ fn settle(client: &mut Client, authority: &mut crate::canvas::Document, session:
         }
     }
     panic!("layout receipt did not settle");
+}
+fn apply(client: &mut Client, authority: &mut crate::canvas::Document, session: &mut Session) {
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        client
+            .designer_action(LocalAction::ApplyWorkingCopy)
+            .unwrap()
+    );
+    assert!(!client.active.as_ref().unwrap().doc.confirmed());
+    settle(client, authority, session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
 }
 fn scroll_to(client: &mut Client, y: f32) {
     let viewport = client
@@ -98,7 +127,7 @@ fn visual(
         .active
         .as_ref()
         .unwrap()
-        .doc
+        .design_doc()
         .oib_authoring_seed()
         .unwrap()
         .graph
@@ -161,50 +190,26 @@ fn blank() -> (
     NodeId,
     u64,
 ) {
-    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    let (mut client, authority, session) = mounted_fixture_session(true);
     client.active.as_mut().unwrap().font = Some(Arc::new(crate::dashboard::font::test_font()));
-    // This fixture deliberately fills its admitted six-root canvas. Reuse one
-    // disposable duplicate slot rather than changing the production limit.
-    let duplicate = client
-        .active
-        .as_ref()
-        .unwrap()
-        .doc
-        .oib_instances()
-        .unwrap()
-        .into_iter()
-        .find(|instance| instance.id != instance.prototype)
-        .unwrap()
-        .id;
-    assert!(client.remove_oib(duplicate).unwrap());
-    settle(&mut client, &mut authority, &mut session);
-    client
-        .designer_action(LocalAction::Workspace(Task::Library))
-        .unwrap();
-    let operation = client
-        .active
-        .as_ref()
-        .unwrap()
-        .designer
-        .as_ref()
-        .unwrap()
-        .structure_tools
-        .iter()
-        .find(|(label, _)| label == "New component")
-        .unwrap()
-        .1
-        .clone();
+    let live_root = client.active.as_ref().unwrap().doc.oib_root();
+    assert!(client.designer_action(LocalAction::NewComponent).unwrap());
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), live_root);
     assert!(
         client
-            .designer_action(LocalAction::Structure(operation))
+            .active
+            .as_mut()
             .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
     );
-    settle(&mut client, &mut authority, &mut session);
     let graph = client
         .active
         .as_ref()
         .unwrap()
-        .doc
+        .design_doc()
         .oib_authoring_seed()
         .unwrap()
         .graph
@@ -215,60 +220,45 @@ fn blank() -> (
         .find(|d| d.name == "New component")
         .unwrap();
     let ids = (definition.id, definition.root);
-    let preset = graph
-        .presets
-        .iter()
-        .find(|p| p.definition == ids.0)
-        .unwrap()
-        .id;
-    let before = client
-        .active
-        .as_ref()
-        .unwrap()
-        .doc
-        .oib_allocations()
-        .unwrap()
-        .into_iter()
-        .map(|allocation| allocation.id)
-        .collect::<Vec<_>>();
-    assert!(
-        client.insert_oib(preset, None).unwrap(),
-        "status={} confirmed={} busy={} blocked={} dirty={}",
-        client.active.as_ref().unwrap().doc.oib_status_text(),
-        client.active.as_ref().unwrap().doc.confirmed(),
-        client.input_busy(),
-        client.active.as_ref().unwrap().oib_activation_blocked(),
-        client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .drafts
-            .drafts()
-            .iter()
-            .any(|d| d.dirty)
-    );
-    settle(&mut client, &mut authority, &mut session);
+    client
+        .inspect_oib_selection(Selection::Definition(ids.0))
+        .unwrap();
     let instance = client
         .active
         .as_ref()
         .unwrap()
-        .doc
-        .oib_allocations()
+        .definition_presentation
+        .as_ref()
         .unwrap()
-        .into_iter()
-        .find(|a| a.prototype == preset && !before.contains(&a.id))
-        .unwrap()
-        .id;
-    client
-        .inspect_oib_selection(Selection::Definition(ids.0))
-        .unwrap();
+        .preview
+        .instance
+        .0;
     (client, authority, session, ids.0, ids.1, instance)
 }
 fn frame(client: &mut Client, instance: u64) -> Rect {
-    let node=client.active.as_ref().unwrap().designer.as_ref().unwrap().objects.iter().find_map(|object|matches!(&object.selection,Selection::Object(address) if address.instance.0==instance && address.references.is_empty()).then_some(object.layout_node).flatten()).unwrap();
+    let m = client.active.as_ref().unwrap();
+    let preview = &m.definition_presentation.as_ref().unwrap().preview;
+    let source = m.design_doc().oib_authoring_seed().unwrap();
+    let root = source
+        .graph
+        .as_ref()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == preview.definition)
+        .unwrap()
+        .root;
+    let node = preview
+        .objects
+        .iter()
+        .find(|mapping| {
+            mapping.address.instance.0 == instance
+                && mapping.address.references.is_empty()
+                && mapping.address.node == root
+        })
+        .unwrap()
+        .layout_node
+        .unwrap();
     client
         .scene()
         .unwrap()
@@ -293,10 +283,20 @@ fn layout_editor_blank_and_padding_edit_change_measured_geometry_with_receipts()
     assert_eq!(flow.padding, [16.; 4]);
     assert_eq!(flow.gap, 8.);
     assert_eq!(frame(&mut client, instance).height, 48.);
-    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let values =
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap());
     replace(&mut client, address(definition, node, P::Padding), "40");
-    assert!(!client.active.as_ref().unwrap().doc.confirmed());
-    settle(&mut client, &mut authority, &mut session);
+    assert!(client.active.as_ref().unwrap().doc.confirmed());
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         visual(&client, definition, node)
             .layout
@@ -307,8 +307,10 @@ fn layout_editor_blank_and_padding_edit_change_measured_geometry_with_receipts()
         [40.; 4]
     );
     assert_eq!(frame(&mut client, instance).height, 80.);
+    apply(&mut client, &mut authority, &mut session);
+    assert_eq!(frame(&mut client, instance).height, 80.);
     assert_eq!(
-        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap()),
         values
     );
 }
@@ -357,32 +359,29 @@ fn layout_editor_axis_modes_are_independent_and_old_controls_do_not_retarget() {
     assert!(padding.frame.x >= 164. && padding.frame.y < align.frame.y + 156.);
     let stale = control(&mut client, "Width Fill");
     activate(&mut client, "Height Fixed");
-    settle(&mut client, &mut authority, &mut session);
     assert!(!client.activate(client.epoch(), stale).unwrap());
     let policy = visual(&client, definition, node).layout.unwrap();
     assert_eq!(policy.width.mode, Sizing::Fixed);
     assert_eq!(policy.height.mode, Sizing::Fixed);
     activate(&mut client, "Width Hug");
-    settle(&mut client, &mut authority, &mut session);
     let policy = visual(&client, definition, node).layout.unwrap();
     assert_eq!(policy.width.mode, Sizing::Hug);
     assert_eq!(policy.height.mode, Sizing::Fixed);
     activate(&mut client, "Free");
-    settle(&mut client, &mut authority, &mut session);
     assert_eq!(
         visual(&client, definition, node).layout.unwrap().placement,
         Placement::Free
     );
     replace(&mut client, address(definition, node, P::X), "-12");
-    settle(&mut client, &mut authority, &mut session);
     assert_eq!(
         visual(&client, definition, node).frame[0],
         Expr::Literal(Value::Number(-12.))
     );
+    apply(&mut client, &mut authority, &mut session);
 }
 #[test]
 fn layout_editor_per_edge_padding_and_bounds_keep_source_and_drafts_bounded() {
-    let (mut client, mut authority, mut session, definition, node, _) = blank();
+    let (mut client, _authority, _session, definition, node, _) = blank();
     let generation = client
         .active
         .as_ref()
@@ -400,13 +399,11 @@ fn layout_editor_per_edge_padding_and_bounds_keep_source_and_drafts_bounded() {
         generation
     );
     replace(&mut client, address(definition, node, P::PaddingLeft), "8");
-    settle(&mut client, &mut authority, &mut session);
     replace(
         &mut client,
         address(definition, node, P::PaddingRight),
         "24",
     );
-    settle(&mut client, &mut authority, &mut session);
     assert_eq!(
         visual(&client, definition, node)
             .layout
@@ -417,7 +414,6 @@ fn layout_editor_per_edge_padding_and_bounds_keep_source_and_drafts_bounded() {
         [8., 16., 24., 16.]
     );
     activate(&mut client, "Independent padding");
-    settle(&mut client, &mut authority, &mut session);
     assert_eq!(
         visual(&client, definition, node)
             .layout
@@ -429,7 +425,6 @@ fn layout_editor_per_edge_padding_and_bounds_keep_source_and_drafts_bounded() {
     );
     activate(&mut client, "Size bounds");
     replace(&mut client, address(definition, node, P::MinWidth), "120");
-    settle(&mut client, &mut authority, &mut session);
     let root = client.active.as_ref().unwrap().doc.oib_root();
     replace(&mut client, address(definition, node, P::MaxWidth), "80");
     assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
@@ -492,9 +487,9 @@ fn layout_captions_and_checkbox_render_with_admitted_font_and_keep_input() {
         |n| !matches!(&n.primitive, Primitive::Text { value, .. } if value.contains(['✓','□']))
     ));
     assert_eq!(client.designer_activate(id).unwrap(), Some(true));
-    settle(&mut client, &mut authority, &mut session);
     assert!(matches!(
         visual(&client, definition, node).shape,
         Shape::Canvas { clip: false }
     ));
+    apply(&mut client, &mut authority, &mut session);
 }

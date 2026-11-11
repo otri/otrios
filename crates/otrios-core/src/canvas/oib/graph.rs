@@ -8,6 +8,10 @@ use otrios_interfaces::{
     oib::{designer::*, graph as source},
 };
 
+#[path = "graph_preview.rs"]
+mod preview;
+pub(crate) use preview::{DefinitionPreview, definition_preview, definition_preview_with_values};
+
 /// Admitted typed chrome plus disposable graph output. Internal transformations
 /// update `blueprint`; conversion to an artifact Ui serializes at the boundary.
 #[derive(Clone)]

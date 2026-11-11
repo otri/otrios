@@ -98,17 +98,38 @@ fn workspace_task_keeps_invalid_field_visible() {
     assert!(mount.keyboard.visible);
 }
 #[test]
-fn workspace_mode_blurs_clean_field_and_waits_for_dirty_receipt() {
+fn workspace_mode_blurs_field_into_private_candidate_then_applies_explicitly() {
     let (mut client, mut authority, mut session, id) = focused_width();
+    let live_root = client.active.as_ref().unwrap().doc.oib_root();
     replace(&mut client, id, "410");
     client.set_oib_designer_mode(DesignerMode::Test).unwrap();
     let mount = client.active.as_ref().unwrap();
     let designer = mount.designer.as_ref().unwrap();
     assert!(!designer.editor_focused());
-    assert_eq!(designer.mode, DesignerMode::Edit);
-    assert_eq!(designer.pending_mode, Some(DesignerMode::Test));
-    assert!(!mount.doc.confirmed());
+    assert_eq!(designer.mode, DesignerMode::Test);
+    assert_eq!(designer.pending_mode, None);
+    assert!(mount.doc.confirmed());
+    assert_eq!(mount.doc.oib_root(), live_root);
+    assert!(mount.working_copy.as_ref().unwrap().dirty());
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    client.set_oib_designer_mode(DesignerMode::Edit).unwrap();
+    assert!(
+        client
+            .designer_action(LocalAction::ApplyWorkingCopy)
+            .unwrap()
+    );
+    assert!(!client.active.as_ref().unwrap().doc.confirmed());
     settle(&mut client, &mut authority, &mut session);
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
     let mount = client.active.as_ref().unwrap();
     assert_eq!(mount.designer.as_ref().unwrap().mode, DesignerMode::Test);
     assert!(mount.designer_preview.is_some());

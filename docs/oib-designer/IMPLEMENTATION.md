@@ -293,3 +293,47 @@ need admitted imported exports for the real LabelledSlider journey; deleting a
 component in use is filtered out today and needs visible impact/reason feedback.
 Full row qualification remains pending alongside named styles/modes, independent
 scroll owners and the previously listed overflow/wrapping/zero-extent gates.
+
+## B5 integration checkpoint — 2026-11-11
+
+Status: **IN PROGRESS; not deployed**. B1–B4 live evidence above is historical;
+it does not establish acceptance of this B5 work. The current editor uses the
+sole live adapter for confirmed state and a bounded local working copy. One OIB
+Apply atomically stages source and causal changes on a private candidate, with a
+maximum of 16 operations and 8 KiB, then validates and publishes once. State
+protocol is v33 on native/server and browser; the opening release-control envelope
+remains v1. Local undo history is bounded to 64 KiB.
+
+The working copy pins the epoch, confirmed baseline, structural generation and
+exact causal contexts. A durable per-writer digest receipt supports reconciliation
+of the submitted operation; new targets receive a seeded context. Preview compiles
+the private candidate, including a private virtual instance of the selected
+definition with sample values. Semantic values are projected into that preview
+without changing imported bodies. Edit/Test mode, local drafts and canonical
+source generation have distinct roles: a local draft or mode change is not a
+confirmed canonical generation.
+
+Focused evidence so far: Apply **11**, working choice **1**, and preview/clip
+**12** tests passed; workspace **6**, focus **4**, and layout **4** tests passed.
+The integrated Designer suite passed **66 tests**, with one existing ignored timing diagnostic. A focused real-process WebSocket test passed against a freshly built macOS canvas-server, covering authorization, mixed publication, lost reply, authority restart and idempotent receipt recovery; this is not Linux IPC acceptance.
+These are local tests, not live Frame/Web qualification.
+
+Remaining B5 work includes conditional post-Apply Undo, typed API and slots UI,
+retirement and dependency lifecycle, and full impact/replacement review. Apply/Discard/Stay leave confirmation is implemented and passed three focused tests for exact-receipt navigation, rejection, concurrent edits, raw fields and input barriers. Full B6 styles, catalog qualification and live acceptance remain.
+Do not mark the goal complete from this checkpoint.
+
+Restart map: inspect `canvas/state/oib/apply.rs` for atomic staging and receipts;
+`client/oib_working_copy.rs` for pinned context and local history;
+`client/oib_editor.rs` for editor lifecycle; and `oib/graph_preview.rs` for
+private preview and semantic projection. The guest activation/reconnect resource regression is fixed: matching qualified compositions reuse their exact validated guest set and resumed locals, without a third allocation or increased limits (14 component tests passed). The final added private-source Test regression also passed. For publication, use the existing publisher and perform focused live Frame/Web acceptance. The remaining B5 capabilities stay open after this slice. Complete B6 styles and
+catalog/live qualification separately before claiming the full goal.
+
+### B5 validation before first publication
+
+- `python3 /tmp/otrios-d2-cargo.py test -p otrios-core --features canvas --lib oib_ --locked --offline`: 79 passed, one existing ignored diagnostic, plus the subsequently added `working_copy_composition_test` regression passed separately.
+- Same wrapper/library command with `atomic_apply`: 11 passed; `graph::preview::tests`: 12 passed; `component_behavior_tests`: 14 passed after fixing redundant guest allocation; `oib_leave`: three passed in the focused role run.
+- `node --test scripts/test-dashboard-session.mjs scripts/test-ui-update.mjs`: 22 passed; native/server and browser declare state v33, control v1.
+- Fresh `canvas-server` build and `OTRIOS_SPACES_SERVER=<mac-target/debug/canvas-server>` integration test `d1::b5_atomic_apply_mixed_publication_lost_reply_restart_replay_and_admin_gate`: one passed over real macOS authority-process/WebSocket boundaries; not Linux IPC qualification.
+- Core library Clippy with `-D warnings` passed before final source formatting. The final run is recorded with publication evidence below.
+
+The original repository remains on main; implementation stays on the feature branch. No full preflight, data preservation inventory, separate signing campaign or new PR was run. Initial B5 publication is a coherent slice; full typed API/slots, conditional post-Apply history, imported linking, impact/retirement and B6/B7 qualification remain open.

@@ -251,28 +251,71 @@ pub fn validate_surface(ui: &Ui) -> Result<()> {
     Ok(())
 }
 
-/// Painted content and touch targets must fit within their admitted row, even
-/// when nonpainting component containers extend past it.
+/// Visible paint must fit its admitted row. Ancestor clips apply to paint and
+/// input together; clipped-off source geometry does not escape the row.
 pub fn validate_row_geometry(scene: &crate::dashboard::scene::Scene, viewport: u16) -> Result<()> {
     use otrios_interfaces::scene::{Primitive, SceneNode, TouchResponder};
-    fn visit(node: &SceneNode, parent: [f32; 2], size: [f32; 2]) -> Result<()> {
-        let at = [parent[0] + node.frame.x, parent[1] + node.frame.y];
+    fn intersection(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+        [
+            a[0].max(b[0]),
+            a[1].max(b[1]),
+            a[2].min(b[2]),
+            a[3].min(b[3]),
+        ]
+    }
+    fn visit(
+        node: &SceneNode,
+        parent: [f32; 2],
+        scale: f32,
+        size: [f32; 2],
+        clip: Option<[f32; 4]>,
+    ) -> Result<()> {
+        let at = [
+            parent[0] + node.frame.x * scale,
+            parent[1] + node.frame.y * scale,
+        ];
+        let bounds = [
+            at[0],
+            at[1],
+            at[0] + node.frame.width * scale,
+            at[1] + node.frame.height * scale,
+        ];
+        let visible = clip.map_or(bounds, |clip| intersection(bounds, clip));
         if !matches!(
             node.primitive,
             Primitive::Canvas { .. } | Primitive::Viewport { .. }
-        ) && (at.iter().any(|v| *v < -0.01)
-            || at[0] + node.frame.width > size[0] + 0.01
-            || at[1] + node.frame.height > size[1] + 0.01)
+        ) && visible[0] < visible[2]
+            && visible[1] < visible[3]
+            && (visible[0] < -0.01
+                || visible[1] < -0.01
+                || visible[2] > size[0] + 0.01
+                || visible[3] > size[1] + 0.01)
         {
             return Err("OIB painted content escapes its row; adjust geometry or row pitch".into());
         }
+        // Keep the declared target minimum, even when only part of that target
+        // is visible. Clipping must not make its remaining portion unclickable.
         if matches!(node.responder, Some(TouchResponder::Drag(_)))
             && (node.frame.width < 48. || node.frame.height < 32.)
         {
             return Err("OIB slider touch target is too small".into());
         }
+        let clips = matches!(
+            node.primitive,
+            Primitive::Canvas { clip: true } | Primitive::Viewport { .. }
+        );
+        let next_clip = if clips {
+            Some(clip.map_or(bounds, |clip| intersection(bounds, clip)))
+        } else {
+            clip
+        };
+        let next_scale = if let Primitive::Viewport { scale: local } = node.primitive {
+            scale * local
+        } else {
+            scale
+        };
         for child in &node.children {
-            visit(child, at, size)?;
+            visit(child, at, next_scale, size, next_clip)?;
         }
         Ok(())
     }
@@ -280,10 +323,13 @@ pub fn validate_row_geometry(scene: &crate::dashboard::scene::Scene, viewport: u
         .path(u32::from(viewport))
         .ok_or("Missing row viewport")?;
     for row in &path.last().ok_or("Missing row viewport")?.node.children {
-        let size = [row.frame.width, row.frame.height];
-        for child in &row.children {
-            visit(child, [0., 0.], size)?;
-        }
+        visit(
+            row,
+            [-row.frame.x, -row.frame.y],
+            1.,
+            [row.frame.width, row.frame.height],
+            None,
+        )?;
     }
     Ok(())
 }

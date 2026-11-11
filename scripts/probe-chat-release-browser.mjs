@@ -7,7 +7,7 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {tmpdir} from 'node:os';
 const args=process.argv.slice(2),arg=(name,fallback)=>{const i=args.indexOf(name);return i<0?fallback:args[i+1];};
-const url=arg('--url'),expectedProtocol=arg('--protocol','otrios-canvas-sync-v32'),expectedRelease=arg('--release');assert(url);
+const url=arg('--url'),expectedProtocol=arg('--protocol','otrios-canvas-sync-v33'),expectedRelease=arg('--release');assert(url);
 const output=resolve(arg('--output','target/chat-release-probe'));await mkdir(output,{recursive:true});
 const profile=await mkdtemp(join(tmpdir(),'otrios-release-probe-'));
 const browser=spawn(arg('--chromium','chromium'),['--headless=new','--no-sandbox','--enable-unsafe-swiftshader','--use-angle=swiftshader','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','about:blank'],{stdio:['ignore','ignore','pipe']});let socket;
@@ -27,7 +27,7 @@ try{
   }
   assert(ready,'online recovered chat with a settled document');assert.equal(hello?.version,1);assert.equal(hello?.state_protocol,expectedProtocol);if(expectedRelease)assert.equal(hello.release,expectedRelease);
   const sample=await evaluate("(()=>{const r=document.querySelector('#revision'),c=JSON.parse(r.dataset.chat);return {release:r.dataset.release,rows:[...document.querySelector('#chat-log').children].map(n=>({sequence:Number(n.dataset.sequence),text:n.textContent})).sort((a,b)=>a.sequence-b.sequence),chat:{messages:c.messages,first_sequence:c.first_sequence,last_sequence:c.last_sequence,selected_bytes:c.selected_bytes,replica_bytes:c.replica_bytes,pending:c.pending},resources:JSON.parse(r.dataset.runtimeResources)};})()");
-  assert.equal(sample.chat.pending,0);assert(sample.rows.length>0);if(expectedProtocol==='otrios-canvas-sync-v32')assert(sample.rows.length<=64);
+  assert.equal(sample.chat.pending,0);assert(sample.rows.length>0);if(expectedProtocol==='otrios-canvas-sync-v33')assert(sample.rows.length<=64);
   const tail=sample.rows.slice(-10),hash=value=>createHash('sha256').update(value).digest('hex');
   const result={passed:true,hello,release:sample.release,chat:sample.chat,resources:sample.resources,dom_records:sample.rows.length,tail_sequences:tail.map(r=>r.sequence),tail_text_sha256:tail.map(r=>hash(r.text)),tail_sha256:hash(JSON.stringify(tail)),sent_message_commands:0};
   const shot=await call('Page.captureScreenshot',{format:'png'},sessionId);await writeFile(join(output,'chat.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'probe.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({passed:true,release:hello.release,protocol:hello.state_protocol,dom_records:sample.rows.length,tail_sequences:result.tail_sequences,tail_sha256:result.tail_sha256}));

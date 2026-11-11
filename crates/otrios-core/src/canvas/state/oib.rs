@@ -8,6 +8,7 @@ use otrios_interfaces::oib::{
 };
 use std::collections::BTreeSet;
 mod address;
+mod apply;
 mod baseline;
 #[cfg(test)]
 mod cache_tests;
@@ -930,6 +931,13 @@ impl Document {
         Ok(())
     }
     pub(super) fn oib_write(&mut self, writer: Actor, changes: &[Change]) -> Result<()> {
+        let next = self.oib_stage_changes(writer, changes)?;
+        if next.hash() != self.tree.hash() {
+            self.activate_oib(next)?;
+        }
+        Ok(())
+    }
+    fn oib_stage_changes(&self, writer: Actor, changes: &[Change]) -> Result<Snapshot> {
         let _profile = crate::canvas::profiling::span("oib.write");
         if changes.is_empty() || changes.len() > MAX_CHANGES {
             return Err("OIB change batch limit".into());
@@ -967,9 +975,9 @@ impl Document {
             next = next.edit_observed(writer, &edit, &observed).map_err(err)?;
         }
         if seen.is_empty() {
-            return Ok(());
+            return Ok(self.tree.clone());
         }
-        self.activate_oib(next)
+        Ok(next)
     }
     fn activate_oib(&mut self, next: Snapshot) -> Result<()> {
         let _profile = crate::canvas::profiling::span("oib.activate");
@@ -1086,7 +1094,7 @@ impl StateAdapter {
     pub(in crate::canvas) fn oib_saving(&self) -> bool {
         self.flight
             .as_ref()
-            .is_some_and(|f| !f.oib.is_empty() || f.oib_instance.is_some())
+            .is_some_and(|f| !f.oib.is_empty() || f.oib_instance.is_some() || f.oib_apply.is_some())
     }
     pub(in crate::canvas) fn oib_root(&self) -> Option<merkle::Hash> {
         self.doc.tree.subtree(&[4]).ok().map(|n| n.hash())
@@ -1274,6 +1282,7 @@ impl StateAdapter {
         // compiles/validates the draft and journals the active result atomically.
         // Repeating that work here only blocks delivery of the button release.
         self.flight = Some(Flight {
+            oib_apply: None,
             oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self
                 .acknowledged
@@ -1742,6 +1751,7 @@ impl StateAdapter {
             }
         }
         self.flight = Some(Flight {
+            oib_apply: None,
             oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self
                 .acknowledged

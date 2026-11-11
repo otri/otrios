@@ -426,7 +426,9 @@ impl Peer {
             let bytes = self.state.generate().unwrap().expect("pending D1 intent");
             if matches!(
                 canvas::decode_state_request(&bytes).unwrap(),
-                StateRequest::OibWrite { .. } | StateRequest::OibInstance { .. }
+                StateRequest::OibWrite { .. }
+                    | StateRequest::OibInstance { .. }
+                    | StateRequest::OibApply { .. }
             ) {
                 return bytes;
             }
@@ -463,6 +465,105 @@ fn assert_values(state: &StateAdapter) {
     for (field, value) in VALUES {
         assert_eq!(state.value(field).unwrap(), value, "field {field}");
     }
+}
+
+/// Portable process/socket proof. The adapters run in this test process; this
+/// does not establish Linux shared-memory IPC or separately spawned clients.
+#[test]
+fn b5_atomic_apply_mixed_publication_lost_reply_restart_replay_and_admin_gate() {
+    use otrios_interfaces::oib::authoring::{ApplyResult, DefinitionEdit, DocumentEdit};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut fixture = Fixture::start(&binary);
+    let mut admin = fixture.open('a', 95, 0);
+    let mut member = fixture.open('b', 96, 0);
+    assert!(admin.binding.ui_editable && !member.binding.ui_editable);
+    assert!(admin.state.set(&VALUES).unwrap());
+    admin.settle();
+    member.observe(&admin);
+    let collection = admin.binding.collection.clone();
+    let property = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(3),
+    };
+    let cell = admin.state.oib_property_register(&property).unwrap().cell;
+    let before_ui = admin.state.oib_generation().unwrap();
+    let before_structure = admin.state.oib_structural_generation().unwrap();
+    let mut apply = admin.state.oib_apply_base().unwrap();
+    apply
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::RenameDefinition {
+            definition: DefinitionId(12),
+            name: "B5 process label".into(),
+        }));
+    apply.changes.push(
+        admin
+            .state
+            .oib_capture_change(&property, Some(Value::Text("Atomic process text".into())))
+            .unwrap(),
+    );
+    let digest = StateAdapter::oib_apply_digest(&apply).unwrap();
+    assert!(admin.state.apply_oib(apply).unwrap());
+    let request = admin.issue();
+    assert!(matches!(
+        canvas::decode_state_request(&request).unwrap(),
+        StateRequest::OibApply { .. }
+    ));
+    member.send(request.clone());
+    assert!(member.denied().contains("Space Admin"));
+    drop(member);
+    let mut observer = fixture.open('b', 97, 0);
+    assert_eq!(observer.state.oib_generation(), Some(before_ui));
+    admin.send(request.clone());
+    // Let another real socket prove publication while the sender deliberately
+    // never consumes its reply. Preserve only its RAM flight across restart.
+    observer.until(|s| s.oib_structural_generation() == Some(before_structure + 1));
+    assert_eq!(observer.state.oib_generation(), Some(before_ui + 1));
+    assert_eq!(
+        observer.state.oib_active().unwrap()[&cell],
+        Some(Value::Text("Atomic process text".into()))
+    );
+    let persisted = fixture.durable(&collection);
+    let compiled = persisted.oib_compiled(2).unwrap().0;
+    assert!(
+        oib::seed(&compiled)
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|d| d.id == DefinitionId(12) && d.name == "B5 process label")
+    );
+    assert_eq!(persisted.oib_status().unwrap().generation, before_ui + 1);
+    let pending = admin.state;
+    drop(admin.socket);
+    drop(observer);
+    fixture.rig.stop();
+    fixture.rig.restart(&binary, true, true);
+    let mut recovered = fixture.open('a', 95, pending.resume_sequence());
+    recovered.state.restore_pending(&pending).unwrap();
+    recovered.settle();
+    let receipt = recovered.state.oib_apply_result().unwrap().unwrap();
+    assert_eq!(receipt.digest, digest);
+    assert!(
+        matches!(receipt.result, ApplyResult::Accepted { generation, structural_generation } if generation == before_ui + 1 && structural_generation == before_structure + 1)
+    );
+    assert!(recovered.state.confirmed());
+    recovered.send(request);
+    // This subsequent ordered app write acts as a socket barrier after replay.
+    assert!(recovered.state.set(&[(1, 482)]).unwrap());
+    recovered.settle();
+    assert_eq!(recovered.state.oib_generation(), Some(before_ui + 1));
+    assert_eq!(
+        recovered.state.oib_structural_generation(),
+        Some(before_structure + 1)
+    );
+    assert_eq!(recovered.state.oib_apply_result().unwrap(), Some(receipt));
+    assert_eq!(recovered.state.value(1).unwrap(), 482);
+    fixture.counter_unchanged();
 }
 fn seed(ui: &Ui) -> &otrios_interfaces::oib::Seed {
     oib::seed(ui).unwrap()

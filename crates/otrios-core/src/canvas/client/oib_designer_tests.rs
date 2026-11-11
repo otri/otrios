@@ -1023,7 +1023,9 @@ fn fixture_sync(
 fn mounted_six_panel_fixture(focus: bool) -> Client {
     mounted_fixture_session(focus).0
 }
-pub(super) fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Session) {
+pub(in crate::canvas::client) fn mounted_fixture_session(
+    focus: bool,
+) -> (Client, crate::canvas::Document, Session) {
     mounted_fixture_session_with_count(focus, 4)
 }
 fn mounted_fixture_session_with_count(
@@ -1595,7 +1597,7 @@ fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
     );
 }
 
-pub(super) fn editor_address(property: u64) -> PropertyAddress {
+pub(in crate::canvas::client) fn editor_address(property: u64) -> PropertyAddress {
     PropertyAddress::Occurrence {
         instance: InstanceId(20),
         path: PropertyPath {
@@ -1635,7 +1637,10 @@ fn editor_value(client: &Client, property: u64) -> Value {
 fn focus_property(client: &mut Client, property: u64) -> u32 {
     focus_address(client, editor_address(property))
 }
-pub(super) fn focus_address(client: &mut Client, address: PropertyAddress) -> u32 {
+pub(in crate::canvas::client) fn focus_address(
+    client: &mut Client,
+    address: PropertyAddress,
+) -> u32 {
     client
         .designer_activate(super::super::oib_workspace::TAB_INSPECT)
         .unwrap();
@@ -1715,7 +1720,8 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
             .any(|i| i.id == id && i.focused && i.value == "Sound")
     );
     assert!(client.edit_text_input(epoch, id, &Edit::Enter).unwrap());
-    assert!(client.active.as_ref().unwrap().doc.oib_saving());
+    assert!(!client.active.as_ref().unwrap().doc.oib_saving());
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(editor_value(&client, 3), Value::Text("Sound".into()));
     assert!(
@@ -1723,6 +1729,7 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
             .designer_action(LocalAction::Write(editor_address(3), None))
             .unwrap()
     );
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(editor_value(&client, 3), Value::Text("Volume".into()));
     let id = focus_property(&mut client, 2);
@@ -1741,6 +1748,7 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
             .unwrap()
     );
     assert!(client.blur_text_input(epoch, id).unwrap());
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(editor_override(&client, 2), Some(Value::Number(377.5)));
     assert_eq!(
@@ -2077,6 +2085,7 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
         .into_iter()
         .enumerate()
     {
+        let before_preview = cached_layout(client.active.as_ref().unwrap()).unwrap();
         let generation = authority.oib_status().unwrap().generation;
         let (before_hierarchy, before_management, before_controls) = {
             let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
@@ -2116,6 +2125,8 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
             &mut client,
             &LocalAction::Apply(address.clone())
         ));
+        assert!(!client.active.as_ref().unwrap().doc.oib_saving());
+        assert!(client.designer_apply_working_copy().unwrap());
         assert!(client.active.as_ref().unwrap().doc.oib_saving());
         {
             let mount = client.active.as_ref().unwrap();
@@ -2180,7 +2191,11 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
             "incremental paint agrees with a full resolution of current state"
         );
         fn scene_structure(node: &SceneNode, out: &mut Vec<(u32, Rect, Option<TouchResponder>)>) {
-            out.push((node.id, node.frame, node.responder));
+            // Lifecycle toolbar commands change enabled state on receipts.
+            // Paint-only edits preserve authored preview geometry and input IDs.
+            if node.id <= u32::from(u16::MAX) {
+                out.push((node.id, node.frame, node.responder));
+            }
             for child in &node.children {
                 scene_structure(child, out);
             }
@@ -2192,6 +2207,22 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
         assert_eq!(
             before, after,
             "Accent preserves resolved layout and hit-test identities"
+        );
+        fn authored_paint(node: &SceneNode, out: &mut Vec<(u32, Primitive)>) {
+            if node.id <= u32::from(u16::MAX) {
+                out.push((node.id, node.primitive.clone()));
+            }
+            for child in &node.children {
+                authored_paint(child, out);
+            }
+        }
+        let mut previous_paint = Vec::new();
+        let mut current_paint = Vec::new();
+        authored_paint(before_preview.root(), &mut previous_paint);
+        authored_paint(painted.root(), &mut current_paint);
+        assert_ne!(
+            previous_paint, current_paint,
+            "authored preview paint changes independently of toolbar state"
         );
         assert!(mount.doc.confirmed());
         assert_eq!(authority.oib_status().unwrap().generation, generation + 1);
@@ -2316,6 +2347,7 @@ fn frame_focus_invalid_drafts_cancel_and_color_picker_stay_local_until_apply() {
             .is_none()
     );
     assert!(client.designer_action(LocalAction::Apply(address)).unwrap());
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(
         editor_override(&client, 1),
@@ -2499,10 +2531,11 @@ fn frame_focus_conflict_choice_is_explicit_and_stale_choice_cannot_resolve_new_s
     let at = editor_address(3);
     assert!(
         client
-            .designer_action(LocalAction::Write(
-                at.clone(),
-                Some(Value::Text("Sound".into()))
-            ))
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .edit_oib_property(&at, Some(Value::Text("Sound".into())))
             .unwrap()
     );
     let a = issue_editor_write(&mut client.active.as_mut().unwrap().doc);
@@ -2525,6 +2558,7 @@ fn frame_focus_conflict_choice_is_explicit_and_stale_choice_cannot_resolve_new_s
     );
     let choice = LocalAction::Choose(Box::new(view.clone()), Some(Value::Text("Sound".into())));
     assert!(activate_inspector_action(&mut client, &choice));
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert!(
         client
@@ -2677,15 +2711,11 @@ fn frame_focus_tab_reveals_below_fold_fields_without_admitting_stale_ids() {
     );
 }
 #[test]
-fn frame_focus_source_navigation_waits_for_focused_edit_confirmation() {
+fn frame_focus_source_navigation_preserves_local_edit_until_global_apply() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
     client
-        .inspect_oib_selection(Selection::Object(ObjectAddress {
-            instance: InstanceId(20),
-            references: vec![NodeId(7)],
-            node: NodeId(1),
-        }))
+        .inspect_oib_selection(editing::selection(&editor_address(1)))
         .unwrap();
     let id = focus_property(&mut client, 1);
     let epoch = client.epoch();
@@ -2707,32 +2737,23 @@ fn frame_focus_source_navigation_waits_for_focused_edit_confirmation() {
         node: NodeId(1),
         property: PropertyId(1),
     };
-    assert!(
-        !activate_inspector_action(&mut client, &LocalAction::Source(shared.clone())),
-        "navigation is pending, not reported complete"
-    );
-    assert!(client.active.as_ref().unwrap().doc.oib_saving());
+    assert!(activate_inspector_action(
+        &mut client,
+        &LocalAction::Source(shared)
+    ));
+    let m = client.active.as_mut().unwrap();
+    assert!(m.doc.generate().unwrap().is_none());
+    assert!(m.working_copy.as_ref().unwrap().dirty());
     assert_eq!(
-        client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .pending_source,
-        Some(shared)
-    );
-    settle_editor(&mut client, &mut authority, &mut session);
-    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
-    assert_eq!(
-        d.selection,
+        m.designer.as_ref().unwrap().selection,
         Selection::DefinitionNode {
             definition: DefinitionId(10),
             node: NodeId(1)
         }
     );
-    assert!(d.pending_source.is_none());
+    assert!(m.definition_presentation.is_some());
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(
         editor_override(&client, 1),
         Some(Value::Color([0x12, 0x34, 0x56, 255]))
@@ -2740,15 +2761,11 @@ fn frame_focus_source_navigation_waits_for_focused_edit_confirmation() {
 }
 
 #[test]
-fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
+fn frame_focus_hierarchy_selection_after_valid_blur_keeps_edit_local() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
     client
-        .inspect_oib_selection(Selection::Object(ObjectAddress {
-            instance: InstanceId(20),
-            references: vec![NodeId(7)],
-            node: NodeId(1),
-        }))
+        .inspect_oib_selection(editing::selection(&editor_address(3)))
         .unwrap();
     let id = focus_property(&mut client, 3);
     let epoch = client.epoch();
@@ -2770,33 +2787,15 @@ fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
         node: NodeId(1),
     });
     assert!(
-        !client
+        client
             .designer_action(LocalAction::Select(target.clone()))
             .unwrap()
     );
-    assert_eq!(
-        client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .pending_selection,
-        Some(target.clone())
-    );
+    let m = client.active.as_mut().unwrap();
+    assert!(m.doc.generate().unwrap().is_none());
+    assert_eq!(m.designer.as_ref().unwrap().selection, target);
+    assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
-    assert_eq!(
-        client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .selection,
-        target
-    );
     assert_eq!(
         editor_override(&client, 3),
         Some(Value::Text("Sound".into()))
@@ -3225,6 +3224,16 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
         .collect();
     for id in temporary {
         assert!(client.remove_oib(id).unwrap());
+        if client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .is_some_and(|w| w.dirty())
+        {
+            assert!(client.designer_apply_working_copy().unwrap());
+        }
         settle_editor(&mut client, &mut authority, &mut session);
     }
     let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
@@ -3237,6 +3246,16 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
             .edit_oib_property(&editor_address(3), Some(Value::Text("Sound".into())))
             .unwrap()
     );
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let audio_before = client
         .active
@@ -3264,6 +3283,16 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
     // even though its template is absent from the compiled resident document.
     activate_studio_tool(&mut client, "Insert component...");
     let stale_insert = activate_studio_tool(&mut client, "Insert Power");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert!(!client.activate(client.epoch(), stale_insert).unwrap());
     let power = client
@@ -3335,6 +3364,16 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
             .edit_text_input(client.epoch(), field, &Edit::Enter)
             .unwrap()
     );
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let power_before = client
         .active
@@ -3368,6 +3407,16 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
     ] {
         activate_studio_root(&mut client, instance);
         let stale_move = activate_studio_tool(&mut client, tool);
+        if client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .is_some_and(|w| w.dirty())
+        {
+            assert!(client.designer_apply_working_copy().unwrap());
+        }
         settle_editor(&mut client, &mut authority, &mut session);
         assert_eq!(order(&client), expected);
         assert!(!client.activate(client.epoch(), stale_move).unwrap());
@@ -3381,7 +3430,7 @@ fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retar
             display_before
         );
         assert_eq!(m.doc.oib_property_register(&label).unwrap(), power_before);
-        assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
+        assert_eq!([1, 2, 3, 4].map(|f| m.doc.typed_value(f).unwrap()), fields);
     }
     let m = client.active.as_ref().unwrap();
     let seed = m.doc.oib_authoring_seed().unwrap();
@@ -3584,6 +3633,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
         .collect();
     for id in temporary {
         assert!(client.remove_oib(id).unwrap());
+        if client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .is_some_and(|w| w.dirty())
+        {
+            assert!(client.designer_apply_working_copy().unwrap());
+        }
         settle_editor(&mut client, &mut authority, &mut session);
     }
     assert!(
@@ -3595,6 +3654,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
             .edit_oib_property(&editor_address(3), Some(Value::Text("Sound".into())))
             .unwrap()
     );
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
     let original = client
@@ -3606,6 +3675,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
         .unwrap();
     activate_studio_tool(&mut client, "Insert component...");
     activate_studio_tool(&mut client, "Insert Power");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let power = client
         .active
@@ -3769,6 +3848,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
             .edit_text_input(client.epoch(), field, &Edit::Enter)
             .unwrap()
     );
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(
         client
@@ -3843,6 +3932,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
             .any(|i| i.id == power.id && i.active)
     );
     assert!(client.activate(client.epoch(), delete).unwrap());
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert!(
         !client
@@ -3870,6 +3969,16 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
         activate_studio_tool(&mut client, "Insert component...");
     }
     activate_studio_tool(&mut client, "Insert Power");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let replacement = client
         .active
@@ -3887,7 +3996,7 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
     activate_studio_root(&mut client, 20);
     assert!(!client.activate(client.epoch(), delete).unwrap());
     let m = client.active.as_ref().unwrap();
-    assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
+    assert_eq!([1, 2, 3, 4].map(|f| m.doc.typed_value(f).unwrap()), fields);
     assert_eq!(
         m.doc.oib_property_register(&editor_address(3)).unwrap(),
         original
@@ -4234,8 +4343,16 @@ fn responsive_workspace_delete_discards_own_dirty_draft_and_retains_unrelated_dr
     assert!(!client.keyboard_visible());
     settle_editor(&mut client, &mut authority, &mut session);
     let m = client.active.as_ref().unwrap();
-    assert_eq!(m.doc.oib_generation(), Some(generation + 1));
-    assert!(!m.doc.oib_instances().unwrap().iter().any(|i| i.id == 30));
+    assert_eq!(m.doc.oib_generation(), Some(generation));
+    assert!(m.working_copy.as_ref().unwrap().dirty());
+    assert!(
+        !m.design_doc()
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == 30)
+    );
+    assert!(m.doc.oib_instances().unwrap().iter().any(|i| i.id == 30));
     assert!(m.designer.as_ref().unwrap().drafts.drafts().iter().all(|draft| !matches!(&draft.address, PropertyAddress::Occurrence { instance, .. } if instance.0 == 30)));
     let audio = m
         .designer
@@ -4254,13 +4371,31 @@ fn responsive_workspace_delete_discards_own_dirty_draft_and_retains_unrelated_dr
     assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
     assert!(client.confirmed());
     assert!(!client.input_busy());
+    assert!(!client.designer_apply_working_copy().unwrap());
+    client
+        .designer_discard_property(&editor_address(2))
+        .unwrap();
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == 30)
+    );
 }
 
 #[test]
 fn responsive_workspace_shared_definition_tools_preserve_instances_values_and_stale_targets() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
-    let fields = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let fields =
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap());
     let allocations = authority.oib_allocations().unwrap();
     let values = authority.oib_values(2).unwrap();
     client
@@ -4271,13 +4406,23 @@ fn responsive_workspace_shared_definition_tools_preserve_instances_values_and_st
         .unwrap();
     let generation = authority.oib_status().unwrap().generation;
     let stale = activate_studio_tool(&mut client, "Move shared earlier");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(authority.oib_status().unwrap().generation, generation + 1);
     assert!(!client.activate(client.epoch(), stale).unwrap());
     assert_eq!(authority.oib_allocations().unwrap(), allocations);
     assert_eq!(authority.oib_values(2).unwrap(), values);
     assert_eq!(
-        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap()),
         fields
     );
     assert_eq!(
@@ -4337,6 +4482,16 @@ fn responsive_workspace_shared_definition_tools_preserve_instances_values_and_st
         "Components follows the authored visual order"
     );
     activate_studio_tool(&mut client, "Move shared later");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(authority.oib_status().unwrap().generation, generation + 2);
     assert_eq!(authority.oib_values(2).unwrap(), values);
@@ -4359,7 +4514,8 @@ fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_co
     use otrios_interfaces::oib::authoring::{DefinitionBatch, DefinitionEdit};
     let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
-    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let values =
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap());
     client
         .inspect_oib_selection(Selection::Definition(DefinitionId(10)))
         .unwrap();
@@ -4399,6 +4555,16 @@ fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_co
             .unwrap(),
         )
         .unwrap();
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert!(!client.designer_commit_property(&name, false).unwrap());
     let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
@@ -4422,6 +4588,16 @@ fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_co
         .oib_next_identity()
         .unwrap();
     activate_studio_tool(&mut client, "New component");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let definition = DefinitionId(next);
     let node = NodeId(next + 1);
@@ -4435,6 +4611,16 @@ fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_co
     let id = focus_address(&mut client, width.clone());
     client.edit_text_input(epoch, id, &replace("400")).unwrap();
     assert!(client.edit_text_input(epoch, id, &Edit::Enter).unwrap());
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let authored = client
         .active
@@ -4465,7 +4651,7 @@ fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_co
             .all(|p| p.frame.is_none())
     );
     assert_eq!(
-        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap()),
         values
     );
     assert!(client.scene().unwrap().controls().len() <= 128);
@@ -4485,11 +4671,32 @@ fn responsive_workspace_connects_an_unbound_preset_through_visible_source_choice
         .doc
         .oib_next_identity()
         .unwrap();
-    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let values =
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap());
     activate_studio_tool(&mut client, "New preset");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     activate_studio_tool(&mut client, "Insert component...");
     activate_studio_tool(&mut client, "Insert New preset");
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     let instance = authority
         .oib_allocations()
@@ -4544,6 +4751,16 @@ fn responsive_workspace_connects_an_unbound_preset_through_visible_source_choice
         &mut client,
         &LocalAction::Structure(operation)
     ));
+    if client
+        .active
+        .as_ref()
+        .unwrap()
+        .working_copy
+        .as_ref()
+        .is_some_and(|w| w.dirty())
+    {
+        assert!(client.designer_apply_working_copy().unwrap());
+    }
     settle_editor(&mut client, &mut authority, &mut session);
     assert!(authority.oib_status().unwrap().error.is_none());
     assert!(
@@ -4557,7 +4774,7 @@ fn responsive_workspace_connects_an_unbound_preset_through_visible_source_choice
     );
     assert_eq!(authority.oib_values(1).unwrap(), properties);
     assert_eq!(
-        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().doc.typed_value(id).unwrap()),
         values
     );
     let info = editing::sources(
@@ -5174,4 +5391,141 @@ fn compatible_library_activation_waits_for_held_slider_and_final_receipt_without
             .width,
         400.
     );
+}
+
+#[test]
+fn working_copy_new_component_preview_undo_discard_never_reaches_authority() {
+    let (mut client, authority, _) = mounted_fixture_session_with_count(true, 0);
+    let before = client.active.as_ref().unwrap().doc.oib_root();
+    let before_generation = authority.oib_status().unwrap().structural_generation;
+    assert!(client.designer_new_component().unwrap());
+    assert!(
+        !client.reload_ready(),
+        "connected code replacement waits for local authored intent"
+    );
+    let m = client.active.as_mut().unwrap();
+    let Selection::Definition(id) = m.designer.as_ref().unwrap().selection else {
+        panic!("New component must open its definition")
+    };
+    assert!(
+        m.definition_presentation
+            .as_ref()
+            .is_some_and(|p| p.preview.definition == id)
+    );
+    assert!(
+        m.design_doc()
+            .oib_allocations()
+            .unwrap()
+            .iter()
+            .all(|a| a.prototype != id.0)
+    );
+    assert!(m.working_copy.as_ref().unwrap().dirty());
+    assert_eq!(m.doc.oib_root(), before);
+    assert!(m.doc.generate().unwrap().is_none());
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        before_generation
+    );
+    assert!(client.designer_history(false).unwrap());
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    assert!(client.designer_history(true).unwrap());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    assert!(client.designer_discard_working_copy().unwrap());
+    assert!(client.reload_ready());
+    let m = client.active.as_mut().unwrap();
+    assert!(!m.working_copy.as_ref().unwrap().dirty());
+    assert_eq!(m.doc.oib_root(), before);
+    assert!(m.doc.generate().unwrap().is_none());
+}
+
+#[test]
+fn working_copy_new_component_global_apply_publishes_once_and_clears_on_receipt() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    let original = authority.oib_status().unwrap().structural_generation;
+    assert!(client.designer_new_component().unwrap());
+    assert!(client.designer_apply_working_copy().unwrap());
+    assert!(
+        !client.designer_apply_working_copy().unwrap(),
+        "no duplicate in-flight Apply"
+    );
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    assert!(!m.working_copy.as_ref().unwrap().dirty());
+    assert!(!m.working_copy.as_ref().unwrap().applying());
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        original + 1
+    );
+    assert!(
+        m.definition_presentation.is_some(),
+        "accepted definition stays open"
+    );
+}
+
+#[test]
+fn working_copy_composition_test_uses_private_source_without_publishing_new_control() {
+    let (mut client, authority, _) = mounted_fixture_session_with_count(true, 0);
+    client.set_viewport([1280., 800.]).unwrap();
+    let before = authority.oib_allocations().unwrap();
+    activate_studio_tool(&mut client, "Insert component...");
+    activate_studio_tool(&mut client, "Insert Power");
+    let instance = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.component == 13 && i.active)
+        .unwrap()
+        .id;
+    assert!(client.set_oib_designer_mode(DesignerMode::Test).unwrap());
+    let address = PropertyAddress::Occurrence {
+        instance: InstanceId(instance),
+        path: PropertyPath {
+            references: vec![],
+            node: NodeId(1),
+            property: PropertyId(3),
+        },
+    };
+    let m = client.active.as_mut().unwrap();
+    assert!(
+        m.sample_doc().oib_property_register(&address).is_ok(),
+        "sample guest contexts use the staged source"
+    );
+    assert!(
+        m.doc.oib_property_register(&address).is_err(),
+        "new source remains unpublished"
+    );
+    assert!(m.doc.generate().unwrap().is_none());
+    assert_eq!(authority.oib_allocations().unwrap(), before);
 }

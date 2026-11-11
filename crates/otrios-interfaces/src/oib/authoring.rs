@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Bounded D2 definition edits, carried by state protocol v29.
+//! Bounded D2 definition edits and atomic working-copy Apply.
 //!
 //! Authority admission checks generation, authorization and durable receipts
 //! before publishing the result of a batch. No operation contains
-//! executable code, renderer indices, replacement layouts or property registers.
+//! executable code, renderer indices or replacement layouts. Apply adds explicit
+//! causal property writes to the same private, bounded publication candidate.
 use super::designer::{
     DefinitionId, InstanceId, NodeId, ObjectAddress, PropertyId, PropertyPath, SlotId,
 };
@@ -16,6 +17,35 @@ pub const MAX_SOURCE_BYTES: usize = 16 * 1024;
 pub const MAX_PLACEMENT_BYTES: usize = 4 * 1024;
 pub const MAX_CONNECTION_BYTES: usize = 4 * 1024;
 pub const MAX_DOCUMENT_BYTES: usize = 24 * 1024;
+
+/// One private working copy, submitted as a bounded OIB-only atomic candidate.
+/// The baseline lock identifies the exact admitted import/source closure.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Apply {
+    pub epoch: Vec<u8>,
+    pub generation: u64,
+    pub baseline: Vec<u8>,
+    pub operations: Vec<DocumentEdit>,
+    pub changes: Vec<super::Change>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyReceipt {
+    pub sequence: u64,
+    pub digest: Vec<u8>,
+    pub result: ApplyResult,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApplyResult {
+    Accepted {
+        generation: u64,
+        structural_generation: u64,
+    },
+    Rejected {
+        message: String,
+    },
+}
 
 /// One generation-guarded structural intent. Definition operations precede
 /// instance operations; each phase keeps its authored order. Restore is an

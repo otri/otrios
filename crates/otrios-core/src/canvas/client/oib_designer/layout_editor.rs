@@ -308,6 +308,7 @@ pub(super) fn build(
     drafts: &mut PropertyDrafts,
     properties: &[PropertyInfo],
     target: &Target,
+    draft_revision: u64,
     y: &mut f32,
     bounds: bool,
     independent: bool,
@@ -316,7 +317,7 @@ pub(super) fn build(
     let mut fields = Fields {
         drafts,
         properties,
-        revision: target.generation,
+        revision: draft_revision,
         saving,
     };
     let mut nodes = vec![];

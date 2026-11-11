@@ -8,7 +8,10 @@ mod host_moves;
 mod host_panel;
 mod host_transfers;
 mod oib_designer;
+mod oib_editor;
+mod oib_leave;
 mod oib_property_editor;
+mod oib_working_copy;
 mod oib_workspace;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
@@ -87,6 +90,10 @@ struct Mount {
     doc: StateAdapter,
     // Never used for synchronization; sample values exist only during Test.
     designer_preview: Option<DesignerPreview>,
+    working_copy: Option<oib_working_copy::WorkingCopy>,
+    definition_presentation: Option<oib_editor::DefinitionPresentation>,
+    working_presented: Option<u64>,
+    leave: Option<oib_leave::Pending>,
     behavior: Option<Behavior>,
     component_runtime: Arc<super::component_behavior::Runtime>,
     components: super::oib::component_behaviors::Instances,
@@ -592,6 +599,9 @@ impl Client {
         Ok(text.join(". "))
     }
     pub fn show_spaces(&mut self) -> Result<bool> {
+        if self.request_leave(oib_leave::Target::Spaces)? {
+            return Ok(true);
+        };
         if self.spaces.snapshot().is_none() {
             return Ok(false);
         }
@@ -1881,6 +1891,15 @@ impl Client {
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
         !self.input_busy()
+            && (self.requested.as_ref().is_some_and(|r| r.reconnecting)
+                || self.active.as_ref().is_none_or(|m| {
+                    m.working_copy
+                        .as_ref()
+                        .is_none_or(|w| !w.dirty() && !w.applying())
+                        && m.designer
+                            .as_ref()
+                            .is_none_or(|d| !d.drafts.drafts().iter().any(|f| f.dirty))
+                }))
             && !self
                 .host
                 .transfer
@@ -2154,6 +2173,9 @@ impl Client {
             .unwrap_or_default()
     }
     pub fn navigate(&mut self, path: &str) -> Result<()> {
+        if self.request_leave(oib_leave::Target::Navigate(path.into()))? {
+            return Ok(());
+        }
         let path = path.strip_prefix('/').unwrap_or(path);
         if path.is_empty() && self.spaces.snapshot().is_some() {
             self.show_spaces()?;
@@ -2356,7 +2378,7 @@ impl Client {
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
         let _profile = crate::canvas::profiling::span("client.receive");
         self.decode_budget.admit(bytes, self.wire_clock)?;
-        match decode_server(bytes)? {
+        let changed = match decode_server(bytes)? {
             ServerMessage::Activated { epoch } => {
                 if self.requested.as_ref().is_none_or(|r| r.epoch != epoch)
                     || self
@@ -2669,7 +2691,8 @@ impl Client {
                 }
                 Ok(false)
             }
-        }
+        }?;
+        Ok(self.poll_leave()? || changed)
     }
     fn discard_revoked(&mut self, epoch: u32) -> Result<bool> {
         if self.active.as_ref().is_some_and(|m| m.epoch == epoch) {
@@ -3060,7 +3083,9 @@ impl Client {
             ));
             let m = self.active.as_mut().ok_or("No Canvas")?;
             m.component_calls = m.component_calls.saturating_add(1);
-            let doc = if m.designer_testing() {
+            let doc = if let Some(presentation) = &mut m.definition_presentation {
+                &mut presentation.samples
+            } else if m.designer_testing() {
                 &mut m
                     .designer_preview
                     .as_mut()
@@ -3251,6 +3276,11 @@ impl Client {
     }
     /// Preserve source sample time independently of worker delivery/animation time.
     pub fn pointer_at(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
+        if epoch == self.epoch()
+            && let Some(changed) = self.leave_pointer(event)?
+        {
+            return Ok(changed);
+        }
         if self.local_uninstall && event.phase == PointerPhase::Down {
             return Ok(false);
         }
@@ -3509,6 +3539,11 @@ impl Client {
         Ok(changed)
     }
     pub fn activate(&mut self, epoch: u32, id: u32) -> Result<bool> {
+        if epoch == self.epoch()
+            && let Some(changed) = self.leave_activate(id)?
+        {
+            return Ok(changed);
+        }
         if self.local_uninstall {
             return Ok(false);
         }
@@ -3613,6 +3648,12 @@ impl Client {
                             .clone();
                         self.navigate(&destination.path)?;
                     } else {
+                        if self.request_leave(oib_leave::Target::Open {
+                            ui_ref: n.ui_ref.clone(),
+                            state_ref: n.state_ref.clone(),
+                        })? {
+                            return Ok(true);
+                        };
                         self.open(&n.ui_ref, &n.state_ref);
                     }
                     return Ok(true);
@@ -3663,6 +3704,11 @@ impl Client {
     /// Native browser fields mirror only visible, editable controls in this
     /// mount. A modal never exposes a background composer to the host.
     pub fn text_inputs(&self) -> Result<Vec<otrios_interfaces::keyboard::TextInput>> {
+        if self.active.as_ref().is_some_and(|m| {
+            m.leave.is_some() || m.working_copy.as_ref().is_some_and(|w| w.applying())
+        }) {
+            return Ok(vec![]);
+        };
         let Some(m) = &self.active else {
             return Ok(vec![]);
         };
@@ -3792,6 +3838,9 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
+        if self.active.as_ref().is_some_and(|m| m.leave.is_some()) {
+            return Ok(false);
+        };
         if self.local_uninstall {
             return Ok(false);
         }
@@ -3923,6 +3972,9 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if self.request_leave(oib_leave::Target::Back)? {
+            return Ok(true);
+        }
         if !self.host_active
             && let Some(address) = self
                 .active
@@ -3968,6 +4020,9 @@ impl Client {
         Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        if self.poll_leave()? {
+            return Ok(true);
+        };
         if self.finish_local_uninstall()? {
             return Ok(true);
         }
@@ -4291,6 +4346,24 @@ impl Mount {
     /// The live adapter remains mounted so remote receipts always reach it.
     pub(super) fn sync_designer_preview(&mut self) -> Result<()> {
         let testing = self.designer_testing();
+        if let Some(presentation) = &mut self.definition_presentation {
+            self.designer_preview = None;
+            if presentation.testing != testing {
+                let samples = presentation.preview.sample_adapter()?;
+                let components = super::oib::component_behaviors::Instances::prepare(
+                    &self.ui,
+                    &self.layout,
+                    &self.component_runtime,
+                    None,
+                )?;
+                components.validate_current(&self.ui, &samples)?;
+                presentation.samples = samples;
+                presentation.testing = testing;
+                self.components = components;
+                self.invalidate_local_scene();
+            }
+            return Ok(());
+        }
         if testing
             && (self.designer_preview.is_none() || !self.oib_activation_blocked())
             && self.designer_preview.as_ref().is_none_or(|preview| {
@@ -4307,7 +4380,7 @@ impl Mount {
             self.designer_preview = Some(DesignerPreview {
                 generation: self.oib_generation,
                 admitted: self.doc.admitted_oib_hash(),
-                doc: self.doc.preview_clone(),
+                doc: self.design_doc().preview_clone(),
             });
             self.components = components;
             self.invalidate_local_scene();
@@ -4325,6 +4398,9 @@ impl Mount {
         Ok(())
     }
     fn sample_doc(&self) -> &StateAdapter {
+        if let Some(presentation) = &self.definition_presentation {
+            return &presentation.samples;
+        }
         if self.designer_testing() {
             self.designer_preview
                 .as_ref()
@@ -4334,7 +4410,11 @@ impl Mount {
         }
     }
     fn sample_doc_mut(&mut self) -> Result<&mut StateAdapter> {
-        if self.designer_testing() {
+        let testing = self.designer_testing();
+        if let Some(presentation) = &mut self.definition_presentation {
+            return Ok(&mut presentation.samples);
+        }
+        if testing {
             Ok(&mut self
                 .designer_preview
                 .as_mut()
@@ -4406,12 +4486,14 @@ impl Mount {
     }
     fn refresh(&mut self) -> Result<bool> {
         let capture = self.capture_validation.take();
-        let mut oib_changed = self.refresh_oib_view()?;
+        let mut oib_changed = self.sync_working_copy()?;
+        oib_changed |= self.refresh_oib_view()?;
         if let Some(generation) = self
             .oib_view
             .as_ref()
             .map(|view| view.info.active_generation)
             && self.oib_generation != Some(generation)
+            && self.working_copy.is_none()
             && !self.oib_activation_blocked()
         {
             let _profile = super::profiling::span("client.mount.activate_ui");
@@ -4489,12 +4571,21 @@ impl Mount {
             oib_changed = true;
         }
         oib_changed |= self.refresh_designer()?;
+        oib_changed |= self.refresh_definition_presentation()?;
+        if self.working_copy.is_some()
+            && !self.oib_activation_blocked()
+            && self.working_presented.is_some()
+        {
+            self.oib_generation = self.doc.oib_generation();
+        }
         self.sync_designer_preview()?;
         self.oib_paint_refresh = false;
         let sample_doc = self
-            .designer_preview
+            .definition_presentation
             .as_ref()
-            .map_or(&self.doc, |preview| &preview.doc);
+            .map(|p| &p.samples)
+            .or_else(|| self.designer_preview.as_ref().map(|p| &p.doc))
+            .unwrap_or(&self.doc);
         for (id, editor) in &mut self.editors {
             if let Value::Text(text) = sample_doc.typed_value(*id)?
                 && editor.text() != text
@@ -5138,6 +5229,10 @@ fn qualify(
         oib_selected: None,
         doc,
         designer_preview: None,
+        working_copy: None,
+        definition_presentation: None,
+        working_presented: None,
+        leave: None,
         behavior,
         component_runtime,
         components: Default::default(),
@@ -5389,7 +5484,7 @@ fn resolve_layout_arc(m: &Mount, incremental: bool) -> Result<Arc<Scene>> {
             designer.workspace_task(),
             designer.workspace_mode(),
             designer.appearance(),
-            designer.management_visible(),
+            &m.editor_chrome(),
         )?)
     } else {
         scene
@@ -5422,19 +5517,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             &mut root,
             scene,
             m.preview_scroll.as_ref().map(|s| s.node()),
-            &format!(
-                "{} / active {} / shown {}{}",
-                m.oib_view
-                    .as_ref()
-                    .map_or("Live UI unavailable", |v| v.info.status.as_str()),
-                m.oib_view.as_ref().map_or(0, |v| v.info.active_generation),
-                m.oib_generation.unwrap_or(0),
-                if m.oib_view.as_ref().map(|v| v.info.active_generation) != m.oib_generation {
-                    " / activation pending"
-                } else {
-                    ""
-                }
-            ),
+            &m.editor_status().unwrap_or_else(|| m.doc.oib_status_text()),
             m.doc.confirmed() && !m.doc.oib_saving(),
         )?;
         if let Some(font) = &m.font {

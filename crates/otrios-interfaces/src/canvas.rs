@@ -334,6 +334,10 @@ pub struct MountBinding {
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateRequest {
+    OibApply {
+        sequence: u64,
+        apply: crate::oib::authoring::Apply,
+    },
     OibInstance {
         epoch: Vec<u8>,
         sequence: u64,

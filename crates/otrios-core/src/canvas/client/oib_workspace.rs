@@ -21,6 +21,36 @@ pub(super) const APPEARANCE_LIGHT: u32 = BASE + 7;
 pub(super) const STATUS: u32 = BASE + 20;
 pub(super) const PROPERTIES_TITLE: u32 = BASE + 21;
 pub(super) const PROPERTIES_ACTIONS: u32 = BASE + 22;
+pub(super) const NEW_COMPONENT: u32 = BASE + 40;
+pub(super) const UNDO: u32 = BASE + 41;
+pub(super) const REDO: u32 = BASE + 42;
+pub(super) const DISCARD: u32 = BASE + 43;
+pub(super) const APPLY: u32 = BASE + 44;
+pub(super) const MODAL_ACTION_START: u32 = BASE + 400;
+pub(super) const MODAL_ACTION_END: u32 = BASE + 420;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct EditorChrome {
+    pub(super) management: bool,
+    pub(super) new_component: bool,
+    pub(super) undo: bool,
+    pub(super) redo: bool,
+    pub(super) discard: bool,
+    pub(super) apply: bool,
+    pub(super) modal: Option<Modal>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Modal {
+    pub(super) title: String,
+    pub(super) lines: Vec<String>,
+    pub(super) actions: Vec<ModalAction>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ModalAction {
+    pub(super) id: u32,
+    pub(super) label: String,
+    pub(super) enabled: bool,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Task {
@@ -154,6 +184,163 @@ fn control(id: u32, frame: Rect, value: &str, selected: bool, tab: bool, p: Pale
     });
     node
 }
+fn command(id: u32, frame: Rect, value: &str, enabled: bool, p: Palette) -> SceneNode {
+    let mut node = canvas(
+        id,
+        frame,
+        vec![
+            rect(id + 1000, Rect::new(0., 0., frame.width, 48.), p.line, 5.),
+            rect(
+                id + 1100,
+                Rect::new(1., 1., frame.width - 2., 46.),
+                p.surface,
+                4.,
+            ),
+            label(
+                id + 2000,
+                Rect::new(12., 10., frame.width - 24., 28.),
+                value,
+                2,
+                if enabled { p.text } else { p.muted },
+            ),
+        ],
+    );
+    // Disabled commands remain visible, consume taps, and are absent from the
+    // actionable semantic list until Scene supports a disabled semantic state.
+    node.responder = Some(if enabled {
+        TouchResponder::Activate(Action::KeyboardKey(u16::MAX))
+    } else {
+        TouchResponder::Consume
+    });
+    if enabled {
+        node.semantics = Some(SwitchSemantics {
+            label: value.into(),
+            checked: false,
+        });
+    } else {
+        node.children[0].responder = Some(TouchResponder::Consume);
+    }
+    node
+}
+fn wrapped_lines(lines: &[String], columns: usize) -> Vec<String> {
+    let mut result = Vec::new();
+    for line in lines {
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > columns {
+                result.push(std::mem::take(&mut current));
+            }
+            for character in word.chars() {
+                if current.chars().count() == columns {
+                    result.push(std::mem::take(&mut current));
+                }
+                current.push(character);
+            }
+            current.push(' ');
+        }
+        result.push(current.trim_end().to_string());
+    }
+    result
+}
+fn modal_overlay(
+    modal: &Modal,
+    width: f32,
+    available_height: f32,
+    root_height: f32,
+    p: Palette,
+) -> Result<SceneNode, String> {
+    let card_width = (width - 64.).clamp(288., 760.);
+    let content_width = card_width - 48.;
+    let columns = ((content_width / 12.).floor() as usize).clamp(1, 72);
+    let lines = wrapped_lines(&modal.lines, columns);
+    let title = wrapped_lines(std::slice::from_ref(&modal.title), columns);
+    if lines.len() + title.len() > 48 || modal.actions.len() > 21 {
+        return Err("Designer dialog exceeds visible content limit".into());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    let mut buttons = Vec::new();
+    let mut x = 24.;
+    let action_top = 32. + title.len() as f32 * 24. + 16. + lines.len() as f32 * 24. + 24.;
+    let mut y = action_top;
+    for action in &modal.actions {
+        if !(MODAL_ACTION_START..=MODAL_ACTION_END).contains(&action.id) || !ids.insert(action.id) {
+            return Err("Invalid Designer dialog action".into());
+        }
+        let button_width = (action.label.chars().count() as f32 * 12. + 32.).max(112.);
+        if button_width > content_width {
+            return Err("Designer dialog action label is too long".into());
+        }
+        if x > 24. && x + button_width > card_width - 24. {
+            x = 24.;
+            y += 56.;
+        }
+        buttons.push(command(
+            action.id,
+            Rect::new(x, y, button_width, 48.),
+            &action.label,
+            action.enabled,
+            p,
+        ));
+        x += button_width + 8.;
+    }
+    let card_height = if modal.actions.is_empty() {
+        action_top
+    } else {
+        y + 48.
+    } + 24.;
+    if card_height > available_height - 32. {
+        return Err("Designer dialog does not fit viewport".into());
+    }
+    let mut card_children = vec![
+        rect(
+            BASE + 501,
+            Rect::new(0., 0., card_width, card_height),
+            p.line,
+            8.,
+        ),
+        rect(
+            BASE + 502,
+            Rect::new(1., 1., card_width - 2., card_height - 2.),
+            p.surface,
+            7.,
+        ),
+    ];
+    let mut text_y = 24.;
+    for (index, line) in title.iter().chain(lines.iter()).enumerate() {
+        if index == title.len() {
+            text_y += 16.;
+        }
+        card_children.push(label(
+            BASE + 600 + index as u32,
+            Rect::new(24., text_y, content_width, 24.),
+            line,
+            2,
+            if index < title.len() { p.text } else { p.muted },
+        ));
+        text_y += 24.;
+    }
+    card_children.extend(buttons);
+    let card = canvas(
+        BASE + 503,
+        Rect::new(
+            (width - card_width) / 2.,
+            (available_height - card_height) / 2.,
+            card_width,
+            card_height,
+        ),
+        card_children,
+    );
+    let mut backdrop = background(BASE + 504, width, root_height, [0, 0, 0, 176], 0.);
+    backdrop.responder = Some(TouchResponder::Consume);
+    let mut overlay = canvas(
+        BASE + 500,
+        Rect::new(0., 0., width, root_height),
+        vec![backdrop, card],
+    );
+    overlay.responder = Some(TouchResponder::Consume);
+
+    Ok(overlay)
+}
 fn segment_surface(id: u32, frame: Rect, p: Palette) -> SceneNode {
     let mut node = canvas(
         id,
@@ -192,8 +379,9 @@ pub(super) fn project(
     task: Task,
     mode: DesignerMode,
     appearance: Appearance,
-    management: bool,
+    editor: &EditorChrome,
 ) -> Result<Scene, String> {
+    let management = editor.management;
     let metadata = seed.designer.as_ref().ok_or("Missing designer metadata")?;
     let hierarchy_id = metadata
         .hierarchy_viewport
@@ -354,7 +542,29 @@ pub(super) fn project(
             p,
         ));
     }
-    let header_height = y + 64.;
+    let mut command_x = 16.;
+    let mut command_y = y + 64.;
+    for (id, value, enabled, command_width) in [
+        (NEW_COMPONENT, "New component", editor.new_component, 192.),
+        (UNDO, "Undo", editor.undo, 96.),
+        (REDO, "Redo", editor.redo, 96.),
+        (DISCARD, "Discard", editor.discard, 112.),
+        (APPLY, "Apply", editor.apply, 112.),
+    ] {
+        if command_x > 16. && command_x + command_width > width - 16. {
+            command_x = 16.;
+            command_y += 56.;
+        }
+        chrome.push(command(
+            id,
+            Rect::new(command_x, command_y, command_width, 48.),
+            value,
+            enabled,
+            p,
+        ));
+        command_x += command_width + 8.;
+    }
+    let header_height = command_y + 64.;
     chrome.push(rect(
         BASE + 130,
         Rect::new(0., header_height - 1., width, 1.),
@@ -421,6 +631,15 @@ pub(super) fn project(
     let mut children = vec![preview, dock];
     children.splice(0..0, chrome.drain(..1));
     children.extend(chrome);
+    if let Some(modal) = &editor.modal {
+        children.push(modal_overlay(
+            modal,
+            width,
+            available_height,
+            scene.root().frame.height,
+            p,
+        )?);
+    }
     Scene::new(canvas(scene.root().id, scene.root().frame, children))
 }
 
@@ -512,7 +731,7 @@ mod tests {
                     task,
                     DesignerMode::Edit,
                     Appearance::Dark,
-                    false,
+                    &EditorChrome::default(),
                 )
                 .unwrap();
                 assert_eq!(
@@ -547,7 +766,7 @@ mod tests {
                     find(scene.root(), 5).unwrap().semantics,
                     find(original.root(), 5).unwrap().semantics
                 );
-                assert!(count(scene.root()) < 80);
+                assert!(count(scene.root()) < 110);
                 assert!(scene.controls().len() <= 10);
                 for id in [
                     TAB_LIBRARY,
@@ -577,7 +796,10 @@ mod tests {
             Task::Layers,
             DesignerMode::Test,
             Appearance::Light,
-            true,
+            &EditorChrome {
+                management: true,
+                ..Default::default()
+            },
         )
         .unwrap();
         let keyboard = project(
@@ -588,7 +810,10 @@ mod tests {
             Task::Layers,
             DesignerMode::Test,
             Appearance::Light,
-            true,
+            &EditorChrome {
+                management: true,
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(
@@ -614,13 +839,186 @@ mod tests {
                 selected
             );
         }
-        let point = [326., 110.];
+        let path = normal.path(MODE_EDIT).unwrap();
+        let origin = path.last().unwrap().origin;
+        let point = [origin[0] + 24., origin[1] + 24.];
         assert!(
             normal
                 .hit_path(point)
                 .iter()
                 .any(|node| node.node.id == MODE_EDIT)
         );
+    }
+    fn commands() -> EditorChrome {
+        EditorChrome {
+            new_component: true,
+            undo: true,
+            redo: true,
+            discard: true,
+            apply: true,
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn commands_wrap_without_covering_tasks_or_preview_and_disabled_are_inert() {
+        for width in [640., 800., 1280., 1920.] {
+            let (original, seed) = fixture(width, 800.);
+            for keyboard in [false, true] {
+                let editor = commands();
+                let scene = project(
+                    &original,
+                    &seed,
+                    None,
+                    keyboard,
+                    Task::Inspect,
+                    DesignerMode::Edit,
+                    Appearance::Dark,
+                    &editor,
+                )
+                .unwrap();
+                let preview = scene.path(2).unwrap();
+                let preview = preview.last().unwrap();
+                for id in [NEW_COMPONENT, UNDO, REDO, DISCARD, APPLY] {
+                    let path = scene.path(id).unwrap();
+                    let n = path.last().unwrap();
+                    assert_eq!(n.node.frame.height, 48.);
+                    assert!(n.node.frame.width >= 48.);
+                    assert!(n.origin[0] + n.node.frame.width <= width - 16.);
+                    assert!(n.origin[1] + 48. < preview.origin[1]);
+                    assert!(
+                        scene
+                            .hit_path([n.origin[0] + 24., n.origin[1] + 24.])
+                            .iter()
+                            .any(|h| h.node.id == id)
+                    );
+                }
+                assert!(count(scene.root()) < 110);
+                assert!(scene.controls().len() <= 15);
+                assert_eq!(
+                    find(scene.root(), 2).unwrap().children,
+                    find(original.root(), 2).unwrap().children
+                );
+                let disabled = project(
+                    &original,
+                    &seed,
+                    None,
+                    keyboard,
+                    Task::Inspect,
+                    DesignerMode::Edit,
+                    Appearance::Dark,
+                    &EditorChrome::default(),
+                )
+                .unwrap();
+                for id in [NEW_COMPONENT, UNDO, REDO, DISCARD, APPLY] {
+                    assert!(!disabled.controls().iter().any(|n| n.node.id == id));
+                    let path = disabled.path(id).unwrap();
+                    let n = path.last().unwrap();
+                    let hits = disabled.hit_path([n.origin[0] + 24., n.origin[1] + 24.]);
+                    assert!(
+                        hits.iter()
+                            .any(|n| n.node.responder == Some(TouchResponder::Consume))
+                    );
+                    assert!(!hits.iter().any(|n| n.node.id == 2));
+                }
+            }
+        }
+    }
+    #[test]
+    fn modal_blocks_underlying_hits_and_keeps_commands_reachable() {
+        for (width, height, keyboard) in [
+            (800., 800., false),
+            (1280., 800., true),
+            (1920., 1080., false),
+        ] {
+            let (original, seed) = fixture(width, height);
+            let editor = EditorChrome {
+                modal: Some(Modal {
+                    title: "Discard changes?".into(),
+                    lines: vec!["Your component has unapplied changes.".into()],
+                    actions: vec![
+                        ModalAction {
+                            id: MODAL_ACTION_START,
+                            label: "Cancel".into(),
+                            enabled: true,
+                        },
+                        ModalAction {
+                            id: MODAL_ACTION_START + 1,
+                            label: "Discard".into(),
+                            enabled: false,
+                        },
+                    ],
+                }),
+                ..commands()
+            };
+            let scene = project(
+                &original,
+                &seed,
+                None,
+                keyboard,
+                Task::Inspect,
+                DesignerMode::Edit,
+                Appearance::Dark,
+                &editor,
+            )
+            .unwrap();
+            for point in [[1., 1.], [width - 1., height - 1.], [24., 200.]] {
+                let hit = scene.hit_path(point);
+                assert!(hit.iter().any(|n| n.node.id == BASE + 500));
+                assert!(
+                    !hit.iter()
+                        .any(|n| [2, 3, 4, NEW_COMPONENT].contains(&n.node.id))
+                );
+                assert!(
+                    hit.iter()
+                        .any(|n| n.node.responder == Some(TouchResponder::Consume))
+                );
+            }
+            let path = scene.path(MODAL_ACTION_START).unwrap();
+            let n = path.last().unwrap();
+            assert_eq!(n.node.frame.height, 48.);
+            assert!(
+                scene
+                    .hit_path([n.origin[0] + 24., n.origin[1] + 24.])
+                    .iter()
+                    .any(|n| n.node.id == MODAL_ACTION_START)
+            );
+            assert!(
+                !scene
+                    .controls()
+                    .iter()
+                    .any(|n| n.node.id == MODAL_ACTION_START + 1)
+            );
+            assert!(count(scene.root()) < 140);
+            assert!(scene.controls().len() < 20);
+        }
+        assert!(
+            wrapped_lines(&["x".repeat(100)], 32)
+                .iter()
+                .all(|l| l.chars().count() <= 32)
+        );
+    }
+    #[test]
+    fn dialogs_reject_duplicate_ids_and_content_that_cannot_fit() {
+        let p = palette(Appearance::Dark);
+        let action = ModalAction {
+            id: MODAL_ACTION_START,
+            label: "Cancel".into(),
+            enabled: true,
+        };
+        let mut modal = Modal {
+            title: "Review changes".into(),
+            lines: vec![],
+            actions: vec![action.clone(), action.clone()],
+        };
+        assert!(modal_overlay(&modal, 1280., 800., 800., p).is_err());
+        modal.actions = vec![ModalAction {
+            id: APPLY,
+            ..action
+        }];
+        assert!(modal_overlay(&modal, 1280., 800., 800., p).is_err());
+        modal.actions.clear();
+        modal.lines = vec!["A long explanation that needs more room.".repeat(100)];
+        assert!(modal_overlay(&modal, 800., 560., 800., p).is_err());
     }
     #[test]
     fn palette_maps_only_explicit_legacy_roles() {

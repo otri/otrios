@@ -598,6 +598,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
 }
 pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Result<()> {
     let tag = match value {
+        StateRequest::OibApply { .. } => 39,
         StateRequest::OibWrite { .. } => 37,
         StateRequest::OibInstance { .. } => 38,
         StateRequest::Hello { .. } => 33,
@@ -606,6 +607,14 @@ pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Res
         StateRequest::Resync => 36,
     };
     write(out, tag, |w| match value {
+        StateRequest::OibApply { sequence, apply } => {
+            w.u64(*sequence)?;
+            let bytes = flexbuffers::to_vec(apply).map_err(err)?;
+            if bytes.len() > otrios_interfaces::oib::authoring::MAX_BATCH_BYTES {
+                return Err("OIB Apply byte budget".into());
+            }
+            w.blob(&bytes)
+        }
         StateRequest::OibInstance {
             epoch,
             sequence,
@@ -671,6 +680,23 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
     }
     read(bytes, |r| {
         let message = match r.u8()? {
+            39 => {
+                let sequence = r.u64()?;
+                let bytes = r.blob(otrios_interfaces::oib::authoring::MAX_BATCH_BYTES)?;
+                crate::flex_guard::validate(&bytes, 24, 32768, 8192)?;
+                let apply: otrios_interfaces::oib::authoring::Apply =
+                    flexbuffers::from_slice(&bytes).map_err(err)?;
+                if apply.epoch.len() != 32
+                    || apply.baseline.len() != 32
+                    || apply.operations.len() + apply.changes.len()
+                        > otrios_interfaces::oib::authoring::MAX_OPERATIONS
+                    || apply.operations.is_empty() && apply.changes.is_empty()
+                    || flexbuffers::to_vec(&apply).map_err(err)? != bytes
+                {
+                    return Err("Invalid or noncanonical OIB Apply".into());
+                }
+                StateRequest::OibApply { sequence, apply }
+            }
             38 => {
                 let epoch = r.take(32)?.to_vec();
                 let sequence = r.u64()?;
@@ -808,6 +834,42 @@ mod tests {
             bad[index] = 255;
             assert!(decode(&bad).is_err());
         }
+    }
+    #[test]
+    fn atomic_apply_roundtrip_and_shared_operation_budget() {
+        use otrios_interfaces::oib::authoring::{Apply, DocumentEdit, MAX_OPERATIONS};
+        let mut apply = Apply {
+            epoch: vec![1; 32],
+            generation: 2,
+            baseline: vec![3; 32],
+            operations: vec![DocumentEdit::Restore { defaults: false }],
+            changes: vec![],
+        };
+        let request = StateRequest::OibApply {
+            sequence: 4,
+            apply: apply.clone(),
+        };
+        check_roundtrip(&request, encode_state_request, decode_state_request);
+        apply.operations = vec![DocumentEdit::Restore { defaults: false }; MAX_OPERATIONS + 1];
+        let encoded = encode_state_request(&StateRequest::OibApply {
+            sequence: 4,
+            apply: apply.clone(),
+        })
+        .unwrap();
+        assert!(decode_state_request(&encoded).is_err());
+        apply.operations.clear();
+        let encoded = encode_state_request(&StateRequest::OibApply {
+            sequence: 4,
+            apply: apply.clone(),
+        })
+        .unwrap();
+        assert!(decode_state_request(&encoded).is_err());
+        apply
+            .operations
+            .push(DocumentEdit::Restore { defaults: false });
+        apply.baseline.pop();
+        let encoded = encode_state_request(&StateRequest::OibApply { sequence: 4, apply }).unwrap();
+        assert!(decode_state_request(&encoded).is_err());
     }
     #[test]
     fn all_variants_and_typed_values_roundtrip_and_reject_partial_or_extra_packets() {
