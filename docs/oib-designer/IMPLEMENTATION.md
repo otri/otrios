@@ -80,10 +80,11 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: B1–B4 initial runtime/UI slices and B5 working-copy/Apply/leave,
-responsive viewport, conditional history and composition at code `2f95205`.
-Later B5 commits are locally validated and awaiting Frame connectivity and live
-acceptance; the last entries below are authoritative. Full B4–B7 gates remain open.
+Last verified live: code `bdc035c`, release
+`9df7bc6ca06bbc2b1013809cc6ad0734ab34f09b89bb096578119dd633047298`,
+including named literal endpoints, definition deletion/restoration and the earlier
+B5 slices. Focused Frame/Web evidence and remaining UX findings are recorded at
+the end of this file. Full B4–B7 gates remain open.
 Retired the host profile selector, divider
 resize state and old projection module. Test uses a transportless sample fork and
 waits for captured input before adopting changed source. One shared status waits
@@ -1012,3 +1013,52 @@ Restart files: `oib/document.rs`, `document/admission.rs`, `document/authoring.r
 `client/oib_designer/api_editor.rs`, `state/oib/inspector.rs`, `library.rs`,
 `oib/contract.rs`, the focused tests and T20. Protocol v35 is declared in
 interfaces/session.rs, web/shared/session.mjs and the existing publisher.
+
+## Live v35 acceptance after Frame recovery — 2026-11-11
+
+This entry supersedes the pending-publication status above. The existing publisher
+completed Mac/Wasm/ARM builds and deployment of `bdc035c`; Frame, native and public
+Web report release `9df7bc6ca06bbc2b1013809cc6ad0734ab34f09b89bb096578119dd633047298`.
+The existing automatic builder was restored with that source pin. No additional
+service, identity or trust configuration was introduced.
+
+Live acceptance used an authenticated browser with the existing Frame identity,
+an independent read-only browser, and the native Frame client. Shared-runtime
+semantic controls drove browser edits; calibrated evdev taps drove native New
+component and Discard. These taps are injected input, not human touch observation.
+
+- Created a blank definition, linked LabeledSlider, exposed its text endpoint,
+  renamed it `caption`, renamed the component `Frame caption control`, and set
+  `Live caption verified`. The private preview changed before Apply; Apply
+  published generation 41 to the observer and Frame.
+- Undo/Apply removed the new definition at generation 42. Redo/Apply restored the
+  named endpoint, forwarding and value with fresh definition identity 80 at 43.
+- Definition deletion displayed its dependency report. Background Undo did not
+  escape the modal. At 800×480 all three footer actions remained visible. Cancel
+  preserved the definition. Confirm/Apply deleted it at generation 44;
+  Undo/Apply restored its caption with fresh definition identity 84 at 45.
+- Native New component opened a private definition; Discard returned to Document
+  with no shared publication. The native client subsequently reached generation
+  45, confirmed/stream/reload ready, no pending commands and zero component errors.
+- Both browsers reached generation 45 without reported page/component errors.
+  The independent observer remained read-only. Existing Audio/Display sample
+  values stayed at Volume 51% and Brightness 57% through the authoring journey.
+
+The resource diagnostic reported active generation 45 and presented generation
+44 on all clients after the unused-definition change. Do not describe this as
+matching presented generations or full rendered-layout acceptance. No Linux IPC
+acceptance or broad repository suite was run for this deployment.
+
+Concrete live UX findings to fix before final qualification:
+
+1. Layers selects the composition hierarchy even while editing a definition;
+   selecting the new definition's child required the Library hierarchy.
+2. Renaming `label` to `caption` updates the heading but leaves the retained
+   input's accessible label `Property name: label` until its editor is rebuilt.
+3. A newly linked LabeledSlider is clipped by its default 160×100 reference
+   viewport and the blank root's width. Resolve initial reference sizing through
+   the canonical layout model; this is not polished insertion acceptance.
+
+Endpoint-removal impact files remain an uncompiled, uncommitted follow-up. The
+next lifecycle slice still needs removal/history support, followed by bindings,
+actions, slots, styles and representative catalog acceptance.
