@@ -80,10 +80,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `0460435`, release
-`b5babb5484f969f79ef4113f17c2212af1398c4bad439293f0cf05ffde3db3d1`,
+Last verified live: code `2c1ad1c`, release
+`59eca39cc6e06061a13bd78183e164e125c24143c1f2364a80212d31ab64acde`,
 including exposed Slider Value sample interaction, persisted outer app binding
-and accurate bound inspector labels, earlier
+and accurate bound inspector labels, definition-to-document scope return, earlier
 reviewed endpoint removal/Undo/Redo, contextual Layers, natural link
 sizing, named literal endpoints, definition deletion/restoration and earlier B5 slices. Focused Frame/Web
 evidence and remaining UX findings are recorded at
@@ -1329,3 +1329,34 @@ control and existing 512-node/128-control ceilings. Additional Designer regressi
 and live evidence follow below. Broader styles/actions/slots stay separate.
 
 T23 local regression: `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline` passed **94 tests**, with one existing ignored timing diagnostic. Diff check passed.
+
+
+### T23 live acceptance
+
+`python3 /tmp/otrios-designer-live-build.py` completed with exit 0. Native, Wasm
+and ARM builds published release
+`59eca39cc6e06061a13bd78183e164e125c24143c1f2364a80212d31ab64acde`
+from code `2c1ad1c`; Frame and existing publisher both applied it. The automatic
+builder was restored pinned to that source. No source/state protocol changed.
+
+Browser at 1536×960 opened definition 88 with its actual name in the heading and
+Back to document visible. Typed Width 321 without pressing Done, then returned:
+selection became Document, task Inspect and mode Edit remained, Unapplied changes
+remained, shared generation stayed 54, and no app fields were queued. Reopening
+the definition showed 321. Discard restored 320 and All changes applied.
+
+Switched to Test and clicked the actual canvas coordinate of Back to document.
+It returned to Document while keeping Test, removed the scope-only button, and
+retained generation 54 with zero component errors and no pending/issued fields.
+Returned to Edit and closed the owned tab. Audio remained 51%, Display 57%; the
+saved outer Slider binding from T22 remained visible. No test edit was published.
+
+The pinned native readiness helper returned exit 0: matching new release, state
+confirmed, active/presented generation 54/54, four instances, zero component
+errors and no pending commands. Native synchronization was checked; this slice
+did not exercise native touch. Viewport/capture/invalid-field evidence comes
+from the focused shared-runtime tests, not a claimed full browser campaign.
+
+T23 closes the reload-only scope-return gap. General breadcrumbs/Escape parent
+navigation, action/slot authoring, B6 styles and representative full lifecycle
+qualification remain open under the original Designer goal.
