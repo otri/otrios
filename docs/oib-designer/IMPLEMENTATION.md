@@ -21,6 +21,15 @@ Runtime changes/tests remain LGPL in core; public types/codecs/tooling/docs rema
 Apache. Keep pinned Rust/dependencies and existing scene/input/resource ceilings.
 No new service, trust root, native module backend or general transaction system.
 
+Testing restraint (latest user direction): test essentials only. Use one focused
+existing regression or a short changed-behavior live journey, with the necessary
+build. Do not repeat the historical full-core/workspace/Clippy/format/browser
+stack for each slice. Format changed files directly. Broaden only to resolve a
+specific failure, unresolved integration risk or named acceptance requirement;
+explain that reason first. Add tests for meaningful new invariants or demonstrated
+bugs, not copy polish or equivalent variants. Historical test counts below are
+evidence records, not requirements for the next development loop.
+
 ## Restart checklist
 
 1. Read this file and current git status/diff. Do not assume a partial slice is live.
