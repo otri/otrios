@@ -6284,6 +6284,13 @@ fn definition_layers_reveals_only_current_component_and_selects_inserted_child()
     let (child, id, y) = {
         let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
         assert_eq!(d.tree_scope, HierarchyScope::Components);
+        assert!(
+            !d.panels[0].nodes.iter().any(|node| node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "New preset")),
+            "Layers keeps insertion commands behind its palette"
+        );
         assert!(d.tree.iter().all(|row| matches!(row.selection,
             Some(Selection::Definition(id)) | Some(Selection::DefinitionNode {definition:id, ..}) if id == definition)));
         let child = d.tree.iter().find(|row| row.name == "Add text").unwrap();
@@ -6301,7 +6308,10 @@ fn definition_layers_reveals_only_current_component_and_selects_inserted_child()
             .expect("new child is expanded in Layers");
         (selection, id, row.frame.y)
     };
-    fixture_scroll_to(&mut client, 0, y - 8.);
+    assert!(
+        y < 300.,
+        "the new child appears before unrelated insertion commands"
+    );
     assert!(client.scene().unwrap().path(id).is_some());
     assert!(client.activate(client.epoch(), id).unwrap());
     assert_eq!(

@@ -1090,3 +1090,21 @@ The Designer suite passed 84 tests with one existing ignored timing diagnostic
 before the additional Hug-parent regression was added. Live acceptance for these
 follow-ups is pending publication; the preceding release remains the last live
 record until the result below is added.
+
+Release `2c7627ba7c4bd55a97f96a1e19559f121fbfc3958ffaab35dc69bde07dfd8ec1`
+deployed `4ef286b`. Native and Web upgraded through the existing publisher, and
+the automatic builder resumed on that source pin. The live browser created
+definition 88, linked the production LabeledSlider and selected its wrapper from
+Layers. The preview displayed the full 288×112 slider instead of the clipped
+160×100 surface. Native remained confirmed, stream/reload ready, with zero pending
+commands and component errors at generation 45; presented generation also read 45
+after this code reload. Browser diagnostics include the expected WebSocket closure
+during service replacement; it reconnected and upgraded successfully.
+
+That live screenshot exposed one more navigation problem: Layers still displayed
+all insertion commands before its correct hierarchy. The follow-up keeps those
+commands behind the explicit Insert palette in Layers, while Library retains its
+composition tools. The child-selection regression now requires the child to be
+visible without scrolling past commands. The full Designer module passes 85 tests,
+one existing ignored timing diagnostic. Publication of this small follow-up is
+still required; endpoint-removal work remains separate.

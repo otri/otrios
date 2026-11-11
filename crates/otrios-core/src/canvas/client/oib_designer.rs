@@ -585,7 +585,7 @@ impl Designer {
                     &self.tree,
                     &self.selection,
                     &self.tree_closed,
-                    self.tree_scope,
+                    self.workspace_task,
                     self.mode,
                     AuthoringTools {
                         operations: &self.structure_tools,
@@ -1189,7 +1189,7 @@ fn focus_hierarchy(
     tree: &[HierarchyRow],
     selected: &Selection,
     collapsed: &[HierarchyKey],
-    _scope: HierarchyScope,
+    task: Task,
     mode: DesignerMode,
     tools: AuthoringTools<'_>,
 ) -> Result<(Vec<SceneNode>, f32)> {
@@ -1225,6 +1225,9 @@ fn focus_hierarchy(
         nodes.push(palette);
         y += 56.;
         for (label, operation) in structure {
+            if task == Task::Layers && !palette_open {
+                continue;
+            }
             if operation.operations.iter().any(|edit| {
                 matches!(
                     edit,
