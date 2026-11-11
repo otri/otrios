@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prototype validation and implementation progress
 
-Date: 2026-11-11. Latest results: **V07 appearance and Apply status** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Date: 2026-11-11. Latest results: **V08 text audit** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
 Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
 acceptance is unchanged. This task made no live deployment or state changes.
 
@@ -188,3 +188,26 @@ surface and collapsed revision diagnostics. See
 package links/IDs, reproducible HTML and whitespace checks passed. The unchanged
 model suite was not repeated for this UI-only follow-up. No runtime deployment
 or native acceptance was performed. V07 supersedes V06's appearance-dropdown choice.
+
+## V08. Critical text audit
+
+[COPY_AUDIT.md](COPY_AUDIT.md) records keep/remove/move decisions for all prototype
+text families: chrome, canvas, panels, selected/empty states, fixtures, dialogs,
+feedback and accessibility names. Persistent tutorial copy, repeated layer/type
+badges, empty-selection prompts, empty API results and routine success narration
+were removed. Help, override demonstration and prototype limits are collapsed.
+Useful labels, units, variable names, actual content, API names, scoped dependency
+counts and destructive/error feedback remain. The fake panel.default style label
+was replaced by Colors rather than implying an implemented style binding.
+
+Canvas selection now uses an accessible transparent Edit-only selection button
+instead of a visible text badge. Existing exposed component API stays visible
+without the contextual creation form. Tests exercise selection after copy removal,
+source isolation, Test-mode overlay removal, collapsed help, and API visibility.
+
+Browser checks at 728×800, 1280×800 and 1600×800 passed **32 scenarios / 227
+assertions per run**, zero failures and no horizontal overflow, 800px output.
+See [evidence/copy-audit.json](evidence/copy-audit.json). JS syntax, document links,
+generated artifact reproducibility and whitespace checks passed. Model contracts
+were unchanged, so the model suite was not repeated. No native build, deployment
+or production accessibility acceptance was run.

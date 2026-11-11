@@ -41,8 +41,9 @@ same information architecture, with their input adapters and available space.
 | Apply status | One plain-language status near commands | All changes applied / Unapplied changes / review or validation required |
 | Revision numbers | Collapsed technical details only | Debugging; never ordinary editing feedback |
 
-Group labels Workspace, Interaction and Preview appearance make the distinction
-explicit. Tabs use Left/Right/Home/End plus normal keyboard focus. Edit/Test uses
+Labels Interaction and Preview appearance make independent modes explicit. The
+navigation tab group keeps its accessible Workspace name without a redundant
+visible Workspace heading. Tabs use Left/Right/Home/End plus normal keyboard focus. Edit/Test uses
 pressed state within its own labeled group, not tab styling. Navigation never
 silently switches Edit/Test, and appearance never writes an app theme preference.
 
@@ -266,3 +267,14 @@ are both two-option segmented controls using the same component; their labels
 identify independent local contexts. Neither affects Apply status unless an actual
 authored field changes. The prototype's RAM-only/publication limits and simulation
 commands stay in explicitly labeled Prototype & technical details.
+
+## S13. Copy and progressive guidance
+
+Follow [COPY_AUDIT.md](COPY_AUDIT.md). Keep labels, values, units, source/scope and
+actionable errors. Move one-time guidance and prototype diagnostics into collapsed
+Help/details. Remove repeated type badges, no-selection prompts and empty-result
+filler. Canvas content is authored content and must not be removed as chrome.
+Routine success does not require another footer message when the scene and Apply
+status already communicate it. Keep rare publication outcomes and destructive
+consequences explicit. Do not hide existing component API just because the creation
+form is contextual to a selected node. Accessible names remain mandatory.

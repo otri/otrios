@@ -8,10 +8,11 @@ foundation without rewriting those qualification records.
 
 ## Restart here after context compaction
 
-1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V07, and
+1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V08, and
    [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md) for actual progress and gaps.
 2. Read [DESIGN.md](../../DESIGN.md) for visual direction and
-   [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization.
+   [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization, and
+   [COPY_AUDIT.md](COPY_AUDIT.md) for text decisions.
 3. Use [UX_JOURNEYS.md](UX_JOURNEYS.md) J01–J27 for user narratives and
    [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md) T01–T13 for contracts and algorithms.
 4. Use [CONTROL_MATRIX.md](CONTROL_MATRIX.md) Q01–Q16 as the implementation and
@@ -55,6 +56,7 @@ foundation without rewriting those qualification records.
 | TECHNICAL_DESIGN.md | Proposed record, layout, transaction and dependency semantics |
 | CONTROL_MATRIX.md | Representative control breadth and implementation/test backlog |
 | REFERENCES.md | Reviewed references, inaccessible sources and alignment differences |
+| COPY_AUDIT.md | Keep/remove/move decisions for all UI text families |
 | COMPLETENESS_AUDIT.md | Field coverage, asymmetry findings and explicit remaining gaps |
 | VALIDATION.md | Commands, evidence scope, findings and remaining qualification |
 | prototype/ | Original disposable HTML/JS UX model; not a runtime implementation |

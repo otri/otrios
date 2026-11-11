@@ -23,6 +23,8 @@ for marker, name in [('MODEL', 'model.cjs'), ('UI', 'ui.js')]:
 assert (prototype / 'index.html').read_text() == expected, 'Rebuild prototype'
 assert 'id="profile"' not in expected, 'Device profile selector must remain removed'
 assert 'id="appearance"' not in expected, 'Appearance uses segmented buttons'
+assert 'id="edit-hint"' not in expected, 'Persistent canvas tutorial must stay in Help'
+assert 'Style / panel.default' not in expected, 'Do not imply a style binding'
 assert 'Confirmed model' not in expected, 'Internal status must not return'
 assert 'role="tablist"' in expected and 'aria-label="Interaction mode"' in expected
 assert 'of 96. It has no inserted' not in (root / 'UX_JOURNEYS.md').read_text()
