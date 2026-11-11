@@ -234,7 +234,7 @@ fn command(id: u32, frame: Rect, value: &str, enabled: bool, p: Palette) -> Scen
     }
     node
 }
-fn wrapped_lines(lines: &[String], columns: usize) -> Vec<String> {
+pub(super) fn wrapped_lines(lines: &[String], columns: usize) -> Vec<String> {
     let mut result = Vec::new();
     for line in lines {
         let mut current = String::new();

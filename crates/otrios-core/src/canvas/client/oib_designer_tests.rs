@@ -6140,3 +6140,234 @@ fn confirm_instance_removal(client: &mut Client) {
     assert!(client.activate(client.epoch(), id).unwrap());
     assert!(client.active.as_ref().unwrap().delete_review.is_none());
 }
+
+fn activate_api_control(client: &mut Client, label: &str) -> u32 {
+    let (id, y) = {
+        let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+        let row = d
+            .panels
+            .last()
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|n| n.semantics.as_ref().is_some_and(|s| s.label == label))
+            .unwrap_or_else(|| panic!("Missing API control {label}"));
+        (row.id, row.frame.y)
+    };
+    fixture_scroll_to(client, 1, y - 8.);
+    assert!(client.scene().unwrap().path(id).is_some());
+    assert!(client.activate(client.epoch(), id).unwrap());
+    id
+}
+#[test]
+fn component_api_routes_imported_child_property_privately_and_apply_keeps_app_values() {
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_ui(true, 0, ui);
+    let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().doc.typed_value(f).unwrap());
+    let generation = authority.oib_status().unwrap().structural_generation;
+    let before = authority.save().unwrap();
+    client
+        .inspect_oib_selection(Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(7),
+        })
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    activate_api_control(&mut client, "> Accent · Color");
+    let disconnect = activate_api_control(&mut client, "Disconnect Accent");
+    let path = PropertyPath {
+        references: vec![NodeId(7)],
+        node: NodeId(1),
+        property: PropertyId(1),
+    };
+    let targets = |client: &Client| {
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .design_doc()
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .into_iter()
+            .find(|d| d.id == DefinitionId(10))
+            .unwrap()
+            .exposed
+            .into_iter()
+            .find(|e| e.property == PropertyId(1))
+            .unwrap()
+            .targets
+    };
+    assert!(!targets(&client).contains(&path));
+    assert_eq!(authority.save().unwrap(), before);
+    assert!(
+        !client.activate(client.epoch(), disconnect).unwrap(),
+        "retired row cannot act again"
+    );
+    assert!(client.designer_history(false).unwrap());
+    assert!(targets(&client).contains(&path));
+    assert!(client.designer_history(true).unwrap());
+    assert!(!targets(&client).contains(&path));
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        generation + 1
+    );
+    client
+        .inspect_oib_selection(Selection::Definition(DefinitionId(10)))
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    activate_api_control(&mut client, "> Accent · Color");
+    let model = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .api_model
+        .as_ref()
+        .unwrap();
+    assert!(!model.choices.is_empty());
+    assert!(
+        model
+            .choices
+            .iter()
+            .all(|choice| choice.label.ends_with(" / Accent"))
+    );
+    client
+        .inspect_oib_selection(Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(7),
+        })
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    activate_api_control(&mut client, "> Accent · Color");
+    // Reconnect from the child's compatible typed source chooser, then change
+    // the shared root value in the same private candidate.
+    activate_api_control(&mut client, "Forward from Accent");
+    let address = PropertyAddress::Definition {
+        definition: DefinitionId(10),
+        node: NodeId(1),
+        property: PropertyId(1),
+    };
+    let color = Value::Color([180, 72, 40, 255]);
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .stage_property(&address, Some(color.clone()))
+        .unwrap();
+    let child = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: path.clone(),
+    };
+    let m = client.active.as_ref().unwrap();
+    let trace = crate::canvas::oib::document::property_sources(
+        &m.design_doc().oib_authoring_seed().unwrap(),
+        &m.design_doc().oib_allocations().unwrap(),
+        &child,
+        &m.design_doc().oib_active().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        trace.value,
+        Some(color.clone()),
+        "forwarding is live, not a copied child default"
+    );
+    for viewport in [[800., 480.], [1280., 800.], [1920., 1080.]] {
+        client.set_viewport(viewport).unwrap();
+        assert!(client.scene().unwrap().controls().len() <= 128);
+    }
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(targets(&client).contains(&path));
+    let m = client.active.as_ref().unwrap();
+    assert_eq!([1, 2, 3, 4].map(|f| m.doc.typed_value(f).unwrap()), fields);
+    assert_eq!(
+        m.doc.oib_property_register(&address).unwrap().alternatives,
+        vec![Some(color)]
+    );
+    assert!(client.designer_history(false).unwrap());
+    assert!(!targets(&client).contains(&path));
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(!targets(&client).contains(&path));
+}
+
+#[test]
+fn component_api_exposes_no_numeric_source_and_imported_definitions_stay_readonly() {
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let (mut client, authority, _session) = mounted_fixture_session_with_ui(true, 0, ui);
+    let before = authority.save().unwrap();
+    client
+        .inspect_oib_selection(Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(7),
+        })
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    let m = client.active.as_ref().unwrap();
+    let model = m.designer.as_ref().unwrap().api_model.as_ref().unwrap();
+    let numeric = model
+        .fields
+        .iter()
+        .find(|f| f.descriptor.value_type == ValueType::Number)
+        .unwrap()
+        .path
+        .clone();
+    let model = api_editor::model(
+        m.design_doc(),
+        &m.design_doc().oib_authoring_seed().unwrap(),
+        &m.designer.as_ref().unwrap().selection,
+        Some(&numeric),
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        model.choices.is_empty(),
+        "Color root never supplies a Number endpoint"
+    );
+    let path = PropertyPath {
+        references: vec![NodeId(7)],
+        node: NodeId(1),
+        property: PropertyId(1),
+    };
+    let model = api_editor::model(
+        m.design_doc(),
+        &m.design_doc().oib_authoring_seed().unwrap(),
+        &m.designer.as_ref().unwrap().selection,
+        Some(&path),
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(model.choices.iter().all(|c| c.operation.is_none()));
+    client
+        .inspect_oib_selection(Selection::Definition(DefinitionId(12)))
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    let m = client.active.as_ref().unwrap();
+    assert!(
+        m.designer
+            .as_ref()
+            .unwrap()
+            .api_model
+            .as_ref()
+            .unwrap()
+            .root
+    );
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(authority.save().unwrap(), before);
+}

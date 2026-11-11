@@ -785,3 +785,54 @@ staleness, explicit rescan, navigation and scrolling rules apply to this review.
 
 The broader replacement/retirement journey remains open. See the latest
 implementation record for actual tests and Frame/Web publication status.
+
+## T19. Typed API delivery and current endpoint boundary
+
+The current canonical `Expose` operation routes an existing admitted root property;
+it cannot create or rename a property descriptor. Do not treat routing a Panel's
+existing Color property as qualification of LabelledSlider's new `label`, `value`,
+`minimum`, `maximum`, `step` or `enabled` endpoints. The full T04/J07 journey stays
+open until those stable typed declarations exist and have authority/codec/history
+and Frame/Web evidence.
+
+API delivery proceeds through these concrete slices:
+
+1. **Existing endpoint routes:** Inspect in definition scope has a Component API
+   disclosure. Selecting a local node lists its declared inherited properties;
+   selecting a component-reference node lists the linked component root's declared
+   properties. Expand one property at a time. List only root source properties of
+   the same type and an admitted writable literal policy. Connecting/disconnecting
+   updates that source's canonical target list, preserving its other targets.
+   Root selection lists existing target paths by reference/object/property name
+   and permits explicit disconnection. Final candidate preview supplies rejection
+   reasons; unavailable choices have no executable action. Imported definition
+   bodies remain immutable even when their local reference is editable. Global
+   Apply, local Undo and conditional published Undo retain their existing meaning.
+2. **Definition-owned endpoints:** Add a canonical per-definition declaration with
+   stable property identity, descriptive name, scalar type, typed default, optional
+   bounds/step and explicit override/binding policy. Reuse signed class endpoints;
+   do not mutate a signed class to customize one component. Specify identity
+   reservation, descriptor lookup/source precedence, limits, codec/protocol bump,
+   final admission, causal cells and fresh-ID history remapping before implementing
+   create/rename/remove/type-change forms. Preserve identity on rename. Contract
+   changes must expose dependencies and require repairs in the same Apply.
+3. **Slot declarations and placement:** Expose the existing SetSlots contract with
+   semantic host selection, stable slot identity/name, admitted class set, min/max
+   cardinality and qualified layout. Distinguish definition default children from
+   allocated owned contents. Validate required cardinality, host paths and cycles
+   after the entire repair batch. Qualify create/edit/delete and in-use failure
+   journeys rather than presenting a hardcoded Content slot as full slot editing.
+4. **Actions and complete composition:** Display and route only declared behavior
+   endpoints under grants. New event/action contracts need their own admission
+   slice; a property forwarding control grants no behavior authority. Complete
+   LabelledSlider's named endpoints, samples, bindings and changed behavior on the
+   real shared runtime before closing T04 or its control-matrix row.
+
+The first slice is local implementation, not full API/slots acceptance. API
+presentation stays in the scrolling Inspector and resets disclosure on semantic
+selection change. Long target names wrap inside their controls; only semantic
+labels are explicitly abbreviated to the existing 96-byte ceiling. Exact paths
+remain typed action identity. Existing 8192-pixel panel and 512-node/128-control
+scene ceilings remain admission gates; this slice does not raise them or add a
+second API/property engine. Candidate projection runs only while disclosed and
+uses shared descriptor lookup and final source admission.

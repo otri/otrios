@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
+mod api_editor;
 mod authoring;
 mod editing;
 mod layout_editor;
@@ -65,6 +66,8 @@ enum LocalAction {
     Mode(DesignerMode),
     Workspace(Task),
     Appearance(Appearance),
+    ApiOpen(bool),
+    ApiProperty(Option<otrios_interfaces::oib::designer::PropertyPath>),
     LayoutNoop,
     LayoutBounds(bool),
     LayoutPadding(bool, Option<otrios_interfaces::oib::InstanceOperation>),
@@ -191,6 +194,9 @@ pub(super) struct Designer {
     placement_open: bool,
     layout_bounds: bool,
     padding_independent: bool,
+    api_open: bool,
+    api_property: Option<otrios_interfaces::oib::designer::PropertyPath>,
+    api_model: Option<api_editor::Model>,
     management: Option<ManagedComponent>,
     management_nodes: Vec<SceneNode>,
     structure_tools: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
@@ -245,6 +251,9 @@ impl Clone for Designer {
             placement_open: self.placement_open,
             layout_bounds: self.layout_bounds,
             padding_independent: self.padding_independent,
+            api_open: self.api_open,
+            api_property: self.api_property.clone(),
+            api_model: self.api_model.clone(),
             management: self.management.clone(),
             management_nodes: self.management_nodes.clone(),
             structure_tools: self.structure_tools.clone(),
@@ -313,6 +322,9 @@ impl Designer {
             placement_open: false,
             layout_bounds: false,
             padding_independent: false,
+            api_open: false,
+            api_property: None,
+            api_model: None,
             management: None,
             management_nodes: vec![],
             structure_tools: vec![],
@@ -459,6 +471,9 @@ impl Designer {
         }
         self.layout_bounds = false;
         self.padding_independent = false;
+        self.api_open = false;
+        self.api_property = None;
+        self.api_model = None;
         self.selection = selection;
         self.revision = None;
         if let Some(panel) = self.panels.last_mut() {
@@ -621,6 +636,26 @@ impl Designer {
             )?
         };
 
+        if self.focus_layout && api_editor::definition(&self.selection).is_some() {
+            let mut height = 0.;
+            let api = api_editor::build(
+                &mut builder,
+                self.api_model.as_ref(),
+                self.api_open,
+                &mut height,
+            )?;
+            // Keep the selection title first; API is a separate disclosure above
+            // layout and literal fields, inside the same scrolling inspector.
+            for node in inspector.0.iter_mut().skip(1) {
+                node.frame.y += height;
+            }
+            let mut api = api;
+            for node in &mut api {
+                node.frame.y += 44.;
+            }
+            inspector.0.splice(1..1, api);
+            inspector.1 += height;
+        }
         if let Some(selected) = objects.iter().find(|o| o.selection == self.selection)
             && let Some(title) = inspector.0.first_mut()
             && let Primitive::Text { value, .. } = &mut title.primitive
@@ -2061,6 +2096,17 @@ impl Mount {
                     }
                 }
             }
+            designer.api_model = if designer.api_open {
+                api_editor::model(
+                    self.design_doc(),
+                    seed,
+                    &designer.selection,
+                    designer.api_property.as_ref(),
+                    editable && designer.mode == DesignerMode::Edit,
+                )?
+            } else {
+                None
+            };
             let conflicts = self.design_doc().oib_conflicts();
             designer.registers = properties
                 .iter()
@@ -2498,6 +2544,26 @@ impl Client {
             return Ok(false);
         }
         match action {
+            LocalAction::ApiOpen(_) | LocalAction::ApiProperty(_) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                self.designer_blur_focused()?;
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                match action {
+                    LocalAction::ApiOpen(open) => {
+                        d.api_open = open;
+                        d.api_property = None;
+                    }
+                    LocalAction::ApiProperty(property) => d.api_property = property,
+                    _ => unreachable!(),
+                }
+                d.revision = None;
+                m.refresh_designer()?;
+                m.invalidate_presentation();
+                Ok(true)
+            }
             LocalAction::NewComponent => self.designer_new_component(),
             LocalAction::Undo => self.designer_history(false),
             LocalAction::Redo => self.designer_history(true),

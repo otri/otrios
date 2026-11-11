@@ -59,7 +59,10 @@ fn class(doc: &Document, id: ClassId) -> Result<&ClassDescriptor> {
         .find(|c| c.id == id)
         .ok_or_else(|| "Unknown OIB class".into())
 }
-pub(super) fn descriptors(doc: &Document, id: ClassId) -> Result<Vec<PropertyDescriptor>> {
+pub(in crate::canvas) fn descriptors(
+    doc: &Document,
+    id: ClassId,
+) -> Result<Vec<PropertyDescriptor>> {
     let mut result = Vec::new();
     let mut current = Some(id);
     let mut seen = BTreeSet::new();

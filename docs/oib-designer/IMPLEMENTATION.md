@@ -857,3 +857,50 @@ mixed replacement staging capacity, typed API/slot authoring, app-bound graph
 reconstruction and replacement/retirement; B6 styles/modes and B7 controls/flows.
 Restart in `canvas/oib/instance_impact.rs`, `client/oib_delete.rs`,
 `client/oib_designer.rs`, `client/oib_working_copy.rs` and their focused tests.
+
+## B5 existing typed API routes — local implementation, pending publication
+
+Inspect now has a Component API disclosure in definition scope. It lists the
+selected object's inherited declared properties, or a linked component root's
+properties when selecting its reference node. Expanding a child property shows
+compatible admitted root sources and explicit connect/disconnect commands. Root
+selection lists existing forwarding targets by semantic path. Each command runs
+ordinary candidate admission before becoming executable, then stages the existing
+Expose operation privately. Other targets remain intact. Imported definitions,
+read-only mode and type mismatches grant no extra edit authority. Opening the
+section does not emit transport writes. Long target paths wrap within the row;
+semantic labels remain within 96 bytes and exact paths remain typed actions.
+
+This is T19 slice 1, **not** definition-owned endpoint creation, complete slots,
+actions or full LabelledSlider qualification. The existing public contract has no
+operation for creating a property descriptor; T19 records the required next schema,
+identity, lookup, protocol and history work instead of implying that UI routing
+has already provided named `label`/`value` endpoints. No public wire, dependency or
+resource ceiling changed in this slice.
+
+Focused same-process evidence:
+
+- `component_api` tests verify a local definition's route into an exact imported
+  Slider, private disconnect and local Undo/Redo, stale retired row rejection,
+  one structural Apply, reconnect plus root color in one private candidate,
+  live forwarded source value, published Undo and unchanged app values.
+- The second API case verifies that a Color root offers no Number source, read-only
+  projection has no executable route commands, and inspecting an imported body
+  publishes nothing. Real scenes at 800×480, 1280×800 and 1920×1080 remain within
+  the combined control limit.
+- The API row test verifies that long target paths preserve visible text while
+  explicitly abbreviating semantic labels at the existing ceiling.
+
+The focused Designer module passes 62 tests with one existing ignored timing
+diagnostic; the long-target API row test passes separately. Strict runtime-library
+Clippy and `git diff --check` pass. No full preflight or release artifact build was
+run for this slice.
+Frame SSH again timed out; no publication process was started. Live evidence
+remains the last verified release at the top of this file. The API changes and
+preceding pending lifecycle commits still require combined native/Web acceptance.
+No broad repository scan, full preflight or Linux IPC claim accompanies this slice.
+
+Restart: `client/oib_designer/api_editor.rs`, its parent refresh/disclosure routes,
+`client/oib_designer_tests.rs`, shared `oib/document.rs::descriptors` and T19 above.
+Continue definition-owned endpoint contracts and slots, alongside the remaining
+history/replacement gates and B6/B7; do not close the full objective on these tests.
