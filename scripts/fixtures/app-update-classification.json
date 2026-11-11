@@ -5,7 +5,7 @@
     "component_behavior_abi": "otrios-component-behavior-v1",
     "bundle_abi": "otrios-app-bundle-v1",
     "host_session": 1,
-    "sync_protocol": "otrios-canvas-sync-v31",
+    "sync_protocol": "otrios-canvas-sync-v32",
     "state_schema": "otrios-canvas-merkle-state-v1",
     "app_contracts": {
       "designer.otapp": "1e4f52a959f00546bff6e2f2adf6bbea729b86ae97c1032aa7330c1148761bc4",
@@ -98,7 +98,7 @@
     "component_behavior_abi": "otrios-component-behavior-v1",
     "bundle_abi": "otrios-app-bundle-v1",
     "host_session": 1,
-    "sync_protocol": "otrios-canvas-sync-v31",
+    "sync_protocol": "otrios-canvas-sync-v32",
     "state_schema": "otrios-canvas-merkle-state-v1",
     "app_contracts": {
       "designer.otapp": "1e4f52a959f00546bff6e2f2adf6bbea729b86ae97c1032aa7330c1148761bc4",

@@ -11,6 +11,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
             "otrios-oib-v2",
             "otrios-oib-instances-v1",
             "otrios-oib-designer-v2",
+            "otrios-auto-layout-v1",
         ],
     )
 }

@@ -540,6 +540,22 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// The current text contract has one admitted face. Authority-side source
+/// admission needs its exact metrics even without a graphics host; decode once.
+/// Hosts still load/verify their own matching font resource before mounting.
+#[cfg(feature = "canvas")]
+pub(crate) fn admission_font() -> Result<&'static Font, String> {
+    static FONT: std::sync::OnceLock<Result<Font, String>> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        Font::from_zstd(
+            include_bytes!("../../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            super::font_reference::RESOURCE_SHA256,
+        )
+    })
+    .as_ref()
+    .map_err(Clone::clone)
+}
+
 #[cfg(test)]
 const TEST_FONT_BYTES: &[u8] =
     include_bytes!("../../../../web/shared/fonts/Roboto-Regular.otq.zst");

@@ -8,6 +8,8 @@ fn state(id: u16) -> Expr {
 }
 fn node(id: u16, frame: [Expr; 4], shape: Shape, children: Vec<TemplateNode>) -> TemplateNode {
     TemplateNode {
+        reference_root: false,
+        layout: None,
         id,
         frame,
         shape,
@@ -475,4 +477,99 @@ fn raw_binding_cache_distinguishes_signed_zero_in_all_numeric_values() {
         assert!(!super::super::same_binding_values(&a, &b));
         assert!(super::super::same_binding_values(&b, &b));
     }
+}
+
+#[test]
+fn auto_layout_keeps_color_and_legacy_slider_placement_on_content_path() {
+    let mut source = blueprint();
+    source.schema = AUTO_LAYOUT_FORMAT.into();
+    source.templates[0].root.layout = Some(NodeLayout {
+        container: Some(AutoLayout {
+            padding: [16.; 4],
+            ..AutoLayout::default()
+        }),
+        ..NodeLayout::default()
+    });
+    let layout = Layout::from_blueprint(source).unwrap();
+    let old = values();
+    let mut next = old.clone();
+    next.insert(3, Value::Color([234, 21, 33, 255]));
+    assert!(layout.content_input_bounds_stable(&old, &next));
+    parity(&layout, &old, &next);
+    next.insert(1, Value::Number(80.));
+    assert!(layout.content_input_bounds_stable(&old, &next));
+    parity(&layout, &old, &next);
+}
+
+#[test]
+fn auto_layout_hug_text_change_requires_remeasure_but_color_does_not() {
+    let mut source = blueprint();
+    source.schema = AUTO_LAYOUT_FORMAT.into();
+    source.templates[0].root.children[0].children[1].layout = Some(NodeLayout {
+        width: AxisSizing {
+            mode: Sizing::Hug,
+            ..AxisSizing::default()
+        },
+        height: AxisSizing {
+            mode: Sizing::Hug,
+            ..AxisSizing::default()
+        },
+        ..NodeLayout::default()
+    });
+    let layout = Layout::from_blueprint(source).unwrap();
+    let font = crate::dashboard::font::test_font();
+    let old = values();
+    let previous = layout
+        .resolve_ordered_with_font(&old, [1280., 800.], &[], Some(&font))
+        .unwrap();
+    let mut next = old.clone();
+    next.insert(3, Value::Color([234, 21, 33, 255]));
+    let patched = layout
+        .update_content(&previous, &old, &next, [1280., 800.])
+        .unwrap()
+        .unwrap();
+    let full = layout
+        .resolve_ordered_with_font(&next, [1280., 800.], &[], Some(&font))
+        .unwrap();
+    assert_eq!(patched.root(), full.root());
+    next.insert(2, Value::Text("A much longer label".into()));
+    assert!(!layout.content_input_bounds_stable(&old, &next));
+    assert!(
+        layout
+            .update_content(&previous, &old, &next, [1280., 800.])
+            .unwrap()
+            .is_none()
+    );
+    let full = layout
+        .resolve_ordered_with_font(&next, [1280., 800.], &[], Some(&font))
+        .unwrap();
+    assert_ne!(
+        previous.path(3).unwrap().last().unwrap().node.frame.width,
+        full.path(3).unwrap().last().unwrap().node.frame.width
+    );
+}
+
+#[test]
+fn auto_layout_encoding_input_retains_signed_zero_in_bounds_and_padding() {
+    let mut source = blueprint();
+    source.schema = AUTO_LAYOUT_FORMAT.into();
+    source.templates[0].root.layout = Some(NodeLayout {
+        container: Some(AutoLayout::default()),
+        ..NodeLayout::default()
+    });
+    let layout = Layout::from_blueprint(source.clone()).unwrap();
+    source.templates[0].root.layout.as_mut().unwrap().width.min = -0.;
+    assert_eq!(layout.blueprint(), &source);
+    assert!(!layout.has_same_encoding_input(&source));
+    source.templates[0].root.layout.as_mut().unwrap().width.min = 0.;
+    source.templates[0]
+        .root
+        .layout
+        .as_mut()
+        .unwrap()
+        .container
+        .as_mut()
+        .unwrap()
+        .padding[0] = -0.;
+    assert!(!layout.has_same_encoding_input(&source));
 }

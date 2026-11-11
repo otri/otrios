@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Versioned FlexBuffers layout contract. Serde connects typed Rust values directly to binary.
 use serde::{Deserialize, Serialize};
+pub mod auto_layout;
+pub use auto_layout::{
+    AutoLayout, AxisSizing, CrossAlignment, Direction, NodeLayout, Packing, Placement, Sizing,
+};
+pub const AUTO_LAYOUT_FORMAT: &str = "otrios-layout-v6";
+pub const AUTO_LAYOUT_FEATURE: &str = "otrios-auto-layout-v1";
 /// Sparse u8 responder identities; 255 remains reserved for the host.
 /// Control/scene counts retain their existing admission bounds.
 pub const SPARSE_EVENTS_FORMAT: &str = "otrios-layout-v5";
@@ -136,6 +142,12 @@ pub struct ResizeRule {
 #[serde(deny_unknown_fields)]
 pub struct TemplateNode {
     pub id: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<NodeLayout>,
+    /// Compiler-expanded component root: measure its authored intrinsic size,
+    /// then use the caller reference's allocated border box for presentation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference_root: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resize: Option<ResizeRule>,
     pub frame: [Expr; 4],

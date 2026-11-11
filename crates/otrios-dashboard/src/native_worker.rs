@@ -505,6 +505,11 @@ pub(super) fn state_worker(
     } else {
         [1280., 800.]
     })?;
+    let font = match &o.font {
+        Some(font) => font.clone(),
+        None => crate::font_resource::load()?,
+    };
+    client.set_font(font.clone());
     client.admit_catalog(&catalog)?;
     let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
     let requested_path = o.screen.as_deref().map(entry_app).transpose()?;
@@ -528,11 +533,6 @@ pub(super) fn state_worker(
     } else {
         mount_local(&mut client, &resources, &entry.app.id, &entry.app.state_ref)?;
     }
-    let font = match &o.font {
-        Some(font) => font.clone(),
-        None => crate::font_resource::load()?,
-    };
-    client.set_font(font.clone());
     let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
     let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(8);
     let stream_ready = Arc::new(AtomicBool::new(false));
@@ -1596,6 +1596,8 @@ mod tests {
                     name: "Root".into(),
                     parameters: vec![],
                     root: TemplateNode {
+                        reference_root: false,
+                        layout: None,
                         id: 0,
                         resize: None,
                         frame: [number(0.), number(0.), Expr::Width, Expr::Height],
@@ -1607,6 +1609,8 @@ mod tests {
                         }),
                         semantics: None,
                         children: vec![TemplateNode {
+                            reference_root: false,
+                            layout: None,
                             id: 1,
                             resize: None,
                             frame: [number(0.), number(0.), Expr::Width, Expr::Height],

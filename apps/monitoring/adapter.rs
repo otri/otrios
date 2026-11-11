@@ -42,6 +42,8 @@ impl View {
                 },
             ],
             root: TemplateNode {
+                reference_root: false,
+                layout: None,
                 resize: None,
                 id: 0,
                 frame: [number(0.), number(0.), Expr::Width, Expr::Height],
@@ -50,6 +52,8 @@ impl View {
                 responder: None,
                 semantics: None,
                 children: vec![TemplateNode {
+                    reference_root: false,
+                    layout: None,
                     resize: None,
                     id: 1,
                     frame: [number(0.), number(0.), Expr::Width, Expr::Height],
@@ -75,6 +79,8 @@ impl View {
                 default: color(GREEN),
             }],
             root: TemplateNode {
+                reference_root: false,
+                layout: None,
                 resize: None,
                 id: 0,
                 frame: [number(0.), number(0.), Expr::Width, Expr::Height],
@@ -83,6 +89,8 @@ impl View {
                 responder: None,
                 semantics: None,
                 children: vec![TemplateNode {
+                    reference_root: false,
+                    layout: None,
                     resize: None,
                     id: 1,
                     frame: [number(0.), number(0.), Expr::Width, Expr::Height],

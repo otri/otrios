@@ -11,6 +11,8 @@ fn full() -> [Expr; 4] {
 }
 fn node(id: u16, shape: Shape, children: Vec<TemplateNode>) -> TemplateNode {
     TemplateNode {
+        reference_root: false,
+        layout: None,
         id,
         frame: full(),
         shape,

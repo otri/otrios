@@ -117,7 +117,38 @@ pub(super) fn input_bounds_stable(
             responsive,
         )
     }
-    stable(root, &changed).0
+    !measurement_changed(root, &changed, false) && stable(root, &changed).0
+}
+/// Paint-only reuse remains available in Auto Layout trees. Text whose intrinsic
+/// size participates in Hug invalidates layout, while colors and semantic labels
+/// do not. Flow allocation depends on authored fixed dimensions, not raw x/y.
+fn measurement_changed(node: &TemplateNode, changed: &BTreeSet<u16>, in_flow: bool) -> bool {
+    let policy = node.layout.unwrap_or_default();
+    if (node.layout.is_some() || in_flow)
+        && (node.frame[2..].iter().any(|expr| depends(expr, changed))
+            || (!in_flow || policy.placement == Placement::Free)
+                && node.frame[..2].iter().any(|expr| depends(expr, changed)))
+    {
+        return true;
+    }
+    if (policy.width.mode == Sizing::Hug || policy.height.mode == Sizing::Hug)
+        && let Shape::Text { value, scale, .. } = &node.shape
+        && (depends(value, changed) || depends(scale, changed))
+    {
+        return true;
+    }
+    node.children
+        .iter()
+        .any(|child| measurement_changed(child, changed, policy.container.is_some()))
+}
+fn auto_frame_ids(node: &TemplateNode, in_flow: bool, output: &mut BTreeSet<u16>) {
+    if node.layout.is_some() || in_flow {
+        output.insert(node.id);
+    }
+    let flow = node.layout.is_some_and(|p| p.container.is_some());
+    for child in &node.children {
+        auto_frame_ids(child, flow, output);
+    }
 }
 fn eligible(
     node: &TemplateNode,
@@ -273,6 +304,7 @@ pub(super) fn update(
             &mut overridden,
         );
     }
+    auto_frame_ids(template, false, &mut overridden);
     let mut frames = BTreeMap::new();
     fn existing_frames(
         node: &SceneNode,
@@ -298,11 +330,15 @@ pub(super) fn update(
         params: &params,
         bindings: &old_bindings,
     };
-    if !eligible(template, &changed, &old, &overridden)? {
+    if measurement_changed(template, &changed, false)
+        || !eligible(template, &changed, &old, &overridden)?
+    {
         return Ok(None);
     }
     let expected = instance_frame;
-    if previous.root().frame != Rect::new(expected[0], expected[1], expected[2], expected[3]) {
+    if template.layout.is_none()
+        && previous.root().frame != Rect::new(expected[0], expected[1], expected[2], expected[3])
+    {
         return Ok(None);
     }
     let mut target = previous.root().clone();

@@ -440,7 +440,12 @@ pub(crate) fn compile_prepared(
         slots.insert(selector.local, value);
     }
     for viewport in [[1280., 800.], [800., 1280.]] {
-        let scene = layout.resolve_viewport(&slots, viewport)?;
+        let scene = layout.resolve_ordered_with_font(
+            &slots,
+            viewport,
+            &[],
+            Some(crate::dashboard::font::admission_font()?),
+        )?;
         if let Some(surface) = &seed.instance_surface
             && (surface.layout.is_some()
                 || seed.graph.is_some()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
+pub mod auto_layout;
 pub mod composition;
 mod content_update;
 mod encoding_input;
@@ -186,10 +187,28 @@ impl Layout {
         viewport: [f32; 2],
         order: &[u16],
     ) -> Result<Scene> {
+        self.resolve_ordered_with_font(slots, viewport, order, None)
+    }
+    pub fn resolve_ordered_with_font(
+        &self,
+        slots: &BTreeMap<u16, Value>,
+        viewport: [f32; 2],
+        order: &[u16],
+        font: Option<&super::font::Font>,
+    ) -> Result<Scene> {
         #[cfg(feature = "canvas")]
         let _profile = crate::canvas::profiling::span("layout.resolve");
         let bindings = Bindings { local: slots };
         let mut root = self.blueprint.root.clone();
+        if self
+            .blueprint
+            .templates
+            .iter()
+            .find(|template| template.id == root.template)
+            .is_some_and(|template| template.root.layout.is_some())
+        {
+            root.frame[2..].copy_from_slice(&viewport);
+        }
         let frames = if let Some(plan) = &self.blueprint.composition {
             root.frame[2..].copy_from_slice(&viewport);
             let mut plan = plan.clone();
@@ -218,6 +237,7 @@ impl Layout {
             0,
             &mut 0,
             frames.as_ref(),
+            font,
         )?)
     }
 }
@@ -286,6 +306,7 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
             | "otrios-layout-v3"
             | "otrios-layout-v4"
             | "otrios-layout-v5"
+            | "otrios-layout-v6"
     ) || b.templates.is_empty()
         || b.templates.len() > 32
     {
@@ -382,10 +403,20 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         }
         let mut slots = 0;
         node(&t.root, 0, &mut BTreeSet::new(), &mut slots, &mut total)?;
+        auto_layout::validate_tree(&t.root, &mut Vec::new())?;
+        fn has_layout(node: &TemplateNode) -> bool {
+            node.layout.is_some() || node.reference_root || node.children.iter().any(has_layout)
+        }
+        if b.schema != "otrios-layout-v6" && has_layout(&t.root) {
+            return Err("Reusable Auto Layout requires layout v6".into());
+        }
         fn has_resize(n: &TemplateNode) -> bool {
             n.resize.is_some() || n.children.iter().any(has_resize)
         }
-        if t.root.resize.is_some() || (b.schema == "otrios-layout-v1" && has_resize(&t.root)) {
+        if t.root.reference_root
+            || t.root.resize.is_some()
+            || (b.schema == "otrios-layout-v1" && has_resize(&t.root))
+        {
             return Err("Resize rules require layout v2 and an instance-owned root".into());
         }
         if t.root.id != 0 || slots > 1 {
@@ -427,7 +458,7 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
     if let Some(plan) = &b.composition {
         if !matches!(
             b.schema.as_str(),
-            "otrios-layout-v3" | "otrios-layout-v4" | "otrios-layout-v5"
+            "otrios-layout-v3" | "otrios-layout-v4" | "otrios-layout-v5" | "otrios-layout-v6"
         ) || b.root.id != 0
             || !b.root.children.is_empty()
         {
@@ -446,8 +477,10 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
                 _ => false,
             }
         }
-        if !matches!(b.schema.as_str(), "otrios-layout-v4" | "otrios-layout-v5")
-            && (wraps(&plan.wide.content) || wraps(&plan.tall.content))
+        if !matches!(
+            b.schema.as_str(),
+            "otrios-layout-v4" | "otrios-layout-v5" | "otrios-layout-v6"
+        ) && (wraps(&plan.wide.content) || wraps(&plan.tall.content))
         {
             return Err("Wrapping flow requires layout v4".into());
         }
@@ -677,7 +710,7 @@ fn resolve_responder(schema: &str, responder: Option<Responder>) -> Result<Optio
     Ok(if let Some(responder) = responder {
         Some(match responder {
             Responder::AppEvent { control, drag } => {
-                if (schema != otrios_interfaces::layout::SPARSE_EVENTS_FORMAT && control >= 128)
+                if (!matches!(schema, "otrios-layout-v5" | "otrios-layout-v6") && control >= 128)
                     || control == 255
                 {
                     return Err("Canvas event index exceeds limit".into());
@@ -704,6 +737,7 @@ fn expand(
     depth: usize,
     count: &mut usize,
     frames: Option<&BTreeMap<u16, [f32; 4]>>,
+    font: Option<&super::font::Font>,
 ) -> Result<SceneNode> {
     if depth > 8 {
         return Err("Instance expansion limit".into());
@@ -734,12 +768,14 @@ fn expand(
         params: &'a BTreeMap<u16, Value>,
         depth: usize,
         frames: Option<&'a BTreeMap<u16, [f32; 4]>>,
+        font: Option<&'a super::font::Font>,
     }
     fn walk(
         n: &TemplateNode,
         c: &Context<'_, '_>,
         parent_size: [f32; 2],
         is_root: bool,
+        allocation: Option<Rect>,
         count: &mut usize,
         slots: &mut usize,
     ) -> Result<Option<SceneNode>> {
@@ -756,17 +792,55 @@ fn expand(
         if *count > 512 {
             return Err("Expanded scene too large".into());
         }
-        let r = evaluation.frame(n, parent_size, is_root, &c.b.schema, c.frames)?;
+        let r = if let Some(allocation) = allocation.filter(|_| !n.reference_root) {
+            allocation
+        } else {
+            auto_layout::frame(
+                n,
+                &evaluation,
+                parent_size,
+                is_root,
+                &c.b.schema,
+                c.frames,
+                c.font,
+            )?
+        };
+        if (n.layout.is_some() || allocation.is_some()) && (r.width == 0. || r.height == 0.) {
+            if !n.children.is_empty() && matches!(n.shape, Shape::Canvas { clip: false }) {
+                return Err(
+                    "Zero-size unclipped container requires zero-extent scene support".into(),
+                );
+            }
+            return Ok(None);
+        }
         let primitive = evaluation.primitive(&n.shape, r)?;
         let mut children = Vec::new();
         if matches!(n.shape, Shape::Slot) {
             *slots += 1;
             for child in &c.i.children {
-                children.push(expand(c.b, child, c.bindings, c.depth + 1, count, None)?);
+                children.push(expand(
+                    c.b,
+                    child,
+                    c.bindings,
+                    c.depth + 1,
+                    count,
+                    None,
+                    c.font,
+                )?);
             }
         } else {
+            let allocations =
+                auto_layout::children(n, &evaluation, [r.width, r.height], &c.b.schema, c.font)?;
             for child in &n.children {
-                if let Some(node) = walk(child, c, [r.width, r.height], false, count, slots)? {
+                if let Some(node) = walk(
+                    child,
+                    c,
+                    [r.width, r.height],
+                    false,
+                    allocations.get(&child.id).copied(),
+                    count,
+                    slots,
+                )? {
                     children.push(node);
                 }
             }
@@ -789,6 +863,7 @@ fn expand(
         params: &params,
         depth,
         frames,
+        font,
     };
     let mut slots = 0;
     let mut root = walk(
@@ -796,6 +871,7 @@ fn expand(
         &c,
         [i.frame[2], i.frame[3]],
         true,
+        None,
         count,
         &mut slots,
     )?
@@ -803,7 +879,9 @@ fn expand(
     if slots == 0 && !i.children.is_empty() {
         return Err("Component has children but no visible slot".into());
     }
-    root.frame = Rect::new(i.frame[0], i.frame[1], i.frame[2], i.frame[3]);
+    if t.root.layout.is_none() {
+        root.frame = Rect::new(i.frame[0], i.frame[1], i.frame[2], i.frame[3]);
+    }
     Ok(root)
 }
 

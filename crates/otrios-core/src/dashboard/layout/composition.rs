@@ -362,6 +362,8 @@ mod tests {
     fn profiles_cannot_duplicate_omit_or_reference_nested_components() {
         fn node(id: u16) -> TemplateNode {
             TemplateNode {
+                reference_root: false,
+                layout: None,
                 id,
                 resize: None,
                 frame: std::array::from_fn(|_| Expr::Literal(Value::Number(1.))),

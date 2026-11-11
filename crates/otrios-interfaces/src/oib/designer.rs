@@ -124,6 +124,16 @@ pub enum StructuralProperty {
     Color,
     Radius,
     Visible,
+    LayoutGap,
+    Padding,
+    PaddingLeft,
+    PaddingTop,
+    PaddingRight,
+    PaddingBottom,
+    MinWidth,
+    MinHeight,
+    MaxWidth,
+    MaxHeight,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

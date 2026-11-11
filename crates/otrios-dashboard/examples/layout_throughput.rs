@@ -34,6 +34,8 @@ fn blueprint(nodes: usize, clipped: bool, kind: &str) -> Blueprint {
                 }
             };
             TemplateNode {
+                reference_root: false,
+                layout: None,
                 id: index as u16,
                 frame: [
                     Expr::Add(
@@ -61,6 +63,8 @@ fn blueprint(nodes: usize, clipped: bool, kind: &str) -> Blueprint {
             name: "Throughput".into(),
             parameters: vec![],
             root: TemplateNode {
+                reference_root: false,
+                layout: None,
                 id: 0,
                 frame: [number(0.), number(0.), Expr::Width, Expr::Height],
                 visible: Expr::Literal(Value::Boolean(true)),

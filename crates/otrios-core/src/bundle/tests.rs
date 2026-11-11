@@ -864,3 +864,83 @@ fn package_update_contract_retains_identity_policy_and_schema_without_content_pi
         "adding an app execution requirement changes the contract"
     );
 }
+
+#[path = "../../../../apps/live-ui/app.rs"]
+mod auto_layout_test_app;
+
+#[test]
+fn source_only_auto_layout_requires_feature_in_bundle() {
+    let mut ui = auto_layout_test_app::ui(&[]);
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        panic!("expected OIB source")
+    };
+    let graph = seed.graph.as_mut().unwrap();
+    let visual = graph
+        .definitions
+        .iter_mut()
+        .flat_map(|d| &mut d.nodes)
+        .find_map(|n| n.visual.as_mut())
+        .unwrap();
+    visual.layout = Some(otrios_interfaces::layout::NodeLayout::default());
+    assert!(uses_auto_layout(&ui).unwrap());
+    let bytes = canvas::encode_ui(&ui).unwrap();
+    let mut app = auto_layout_test_app::manifest();
+    app.ui_ref = ui.ui_ref.clone();
+    let entry = CatalogEntry {
+        app,
+        path: "live-ui".into(),
+        private: true,
+        ui_hash: hash(&bytes),
+    };
+    let mut tree = pack(&entry, 1, &bytes, None).unwrap();
+    assert!(
+        inspect(&tree)
+            .unwrap()
+            .info
+            .required_features
+            .iter()
+            .any(|f| f == AUTO_LAYOUT_FEATURE)
+    );
+    change_info(&mut tree, |info| {
+        info.required_features.retain(|f| f != AUTO_LAYOUT_FEATURE)
+    });
+    assert!(
+        inspect(&tree)
+            .unwrap_err()
+            .contains("Missing required auto layout feature")
+    );
+    let mut normal = fixture(None);
+    change_info(&mut normal, |info| {
+        info.required_features.push(AUTO_LAYOUT_FEATURE.into());
+        info.required_features.sort();
+    });
+    assert!(inspect(&normal).is_ok());
+}
+
+#[test]
+fn blueprint_auto_layout_requires_feature_in_bundle() {
+    let original = fixture(None);
+    let mut ui = canvas::decode_ui(&original[UI_PATH]).unwrap();
+    let layout = crate::dashboard::layout::Layout::from_bytes(&ui.layout).unwrap();
+    let mut blueprint = layout.blueprint().clone();
+    blueprint.schema = otrios_interfaces::layout::AUTO_LAYOUT_FORMAT.into();
+    blueprint.templates[0].root.layout = Some(otrios_interfaces::layout::NodeLayout::default());
+    ui.layout = crate::dashboard::layout::Layout::encode(&blueprint).unwrap();
+    let bytes = canvas::encode_ui(&ui).unwrap();
+    let mut info = decode_info(&original[INFO_PATH]).unwrap();
+    info.required_features.push(AUTO_LAYOUT_FEATURE.into());
+    info.required_features.sort();
+    let mut tree = original;
+    tree.insert(UI_PATH.into(), bytes);
+    tree.insert(INFO_PATH.into(), encode_info(&info).unwrap());
+    reseal(&mut tree);
+    assert!(inspect(&tree).is_ok());
+    change_info(&mut tree, |info| {
+        info.required_features.retain(|f| f != AUTO_LAYOUT_FEATURE)
+    });
+    assert!(
+        inspect(&tree)
+            .unwrap_err()
+            .contains("Missing required auto layout feature")
+    );
+}

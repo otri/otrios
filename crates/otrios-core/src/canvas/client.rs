@@ -5341,7 +5341,12 @@ fn resolve_layout_arc(m: &Mount, incremental: bool) -> Result<Arc<Scene>> {
         let scene = if let Some(scene) = updated {
             scene
         } else {
-            Arc::new(m.layout.resolve_ordered(&bindings, m.viewport, &order)?)
+            Arc::new(m.layout.resolve_ordered_with_font(
+                &bindings,
+                m.viewport,
+                &order,
+                m.font.as_deref(),
+            )?)
         };
         *cache = Some(RawLayout {
             source: m.layout.clone(),

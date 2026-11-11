@@ -135,6 +135,8 @@ pub enum Source {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Visual {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::layout::NodeLayout>,
     pub frame: [Expr; 4],
     pub resize: Option<ResizeRule>,
     pub visible: Expr,

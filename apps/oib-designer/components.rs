@@ -331,6 +331,7 @@ fn visual(
     parameters: Vec<g::Parameter>,
 ) -> g::Visual {
     g::Visual {
+        layout: None,
         frame: frame.map(expr),
         resize: None,
         visible: otrios_interfaces::layout::Expr::Literal(Value::Boolean(true)),

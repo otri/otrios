@@ -70,6 +70,8 @@ impl Signs {
     }
     fn node(&mut self, node: &TemplateNode) {
         let TemplateNode {
+            reference_root: _,
+            layout,
             id: _,
             resize,
             frame,
@@ -88,6 +90,18 @@ impl Signs {
             self.numbers(reference_size);
             self.axis(horizontal);
             self.axis(vertical);
+        }
+        if let Some(layout) = layout {
+            for axis in [layout.width, layout.height] {
+                self.number(axis.min);
+                if let Some(max) = axis.max {
+                    self.number(max);
+                }
+            }
+            if let Some(flow) = layout.container {
+                self.numbers(&flow.padding);
+                self.number(flow.gap);
+            }
         }
         for expr in frame {
             self.expr(expr);

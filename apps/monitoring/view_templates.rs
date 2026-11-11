@@ -16,6 +16,8 @@ fn p(v: u16) -> Expr {
 
 fn node(id: u16, frame: [Expr; 4], shape: Shape, children: Vec<TemplateNode>) -> TemplateNode {
     TemplateNode {
+        reference_root: false,
+        layout: None,
         resize: None,
         id,
         frame,

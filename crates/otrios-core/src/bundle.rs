@@ -16,6 +16,41 @@ pub const MAX_PATH_DEPTH: usize = 8;
 const DIGEST_DOMAIN: &[u8] = b"otrios-app-bundle-v1\0";
 const PACKAGE_FEATURE: &str = "otrios-canvas-package-v1";
 const BEHAVIOR_FEATURE: &str = "otrios-canvas-behavior-v1";
+pub(crate) use otrios_interfaces::layout::AUTO_LAYOUT_FEATURE;
+
+pub(crate) fn definitions_use_auto_layout(
+    definitions: &[otrios_interfaces::oib::designer::ComponentDefinition],
+) -> bool {
+    definitions
+        .iter()
+        .flat_map(|d| &d.nodes)
+        .any(|n| n.visual.as_ref().is_some_and(|v| v.layout.is_some()))
+}
+
+fn node_uses_auto_layout(node: &otrios_interfaces::layout::TemplateNode) -> bool {
+    node.layout.is_some() || node.children.iter().any(node_uses_auto_layout)
+}
+
+fn uses_auto_layout(ui: &otrios_interfaces::canvas::Ui) -> Result<bool> {
+    let layout = crate::dashboard::layout::Layout::from_bytes(&ui.layout)?;
+    let blueprint = layout.blueprint();
+    Ok(
+        blueprint.schema == otrios_interfaces::layout::AUTO_LAYOUT_FORMAT
+            || blueprint
+                .templates
+                .iter()
+                .any(|t| node_uses_auto_layout(&t.root))
+            || canvas::oib::seed(ui).is_some_and(|seed| {
+                seed.graph
+                    .as_ref()
+                    .is_some_and(|g| definitions_use_auto_layout(&g.definitions))
+                    || seed
+                        .resolved_libraries
+                        .iter()
+                        .any(|l| definitions_use_auto_layout(&l.graph.definitions))
+            }),
+    )
+}
 
 pub type BundleTree = BTreeMap<String, Vec<u8>>;
 
@@ -222,6 +257,9 @@ pub fn pack(
         == otrios_interfaces::layout::SPARSE_EVENTS_FORMAT
     {
         required_features.push(otrios_interfaces::layout::SPARSE_EVENTS_FORMAT.into());
+    }
+    if uses_auto_layout(&ui)? {
+        required_features.push(AUTO_LAYOUT_FEATURE.into());
     }
     required_features.sort();
     let info = BundleInfo {
@@ -741,6 +779,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-authored-defaults-v1"
                     | "otrios-oib-designer-v2"
                     | "otrios-layout-v5"
+                    | AUTO_LAYOUT_FEATURE
                     | "otrios-oib-library-v1"
                     | "otrios-component-behavior-v1"
             )
@@ -771,6 +810,9 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     }) && !features.contains(otrios_interfaces::oib::RESTORE_FEATURE)
     {
         return Err("Missing required OIB restore feature".into());
+    }
+    if uses_auto_layout(&ui)? && !features.contains(AUTO_LAYOUT_FEATURE) {
+        return Err("Missing required auto layout feature".into());
     }
     canvas::validate_ui_format(&ui)?;
     if canvas::oib::seed(&ui).is_some() && !features.contains(otrios_interfaces::oib::FEATURE) {

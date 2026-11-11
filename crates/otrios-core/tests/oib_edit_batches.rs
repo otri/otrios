@@ -385,6 +385,7 @@ fn submit(
 fn plain_visual() -> otrios_interfaces::oib::graph::Visual {
     use otrios_interfaces::layout::{Expr, Shape};
     otrios_interfaces::oib::graph::Visual {
+        layout: None,
         frame: [0., 0., 100., 30.].map(|n| Expr::Literal(Value::Number(n))),
         resize: None,
         visible: Expr::Literal(Value::Boolean(true)),

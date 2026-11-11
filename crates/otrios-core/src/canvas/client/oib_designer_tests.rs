@@ -1348,6 +1348,8 @@ fn nonzero_selector_evaluates_numeric_state_and_rejects_other_types() {
         layout::{Binding, Blueprint, Expr, Instance, Semantics, Shape, Template, TemplateNode},
     };
     let template = TemplateNode {
+        reference_root: false,
+        layout: None,
         id: 0,
         resize: None,
         frame: [

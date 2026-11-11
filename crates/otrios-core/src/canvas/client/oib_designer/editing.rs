@@ -103,7 +103,18 @@ pub(super) fn inspector(
         PropertyAddress,
         Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
     )],
+    layout_enabled: bool,
+    layout_bounds: bool,
+    padding_independent: bool,
 ) -> Result<(Vec<SceneNode>, f32)> {
+    let layout_target = layout_editor::target(seed, properties, structural_revision)
+        .filter(|_| editable && layout_enabled);
+    let separate = layout_target
+        .as_ref()
+        .is_some_and(|target| layout_editor::separate(target, padding_independent));
+    let visible_properties =
+        layout_editor::visible(properties, layout_target.as_ref(), layout_bounds, separate);
+    let properties = visible_properties.as_slice();
     // Clean fields outside this selection are disposable. Dirty/invalid fields
     // are never silently evicted and retain their original full address.
     let retired: Vec<_> = drafts
@@ -155,7 +166,20 @@ pub(super) fn inspector(
         )?);
         y += 56.;
     }
+    if let Some(target) = &layout_target {
+        nodes.extend(layout_editor::build(
+            b,
+            drafts,
+            properties,
+            target,
+            &mut y,
+            layout_bounds,
+            separate,
+            status.contains("Saving"),
+        )?);
+    }
     for p in properties {
+        if layout_target.is_some() && p.address.as_ref().is_some_and(|address| matches!(address, PropertyAddress::Structural {property,..} if layout_editor::numeric(*property))) { continue; }
         let mut heading = label(b, y + 8., &p.descriptor.label, WHITE)?;
         heading.frame.width = 208.;
         nodes.push(heading);
@@ -694,7 +718,7 @@ pub(in crate::canvas::client) fn keyboard_key(id: u32) -> Option<u16> {
     let index = id.checked_sub(KEY_BASE + 1)?;
     (index % 3 == 0 && index / 3 < u32::from(KEY_COUNT)).then_some((index / 3) as u16)
 }
-fn repaint(m: &mut Mount) -> Result<()> {
+pub(super) fn repaint(m: &mut Mount) -> Result<()> {
     let mut d = m.designer.take().ok_or("Missing designer")?;
     let result = (|| {
         let authoring_seed = m.doc.oib_authoring_seed()?;

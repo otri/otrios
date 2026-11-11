@@ -8,6 +8,24 @@ use otrios_interfaces::{
 };
 
 fn value(visual: &graph::Visual, property: StructuralProperty) -> Option<Value> {
+    let layout = visual.layout.unwrap_or_default();
+    let number = match property {
+        StructuralProperty::LayoutGap => Some(layout.container?.gap),
+        StructuralProperty::Padding | StructuralProperty::PaddingLeft => {
+            Some(layout.container?.padding[0])
+        }
+        StructuralProperty::PaddingTop => Some(layout.container?.padding[1]),
+        StructuralProperty::PaddingRight => Some(layout.container?.padding[2]),
+        StructuralProperty::PaddingBottom => Some(layout.container?.padding[3]),
+        StructuralProperty::MinWidth => Some(layout.width.min),
+        StructuralProperty::MinHeight => Some(layout.height.min),
+        StructuralProperty::MaxWidth => Some(layout.width.max.unwrap_or(8192.)),
+        StructuralProperty::MaxHeight => Some(layout.height.max.unwrap_or(8192.)),
+        _ => None,
+    };
+    if let Some(number) = number {
+        return Some(Value::Number(number));
+    }
     let expr = match property {
         StructuralProperty::X => &visual.frame[0],
         StructuralProperty::Y => &visual.frame[1],
@@ -28,7 +46,7 @@ fn value(visual: &graph::Visual, property: StructuralProperty) -> Option<Value> 
             Shape::Superellipse { radius, .. } => radius,
             _ => return None,
         },
-        StructuralProperty::Name => return None,
+        _ => return None,
     };
     if let Expr::Literal(value) = expr {
         Some(value.clone())
@@ -53,8 +71,18 @@ fn field(
     };
     let range = if value_type == ValueType::Number {
         Some(match property {
-            StructuralProperty::X | StructuralProperty::Y => [0., 16000.],
-            StructuralProperty::Width | StructuralProperty::Height => [1., 1000.],
+            StructuralProperty::X | StructuralProperty::Y => [-8192., 8192.],
+            StructuralProperty::Width | StructuralProperty::Height => [1., 8192.],
+            StructuralProperty::LayoutGap
+            | StructuralProperty::Padding
+            | StructuralProperty::PaddingLeft
+            | StructuralProperty::PaddingTop
+            | StructuralProperty::PaddingRight
+            | StructuralProperty::PaddingBottom
+            | StructuralProperty::MinWidth
+            | StructuralProperty::MinHeight
+            | StructuralProperty::MaxWidth
+            | StructuralProperty::MaxHeight => [0., 8192.],
             _ => [0., 1000.],
         })
     } else {
@@ -293,6 +321,16 @@ impl StateAdapter {
                 (StructuralProperty::Color, "Fill color"),
                 (StructuralProperty::Radius, "Corner radius"),
                 (StructuralProperty::Visible, "Visible"),
+                (StructuralProperty::LayoutGap, "Gap"),
+                (StructuralProperty::Padding, "Padding"),
+                (StructuralProperty::PaddingLeft, "Left padding"),
+                (StructuralProperty::PaddingTop, "Top padding"),
+                (StructuralProperty::PaddingRight, "Right padding"),
+                (StructuralProperty::PaddingBottom, "Bottom padding"),
+                (StructuralProperty::MinWidth, "Minimum width"),
+                (StructuralProperty::MinHeight, "Minimum height"),
+                (StructuralProperty::MaxWidth, "Maximum width"),
+                (StructuralProperty::MaxHeight, "Maximum height"),
             ] {
                 if let Some(current) = value(visual, property) {
                     let inherited = baseline(signed, &source, definition, selected_node)
@@ -402,15 +440,92 @@ impl StateAdapter {
                         Value::Number(number),
                     ) => {
                         let (index, minimum, maximum) = match property {
-                            StructuralProperty::X => (0, 0., 16000.),
-                            StructuralProperty::Y => (1, 0., 16000.),
-                            StructuralProperty::Width => (2, 1., 1000.),
-                            _ => (3, 1., 1000.),
+                            StructuralProperty::X => (0, -8192., 8192.),
+                            StructuralProperty::Y => (1, -8192., 8192.),
+                            StructuralProperty::Width => (2, 1., 8192.),
+                            _ => (3, 1., 8192.),
                         };
                         if !number.is_finite() || *number < minimum || *number > maximum {
                             return Err("Invalid design geometry".into());
                         }
                         visual.frame[index] = Expr::Literal(candidate.clone());
+                    }
+                    (
+                        property @ (StructuralProperty::LayoutGap
+                        | StructuralProperty::Padding
+                        | StructuralProperty::PaddingLeft
+                        | StructuralProperty::PaddingTop
+                        | StructuralProperty::PaddingRight
+                        | StructuralProperty::PaddingBottom
+                        | StructuralProperty::MinWidth
+                        | StructuralProperty::MinHeight
+                        | StructuralProperty::MaxWidth
+                        | StructuralProperty::MaxHeight),
+                        Value::Number(number),
+                    ) => {
+                        if !number.is_finite() || !(0. ..=8192.).contains(number) {
+                            return Err("Invalid layout length".into());
+                        }
+                        visual.resize = None;
+                        let layout = visual.layout.get_or_insert_with(Default::default);
+                        match property {
+                            StructuralProperty::LayoutGap => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .gap = *number
+                            }
+                            StructuralProperty::Padding => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .padding = [*number; 4]
+                            }
+                            StructuralProperty::PaddingLeft => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .padding[0] = *number
+                            }
+                            StructuralProperty::PaddingTop => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .padding[1] = *number
+                            }
+                            StructuralProperty::PaddingRight => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .padding[2] = *number
+                            }
+                            StructuralProperty::PaddingBottom => {
+                                layout
+                                    .container
+                                    .as_mut()
+                                    .ok_or("Node has no Auto Layout")?
+                                    .padding[3] = *number
+                            }
+                            StructuralProperty::MinWidth => layout.width.min = *number,
+                            StructuralProperty::MinHeight => layout.height.min = *number,
+                            StructuralProperty::MaxWidth => {
+                                layout.width.max = (*number < 8192.).then_some(*number)
+                            }
+                            StructuralProperty::MaxHeight => {
+                                layout.height.max = (*number < 8192.).then_some(*number)
+                            }
+                            _ => unreachable!(),
+                        }
+                        if layout.width.max.is_some_and(|max| max < layout.width.min)
+                            || layout.height.max.is_some_and(|max| max < layout.height.min)
+                        {
+                            return Err("Minimum exceeds maximum".into());
+                        }
                     }
                     (StructuralProperty::Visible, Value::Boolean(_)) => {
                         visual.visible = Expr::Literal(candidate.clone())

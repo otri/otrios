@@ -28,9 +28,9 @@ and task dock with Library, Layers and Inspect tabs. Test uses local sample valu
 its gestures do not write the shared app state. Dark/Light currently changes editor
 chrome; authored component modes arrive with named style resolution.
 
-Current state protocol is v31 with release-control v1. App features include
+Current source declares state protocol v32 with release-control v1. App features include
 `otrios-oib-v2`, `otrios-oib-designer-v2`, `otrios-oib-library-v1` and
-`otrios-component-behavior-v1`. L2 supplies a signed library-owned Slider through
+`otrios-component-behavior-v1` and `otrios-auto-layout-v1`. L2 supplies a signed library-owned Slider through
 bounded component Wasm ABI 1. Its initial export-contract cutover initialized a
 fresh Designer collection once, with the same v2 business schema. Subsequent
 compatible graph/guest updates and rollback preserve collection, epoch, app

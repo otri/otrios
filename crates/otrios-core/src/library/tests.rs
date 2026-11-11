@@ -61,6 +61,7 @@ fn graph() -> Graph {
                 }],
                 reference: None,
                 visual: Some(graph::Visual {
+                    layout: None,
                     frame: [0., 0., 100., 50.].map(|n| Expr::Literal(Value::Number(n))),
                     resize: None,
                     visible: Expr::Literal(Value::Boolean(true)),
@@ -469,4 +470,26 @@ fn nested_package_binding_keeps_unrelated_payloads_and_checks_independent_trust(
             .is_err(),
         "transported body must equal exact signed bytes"
     );
+}
+
+#[test]
+fn auto_layout_requires_explicit_library_feature() {
+    let mut graph = graph();
+    graph.definitions[0].nodes[0]
+        .visual
+        .as_mut()
+        .unwrap()
+        .layout = Some(otrios_interfaces::layout::NodeLayout::default());
+    let graph = seal_graph(graph).unwrap();
+    let mut info = info(&[7; 32]);
+    assert!(
+        pack(&info, &graph)
+            .unwrap_err()
+            .contains("Missing required auto layout feature")
+    );
+    info.required_features
+        .push(bundle::AUTO_LAYOUT_FEATURE.into());
+    info.required_features.sort();
+    assert!(inspect(&pack(&info, &graph).unwrap()).is_ok());
+    assert!(pack(&info, &self::graph()).is_ok());
 }

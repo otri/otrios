@@ -217,6 +217,20 @@ fn validate_source(graph: &source::Document) -> Result<()> {
     }
     for definition in &graph.definitions {
         for node in &definition.nodes {
+            if let Some(visual) = &node.visual
+                && let Some(policy) = &visual.layout
+            {
+                crate::dashboard::layout::auto_layout::validate_policy(policy)?;
+                if visual.resize.is_some()
+                    || (policy.container.is_some()
+                        && (node.reference.is_some()
+                            || !matches!(visual.shape, Shape::Canvas { .. })))
+                {
+                    return Err(error(
+                        "Auto Layout cannot combine legacy resize or use a non-container flow",
+                    ));
+                }
+            }
             if node.reference.as_ref().is_some_and(|reference| {
                 reference
                     .assignments
@@ -905,13 +919,16 @@ impl Compiler<'_> {
         if let Some(reference) = &node.reference {
             let mut inner = prefix.to_vec();
             inner.push(node.id);
-            if let Some(root) = self.node(
+            if let Some(mut root) = self.node(
                 p,
                 reference.definition,
                 &inner,
                 definition(self.graph, reference.definition)?.root,
                 depth + 1,
             )? {
+                // A reference owns the outer allocation; the expanded root keeps
+                // intrinsic metrics but presents inside that allocated border box.
+                root.reference_root = node.visual.as_ref().is_some_and(|v| v.layout.is_some());
                 children.push(root);
             }
         }
@@ -1088,6 +1105,8 @@ impl Compiler<'_> {
                 });
         }
         Ok(Some(TemplateNode {
+            reference_root: false,
+            layout: visual.layout,
             id,
             resize: visual.resize,
             frame: visual.frame,
@@ -1381,6 +1400,13 @@ fn materialize_prepared(prepared: PreparedUi) -> Result<PreparedUi> {
         ));
     }
     preview.children = lowering.previews;
+    fn has_auto(node: &TemplateNode) -> bool {
+        node.layout.is_some() || node.children.iter().any(has_auto)
+    }
+    if blueprint.templates.iter().any(|t| has_auto(&t.root)) {
+        blueprint.schema = otrios_interfaces::layout::AUTO_LAYOUT_FORMAT.into();
+    }
+
     result.selectors = lowering.selectors;
     result.handlers.extend(lowering.handlers);
     result.presentation = Some(Presentation::Oib(Box::new(lowering.seed)));
@@ -1544,3 +1570,7 @@ pub(crate) fn expand_prepared(
     super::document::placement::project_blueprint(result, blueprint, allocations, live)?;
     Ok(prepared)
 }
+
+#[cfg(test)]
+#[path = "graph_auto_layout_tests.rs"]
+mod auto_layout_tests;

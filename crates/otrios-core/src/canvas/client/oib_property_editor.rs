@@ -104,23 +104,52 @@ impl Draft {
             }
             ValueType::Number => {
                 let n = parse_number(raw(Part::Value)).ok_or(Error::InvalidNumber)?;
-                let maximum = if matches!(
+                let maximum =
+                    if matches!(
+                        self.address,
+                        PropertyAddress::Placement {
+                            property: otrios_interfaces::oib::designer::PlacementProperty::X
+                                | otrios_interfaces::oib::designer::PlacementProperty::Y,
+                            ..
+                        } | PropertyAddress::Structural {
+                            property: otrios_interfaces::oib::designer::StructuralProperty::X
+                                | otrios_interfaces::oib::designer::StructuralProperty::Y,
+                            ..
+                        }
+                    ) {
+                        16000.
+                    } else if matches!(self.address, PropertyAddress::Structural {
+                    property: otrios_interfaces::oib::designer::StructuralProperty::Width
+                        | otrios_interfaces::oib::designer::StructuralProperty::Height
+                        | otrios_interfaces::oib::designer::StructuralProperty::LayoutGap
+                        | otrios_interfaces::oib::designer::StructuralProperty::Padding
+                        | otrios_interfaces::oib::designer::StructuralProperty::PaddingLeft
+                        | otrios_interfaces::oib::designer::StructuralProperty::PaddingTop
+                        | otrios_interfaces::oib::designer::StructuralProperty::PaddingRight
+                        | otrios_interfaces::oib::designer::StructuralProperty::PaddingBottom
+                        | otrios_interfaces::oib::designer::StructuralProperty::MinWidth
+                        | otrios_interfaces::oib::designer::StructuralProperty::MinHeight
+                        | otrios_interfaces::oib::designer::StructuralProperty::MaxWidth
+                        | otrios_interfaces::oib::designer::StructuralProperty::MaxHeight,
+                    ..
+                }) {
+                        8192.
+                    } else {
+                        1000.
+                    };
+                let minimum = if matches!(
                     self.address,
-                    PropertyAddress::Placement {
-                        property: otrios_interfaces::oib::designer::PlacementProperty::X
-                            | otrios_interfaces::oib::designer::PlacementProperty::Y,
-                        ..
-                    } | PropertyAddress::Structural {
+                    PropertyAddress::Structural {
                         property: otrios_interfaces::oib::designer::StructuralProperty::X
                             | otrios_interfaces::oib::designer::StructuralProperty::Y,
                         ..
                     }
                 ) {
-                    16000.
+                    -8192.
                 } else {
-                    1000.
+                    0.
                 };
-                if !(0. ..=maximum).contains(&n)
+                if !(minimum..=maximum).contains(&n)
                     || self.descriptor.number_range.is_some_and(|[lo, hi]| {
                         !lo.is_finite() || !hi.is_finite() || n < lo || n > hi || lo > hi
                     })

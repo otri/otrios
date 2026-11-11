@@ -2,6 +2,7 @@
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
 mod authoring;
 mod editing;
+mod layout_editor;
 mod style;
 use super::oib_property_editor::PropertyDrafts;
 use super::oib_workspace::{self, Appearance, Task};
@@ -58,6 +59,9 @@ enum LocalAction {
     Mode(DesignerMode),
     Workspace(Task),
     Appearance(Appearance),
+    LayoutNoop,
+    LayoutBounds(bool),
+    LayoutPadding(bool, Option<otrios_interfaces::oib::InstanceOperation>),
     Write(PropertyAddress, Option<Value>),
     RestoreDesign(PropertyAddress, u64),
     Resolve(PropertyAddress),
@@ -160,6 +164,8 @@ pub(super) struct Designer {
     appearance: Appearance,
     palette_open: bool,
     placement_open: bool,
+    layout_bounds: bool,
+    padding_independent: bool,
     management: Option<ManagedComponent>,
     management_nodes: Vec<SceneNode>,
     structure_tools: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
@@ -205,6 +211,8 @@ impl Clone for Designer {
             appearance: self.appearance,
             palette_open: self.palette_open,
             placement_open: self.placement_open,
+            layout_bounds: self.layout_bounds,
+            padding_independent: self.padding_independent,
             management: self.management.clone(),
             management_nodes: self.management_nodes.clone(),
             structure_tools: self.structure_tools.clone(),
@@ -270,6 +278,8 @@ impl Designer {
             appearance: Appearance::Dark,
             palette_open: false,
             placement_open: false,
+            layout_bounds: false,
+            padding_independent: false,
             management: None,
             management_nodes: vec![],
             structure_tools: vec![],
@@ -393,6 +403,8 @@ impl Designer {
             };
             self.reveal_selection = true;
         }
+        self.layout_bounds = false;
+        self.padding_independent = false;
         self.selection = selection;
         self.revision = None;
         if let Some(panel) = self.panels.last_mut() {
@@ -524,6 +536,9 @@ impl Designer {
                 &self.registers,
                 seed,
                 &self.connection_tools,
+                self.mode == DesignerMode::Edit,
+                self.layout_bounds,
+                self.padding_independent,
             )?
         } else {
             inspector(
@@ -2303,6 +2318,33 @@ impl Client {
                 m.invalidate();
                 Ok(true)
             }
+            LocalAction::LayoutNoop => Ok(false),
+            LocalAction::LayoutBounds(open) => {
+                if self.input_busy() || !self.designer_blur_workspace_field()? {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                m.designer.as_mut().ok_or("Missing designer")?.layout_bounds = open;
+                editing::repaint(m)?;
+                Ok(true)
+            }
+            LocalAction::LayoutPadding(independent, normalize) => {
+                if self.input_busy() || !self.designer_blur_workspace_field()? {
+                    return Ok(false);
+                }
+                if let Some(operation) = normalize
+                    && !self.edit_oib_structure(operation)?
+                {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                m.designer
+                    .as_mut()
+                    .ok_or("Missing designer")?
+                    .padding_independent = independent;
+                editing::repaint(m)?;
+                Ok(true)
+            }
             LocalAction::Appearance(appearance) => {
                 if self.input_busy() {
                     return Ok(false);
@@ -2677,3 +2719,7 @@ mod tests;
 #[cfg(test)]
 #[path = "oib_workspace_focus_tests.rs"]
 mod workspace_focus_tests;
+
+#[cfg(test)]
+#[path = "oib_layout_editor_tests.rs"]
+mod layout_editor_tests;

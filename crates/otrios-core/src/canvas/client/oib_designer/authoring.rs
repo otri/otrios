@@ -13,6 +13,7 @@ fn literal(number: f32) -> Expr {
 }
 fn visual(shape: Shape, width: f32, height: f32) -> graph::Visual {
     graph::Visual {
+        layout: None,
         frame: [literal(0.), literal(0.), literal(width), literal(height)],
         resize: None,
         visible: Expr::Literal(Value::Boolean(true)),
@@ -21,6 +22,24 @@ fn visual(shape: Shape, width: f32, height: f32) -> graph::Visual {
         action: None,
         parameters: vec![],
     }
+}
+fn blank_visual() -> graph::Visual {
+    use otrios_interfaces::layout::{AutoLayout, AxisSizing, NodeLayout, Sizing};
+    let mut root = visual(Shape::Canvas { clip: true }, 320., 48.);
+    root.layout = Some(NodeLayout {
+        height: AxisSizing {
+            mode: Sizing::Hug,
+            min: 48.,
+            max: None,
+        },
+        container: Some(AutoLayout {
+            padding: [16.; 4],
+            gap: 8.,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    root
 }
 fn node(
     id: u64,
@@ -108,13 +127,7 @@ pub(super) fn tools(
                 DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
                     definition: DefinitionId(next),
                     name: "New component".into(),
-                    root: node(
-                        root,
-                        "Panel",
-                        class.id,
-                        None,
-                        visual(Shape::Canvas { clip: true }, 320., 180.),
-                    ),
+                    root: node(root, "Panel", class.id, None, blank_visual()),
                 }),
                 DocumentEdit::Preset(PresetEdit::Create {
                     preset: graph::Preset {

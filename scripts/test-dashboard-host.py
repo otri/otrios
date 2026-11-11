@@ -54,7 +54,7 @@ def main():
             status,headers,identity=request(prefix+wasm,extra={'Accept-Encoding':encoding})
             assert status==200 and headers.get('Content-Encoding') is None
             assert hashlib.sha256(identity).hexdigest()==manifest['assets'][wasm]['sha256'];count+=1
-    assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v31';count+=1
+    assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v32';count+=1
     assert 'apps/catalog.flex' in manifest['assets'];count+=1
     for name in manifest.get('authority',{}):
         assert name.startswith(('authority/apps/','authority/bundles/')) and request(prefix+name)[0]==404;count+=1
@@ -72,7 +72,7 @@ def main():
         assert not header[1]&128 and size<=2*1024*1024
         return header[0]&15,read(size)
     assert request('/release/events',extra=ws_headers('https://unrelated.example'))[0]==403;count+=1
-    def hello(path='/session',protocol='otrios-canvas-sync-v31',cookie=None):
+    def hello(path='/session',protocol='otrios-canvas-sync-v32',cookie=None):
         headers=ws_headers(a.url.rstrip('/'))
         if cookie:headers['Cookie']=cookie
         connection,response=request(path,extra=headers,upgrade=True)

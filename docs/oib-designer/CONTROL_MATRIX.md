@@ -66,8 +66,9 @@ signed release (when applicable), viewport, host, command and actual outcome:
    retire it; repair dependencies explicitly; delete when truly unused locally.
 8. Reject invalid/stale Apply without partial state. Confirm discard/history and
    lost-reply/reconnect behavior through real authority receipts when implemented.
-9. Qualify signed compatible update and rollback without host rebuilding where
-   supported; breaking contract changes take new admission.
+9. Qualify compatible library updates without host rebuilding where supported;
+   breaking contracts take new admission. Use the existing publisher path; the
+   user explicitly waived extra signature checks and code rollback qualification.
 10. Check aggregate editor+keyboard+modal+preview scene/control/layout ceilings and
     measured changed-path timing on Frame/Web. Record unknown/unrun work plainly.
 

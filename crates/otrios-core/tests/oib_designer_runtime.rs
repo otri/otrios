@@ -88,6 +88,7 @@ fn definition_node(
 }
 fn visual(frame: [f32; 4]) -> graph::Visual {
     graph::Visual {
+        layout: None,
         frame: frame.map(|v| Expr::Literal(Value::Number(v))),
         resize: None,
         visible: Expr::Literal(Value::Boolean(true)),

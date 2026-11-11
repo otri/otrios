@@ -16,6 +16,8 @@ pub(crate) fn empty_layout() -> Vec<u8> {
             name: "Empty".into(),
             parameters: vec![],
             root: TemplateNode {
+                reference_root: false,
+                layout: None,
                 id: 0,
                 frame: [
                     Expr::Literal(Value::Number(0.)),

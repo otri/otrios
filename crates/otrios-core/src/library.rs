@@ -88,6 +88,7 @@ fn validate_info(info: &LibraryInfo) -> Result<()> {
                 LIBRARY_FEATURE
                     | "otrios-oib-v2"
                     | "otrios-layout-v5"
+                    | bundle::AUTO_LAYOUT_FEATURE
                     | "otrios-component-behavior-v1"
             )
         })
@@ -798,6 +799,14 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedLibrary> {
     )?;
     let info = decode_info(tree.get(INFO_PATH).ok_or("Missing library Info")?)?;
     let graph = decode_graph(tree.get(GRAPH_PATH).ok_or("Missing library graph")?)?;
+    if bundle::definitions_use_auto_layout(&graph.definitions)
+        && !info
+            .required_features
+            .iter()
+            .any(|f| f == bundle::AUTO_LAYOUT_FEATURE)
+    {
+        return Err("Missing required auto layout feature".into());
+    }
     let component = tree.get(CODE_PATH).map(|bytes| ComponentCode {
         abi: otrios_interfaces::oib::component_behavior::ABI,
         sha256: Sha256::digest(bytes).into(),

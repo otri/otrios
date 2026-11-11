@@ -5,8 +5,8 @@ Date: 2026-11-11. Status: **selected implementation target; build-out in progres
 Follow [IMPLEMENTATION.md](IMPLEMENTATION.md) for the concrete slices, active goal,
 source ownership and actual runtime validation. Current PoC data is disposable;
 use a clean versioned cutover instead of migration or obsolete UI compatibility. This document is a
-contract design, not evidence of implemented Auto Layout, named styles or a new
-editor release. Read [the package entry point](README.md),
+contract design; the implementation ledger identifies the delivered shell and
+initial Auto Layout work separately from named styles and unfinished lifecycle work. Read [the package entry point](README.md),
 [UX journeys](UX_JOURNEYS.md), [visual reference](../../DESIGN.md) and
 [RFC 0037](../rfcs/0037-oib-design-system.md) together. The HTML prototype validates
 selected design-model transitions; it does not substitute for native/Web runtime
@@ -16,7 +16,7 @@ admission, input, signing or performance acceptance.
 
 | Concern | Existing implementation | New design work |
 | --- | --- | --- |
-| Canonical source | OIB v2 graph, semantic property addresses, definitions/presets, instances and typed source connections | Auto Layout records, richer component contracts and named-style references |
+| Canonical source | OIB v2 graph and optional typed Auto Layout records; semantic addresses, definitions/presets, instances and typed source connections | Richer component contracts and named-style references |
 | Editing | Generation-checked structural EditBatch; independent causal literal registers | Coherent local working copy and explicit Apply across the new field types |
 | Appearance | Definition-node defaults; compiled theme constants; limited live colors | Typed named styles, variable modes, source-aware full appearance inspector |
 | Runtime | Shared Rust scene/layout/input, Wasmi component ABI 1; library-owned Slider | New generic layout compiler and incremental dependencies, additional admitted controls |
@@ -26,9 +26,11 @@ admission, input, signing or performance acceptance.
 Sources of truth are `crates/otrios-interfaces/src/oib/{designer,graph,library}.rs`,
 `crates/otrios-core/src/canvas/oib/`, `canvas/client/oib_designer*`,
 `docs/OIB_D2_COMPLETION.md` and `docs/OIB_LIBRARY_L2.md`. `graph::Visual` currently
-contains frame expressions and ResizeRule; Source has Literal, Forward and
-AppBinding. No existing StyleId, variable mode or generic Figma-compatible
-Auto Layout contract is assumed. Earlier pins/struts remain a historical/internal
+contains frame expressions, legacy ResizeRule and optional NodeLayout. Fixed
+lengths use the existing frame expressions; sizing policies do not duplicate them.
+Layout v6 admits this shared runtime model; state protocol v32 carries its source
+edits. Source has Literal, Forward and AppBinding. StyleId and variable modes
+remain unimplemented. Earlier pins/struts remain a historical/internal
 capability; the new authoring model exposes no constraint solver or pin editor.
 
 ## T02. Ownership model and canonical records
@@ -125,12 +127,22 @@ No layout property implies semantic interactivity. A 16-unit icon can be inside 
 48-unit control target. Target enlargement must remain within its owning control
 and cannot overlap unrelated targets. Hit testing uses the final clipped geometry.
 
+The initial implementation uses `layout::NodeLayout` with per-axis `AxisSizing`,
+`Sizing::{Fixed,Hug,Fill}`, explicit `Placement::{InFlow,Free}` and optional
+`AutoLayout` container policy. Container clipping stays in `Shape::Canvas`; there
+is no second clip flag. The compiler marks expanded reference roots in layout v6:
+their authored metrics supply intrinsic measure, then the caller's allocation
+sets their presented border box. Container flow belongs on a local wrapper;
+linked references expose item sizing rather than rearranging imported internals.
+
 ### T03.2 Deterministic core algorithm
 
 The compiler builds a dimension-dependency graph before allocating draw resources.
 Measure intrinsic content bottom-up, allocate available container lengths top-down,
 then place children. Work with the existing renderer's canonical layout units and
-checked finite arithmetic; specify rounding fixtures before serializing a new ABI.
+checked finite arithmetic. Layout v6 retains canonical finite f32 logical values
+without integer/pixel snapping; fractional Fill fixtures fix that behavior across
+serialization. Renderer rasterization owns final pixel coverage.
 The implementation may use more passes internally, but must not iterate until a
 visual guess happens to stabilize.
 

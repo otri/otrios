@@ -1254,6 +1254,8 @@ impl Compiler {
             None
         };
         TemplateNode {
+            reference_root: false,
+            layout: None,
             id,
             resize: n.resize.map(|r| ResizeRule {
                 reference_size: parent_reference,

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0035: OIB component designer and composable 2D controls
 
-Date: 2026-11-03. Updated: 2026-11-10. Status: **D1 and canonical bounded D2 implemented and live-qualified; D3/D4 remain proposed**.
+Date: 2026-11-03. Updated: 2026-11-11. Status: **D1 and canonical bounded D2 implemented and live-qualified; D3/D4 remain proposed**.
 
 The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
 isolated worktree roles, integration gates and acceptance.
@@ -29,6 +29,13 @@ libraries and bounded component Wasm from stable host mechanisms.
 [Library L1](../OIB_LIBRARY_L1.md) subsequently delivered that loader; D2 supplied
 the canonical source and semantic boundary. [L2](../OIB_LIBRARY_L2.md) then added
 component ABI 1 and a library-owned Slider at state v31/control v1.
+
+The user subsequently selected the full responsive Designer build-out in the
+[technical design](../oib-designer/TECHNICAL_DESIGN.md). The
+[implementation ledger](../oib-designer/IMPLEMENTATION.md) records the live shared
+workspace/Test isolation and initial reusable Auto Layout implementation, plus
+unfinished working-copy lifecycle, styles and catalog journeys. This is the active
+product scope; historical D2 and L1/L2 acceptance remain separate evidence.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.

@@ -75,8 +75,8 @@ final cross-contract choices and validation. The geometry role owns a new
 `oib_workspace.rs`; the sample-adapter role owns client.rs and its narrowly scoped
 state clone API. They share the working tree with disjoint file ownership.
 
-Current: B1–B3 implementation is integrated; focused Designer regression adaptation
-and live publication remain in progress. Retired the host profile selector, divider
+Current: B1–B3 are live (see acceptance below); B4 initial runtime/UI implementation
+is validated locally and preparing for live publication. Retired the host profile selector, divider
 resize state and old projection module. Test uses a transportless sample fork and
 waits for captured input before adopting changed source. One shared status waits
 for confirmation; the inspector no longer repeats a Saved row.
@@ -86,7 +86,7 @@ Evidence before first live publication:
 - `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline`: **59 passed**, one existing ignored timing diagnostic. Covers editing/deletion/conflicts, responsive task routing, hidden hits, keyboard, bounded scene construction and invalid-focus/mode transitions.
 - Same command filtered to `oib_workspace`: **3 passed**, including active dock controls and unchanged authored preview paint across widths 800–1920.
 - Same command filtered to `light_surface`: **1 passed**, including themed outline/input pass-through after resize/pressed fill and rejection without mutation.
-- Core `cargo check`, dashboard `oib_instance_probe` check and core library Clippy with `-D warnings` passed during integration. Final component regression `--lib component_behavior_tests` passed **14/14**, including all five sample-isolation/source/reconnect cases. Live acceptance remains pending.
+- Core `cargo check`, dashboard `oib_instance_probe` check and core library Clippy with `-D warnings` passed during integration. Final component regression `--lib component_behavior_tests` passed **14/14**, including all five sample-isolation/source/reconnect cases. Live acceptance for B1–B3 is recorded below.
 
 The HTML study under prototype/ is design evidence only (latest V09), not runtime
 acceptance. No full repository preflight or rollback/signature qualification was
@@ -136,3 +136,59 @@ Shared renderer layout records need actual retained layout support, not a second
 editor-only solver. Inspect `dashboard/layout/composition.rs` and `resizing.rs` for
 checked arithmetic patterns. Change state protocol v31 in both session.rs and
 web/shared/session.mjs when source wire shape changes, preserving control v1.
+
+## Initial B4 implementation — 2026-11-11
+
+Canonical `Visual.layout` lowers to renderer `TemplateNode.layout`, admitted only
+in layout v6 with package/library feature `otrios-auto-layout-v1`. Source wire
+changes use state protocol v32 on both hosts, with opening control v1 unchanged.
+The first implementation adds independent Fixed/Hug/Fill W/H, min/max, horizontal
+and vertical flow, nonnegative gap, linked/per-edge padding, physical nine-point
+alignment, packing/SpaceBetween, Free coordinates and existing Canvas clipping.
+Fixed lengths and Free coordinates use frame expressions; policies do not create
+a second copy of those values. Imported reference roots measure intrinsic size
+then receive the caller's allocation, so existing pinned library interiors follow
+actual width without editing the imported source.
+
+The solver checks bounds/dependency paths, measures bottom-up and allocates
+children before resolving descendants. Fill redistribution handles simultaneous
+minimum and maximum constraints correctly; overflow retains minima and clipping.
+Free children do not contribute to Hug even without container flow. Logical
+coordinates retain fractional f32 values. Text Hug uses actual admitted metrics;
+the authority caches the verified current reference face once, and native/browser
+hosts install their admitted font before layout. Font replacement invalidates
+layout caches. No extra dependency or unsafe code was added.
+
+The real inspector uses existing typed drafts and generation-guarded SetVisual.
+Only Fixed axes expose editable fixed lengths. Layout fields fit existing draft,
+scene and action budgets; hidden numeric fields are retired when clean. Alignment
+is beside Gap, Padding and Distribution. A blank component is Vertical, Fixed W
+320, Hug H with minimum 48, padding 16, gap 8. These B4 edits still use the existing
+per-field/operation commit boundary; B5 must replace that with one working copy.
+
+Local evidence before live publication:
+
+- Designer suite: **62 passed**, one existing timing diagnostic ignored; three new
+  cases traverse real authority receipts and inspect resolved shared geometry.
+- Auto Layout filter: **24 passed**, one timing diagnostic ignored. Includes 54
+  direction/alignment/sizing combinations, mixed min/max redistribution, cycles,
+  Free, fractional geometry, clipping/hits, exact font measurement, independent H,
+  cache classification and signed-zero encoding, bundle/library capability gates.
+- Shared layout regression: **42 passed**, one timing diagnostic ignored before
+  the final Free-without-flow case; final rerun remains part of integration.
+- Actual immutable imported Slider in local LabelledSlider wrapper: passes at
+  design widths 320 and 520, with allocated reference/root/track widths 288 and 488.
+- Optimized Mac diagnostic: 500 full layout+Scene resolutions × 202 nodes = 101,000
+  nodes in 23.076 ms, about 4,376,786 nodes/sec. This excludes GL, physical input and
+  Frame timing; it is not a 100K-scene admission claim. Scene/control limits remain.
+- Dashboard all-targets compile check and strict core library Clippy passed.
+  Browser session/control tests passed 15/15, including incompatible-state upgrade
+  discovery and native/browser codec agreement. No broad repository preflight.
+
+Explicit remaining work: multiline/wrapping Hug needs a shared wrapping painter;
+zero-area unclipped containers with visible children remain rejected until
+zero-extent scene support is qualified. Minimum overflow geometry exists, but
+separate overflow/all-Free-Hug diagnostic presentation remains open. Definition
+editing still needs B5's dedicated working-copy preview: unused definitions are
+not shown in the app canvas until inserted. These are tracked requirements, not
+claims of completed final design. Named styles/modes and Q01–Q16 journeys remain.
