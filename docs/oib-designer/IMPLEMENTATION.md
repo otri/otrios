@@ -80,10 +80,11 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `bdc035c`, release
-`9df7bc6ca06bbc2b1013809cc6ad0734ab34f09b89bb096578119dd633047298`,
-including named literal endpoints, definition deletion/restoration and the earlier
-B5 slices. Focused Frame/Web evidence and remaining UX findings are recorded at
+Last verified live: code `ca22fc2`, release
+`be1364759c4223fc1a8df747562106581ef3fd998148c89147896b2f7f0187f6`,
+including contextual Layers, natural link sizing, named literal endpoints,
+definition deletion/restoration and the earlier B5 slices. Focused Frame/Web
+evidence and remaining UX findings are recorded at
 the end of this file. Full B4–B7 gates remain open.
 Retired the host profile selector, divider
 resize state and old projection module. Test uses a transportless sample fork and
@@ -1108,3 +1109,25 @@ composition tools. The child-selection regression now requires the child to be
 visible without scrolling past commands. The full Designer module passes 85 tests,
 one existing ignored timing diagnostic. Publication of this small follow-up is
 still required; endpoint-removal work remains separate.
+
+Final live follow-up: `ca22fc2` deployed as
+`be1364759c4223fc1a8df747562106581ef3fd998148c89147896b2f7f0187f6`.
+The browser upgraded automatically and remained authenticated through its existing
+session. Before this upgrade, real browser typing/Enter renamed the new endpoint
+to `caption`; its retained input then reported `Property name: caption`, fixing
+the accessible-label finding. Definition 88 was named `Layout acceptance slider`
+and applied at shared generation 46, observed by the native client.
+
+On the final release, browser and native each privately created definition 92,
+linked LabeledSlider and opened Layers. At 1280×800 the browser snapshot showed
+the full slider at `[32,264,288,112]` and the Linked component row at
+`[922,528,326,52]`, immediately visible with no hierarchy scroll. No unrelated
+definition or insertion-command list preceded the tree. Selecting that row opened
+definition 92/node 95 in Inspect on both hosts. Native used calibrated evdev taps
+for New → Library → Link LabeledSlider → Layers → child; this proves the native
+input/selection path, not human touch observation or a native pixel comparison.
+Both private acceptance components were discarded, leaving shared generation 46
+and existing Audio/Display values unchanged. Native reported zero component
+errors and no pending commands throughout the sequence. The builder resumed on
+`ca22fc2`; no publisher remains running. Runtime limits and state protocol v35
+were unchanged. Full B5–B7 completion and per-control qualification remain open.
