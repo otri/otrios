@@ -427,7 +427,7 @@ Use one responsive canvas/task-dock composition on all hosts. There is no saved
 Frame/Desktop profile or device-based layout branch. A single local active-task
 value selects Library, Layers or Inspect in the dock; underlined tabs convey this
 navigation. Edit/Test is a separately labeled segmented mode group and appearance
-is a labeled dropdown. Neither shares navigation state or emits document edits.
+is a labeled segmented switch. Neither shares navigation state or emits document edits.
 
 Available viewport width controls the canvas/dock allocation; available height,
 chrome and software-keyboard reservation determine scrollable work height.

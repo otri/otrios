@@ -1,0 +1,55 @@
+{
+  "date": "2026-11-11",
+  "tool": "html_preview",
+  "scope": "Appearance switch and plain-language Apply status; prototype synthetic DOM scenarios only",
+  "runs": [
+    {
+      "width": 728,
+      "contentHeight": 800,
+      "capturedHeight": 800,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":31,\"assertions\":218,\"passed\":31,\"failed\":[],\"viewport\":{\"width\":728,\"height\":800},\"shellHeight\":783.71875,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 728,
+        "height": 800
+      }
+    },
+    {
+      "width": 1280,
+      "contentHeight": 800,
+      "capturedHeight": 800,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":31,\"assertions\":218,\"passed\":31,\"failed\":[],\"viewport\":{\"width\":1280,\"height\":800},\"shellHeight\":783.71875,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 1280,
+        "height": 800
+      }
+    },
+    {
+      "width": 1600,
+      "contentHeight": 800,
+      "capturedHeight": 800,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":31,\"assertions\":218,\"passed\":31,\"failed\":[],\"viewport\":{\"width\":1600,\"height\":800},\"shellHeight\":783.71875,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 1600,
+        "height": 800
+      }
+    }
+  ]
+}

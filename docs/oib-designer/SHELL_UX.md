@@ -16,7 +16,7 @@ the selected definition's hierarchy. Properties is contextual to the selected ro
 child, linked instance or API endpoint. A source badge distinguishes Definition
 from Instance editing at all times. Library selection is not canvas selection.
 
-Top bar: current component and dirty/confirmed status, Edit/Test, Undo/Redo, Apply.
+Top bar: current component and one plain-language Apply status, Edit/Test, Undo/Redo, Apply.
 New component is a Library action; Publish is in the library menu, distinct from
 Apply. Destructive definition actions live in its labeled lifecycle menu. A footer
 contains the latest result, conflicts/errors and a way to reopen details. Notices
@@ -35,10 +35,11 @@ same information architecture, with their input adapters and available space.
 | --- | --- | --- |
 | Library / Layers / Inspect | Underlined tabs, selected indicator and tab semantics | Navigate the task dock |
 | Edit / Test | One bordered segmented group with a filled selection | Change how canvas input behaves |
-| Preview appearance | Labeled dropdown, Light/Dark | Change local preview context |
+| Preview appearance | Labeled segmented switch, Dark/Light | Change local preview context |
 | New / Undo / Redo / Discard / Publish | Command buttons in the action bar | Perform an operation |
 | Apply | Primary command when a valid draft can be applied | Confirm shared source edits |
-| Revision/result | Muted status text, outside option groups | Report state; never a clickable choice |
+| Apply status | One plain-language status near commands | All changes applied / Unapplied changes / review or validation required |
+| Revision numbers | Collapsed technical details only | Debugging; never ordinary editing feedback |
 
 Group labels Workspace, Interaction and Preview appearance make the distinction
 explicit. Tabs use Left/Right/Home/End plus normal keyboard focus. Edit/Test uses
@@ -250,3 +251,18 @@ edges, Light/Dark, definition/instance, default/state and enabled/disabled as pa
 A disabled capability with an explanation is preferable to a working-looking
 control with a hidden constant. Read [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md)
 for the first audit and explicit prototype exclusions.
+
+## S12. Useful Apply status, separate from technical diagnostics
+
+One status surface near the command bar answers whether edits need attention:
+All changes applied, Unapplied changes, Fix invalid values before applying,
+Changes need review, or Pending deletion with its next action. Production also
+needs Applying, Disconnected and Outcome unknown when those states actually occur.
+Never report Saved while a receipt is unknown or merely after a local preview.
+
+Generation/base counters and internal model terminology belong in collapsed
+technical details. Remove the duplicate canvas status. Appearance and interaction
+are both two-option segmented controls using the same component; their labels
+identify independent local contexts. Neither affects Apply status unless an actual
+authored field changes. The prototype's RAM-only/publication limits and simulation
+commands stay in explicitly labeled Prototype & technical details.

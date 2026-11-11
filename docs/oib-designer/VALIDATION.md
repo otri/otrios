@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prototype validation and implementation progress
 
-Date: 2026-11-11. Latest results: **V06 responsive workspace** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Date: 2026-11-11. Latest results: **V07 appearance and Apply status** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
 Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
 acceptance is unchanged. This task made no live deployment or state changes.
 
@@ -168,3 +168,23 @@ JS syntax, local document links, generated-HTML reproducibility and whitespace
 checks passed. Native deployment, shared-runtime layout and production keyboard/
 accessibility qualification remain unperformed. Earlier evidence retains the
 profile-based source and counts it actually tested; V06 supersedes that UX choice.
+
+## V07. Matching appearance switch and useful status
+
+Dark/Light now uses the same segmented-control component as Edit/Test. Both are
+local preview contexts with explicit labels, independent pressed states and no
+document mutation. The generation/base counter moved into collapsed Prototype &
+technical details, along with the simulation commands and RAM-only limitations.
+The duplicate canvas label is removed. A single command-area status reports All
+changes applied, Unapplied changes, validation problems, review required or pending
+deletion. Stale Apply has a user-facing review instruction rather than counter jargon.
+
+Browser checks at 728×800, 1280×800 and 1600×800 passed **31 scenarios / 218
+assertions per run**, no failures, no horizontal overflow, 800px output height.
+New assertions cover matched switch components, appearance selection and state
+isolation, clean/dirty/discard status, invalid/conflicting status, one status
+surface and collapsed revision diagnostics. See
+[evidence/appearance-status.json](evidence/appearance-status.json). JS syntax,
+package links/IDs, reproducible HTML and whitespace checks passed. The unchanged
+model suite was not repeated for this UI-only follow-up. No runtime deployment
+or native acceptance was performed. V07 supersedes V06's appearance-dropdown choice.

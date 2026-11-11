@@ -22,6 +22,8 @@ for marker, name in [('MODEL', 'model.cjs'), ('UI', 'ui.js')]:
     expected = expected.replace(f'/* {marker} */', (prototype / name).read_text())
 assert (prototype / 'index.html').read_text() == expected, 'Rebuild prototype'
 assert 'id="profile"' not in expected, 'Device profile selector must remain removed'
+assert 'id="appearance"' not in expected, 'Appearance uses segmented buttons'
+assert 'Confirmed model' not in expected, 'Internal status must not return'
 assert 'role="tablist"' in expected and 'aria-label="Interaction mode"' in expected
 assert 'of 96. It has no inserted' not in (root / 'UX_JOURNEYS.md').read_text()
 print(f'PASS: local file links in {len(files)} documents, J01–J27, T01–T13, Q01–Q16, reproducible HTML, blank-state consistency')

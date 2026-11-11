@@ -51,7 +51,7 @@ remain available on touch. Lists scroll rather than becoming Previous/Next pages
 information architecture at every supported width. There is no Frame/Desktop
 profile selector. Library/Layers/Inspect are underlined navigation tabs selecting
 the dock content. Edit/Test is a separate segmented interaction-mode control;
-Preview appearance is a labeled local-context dropdown. Commands and revision
+Preview appearance is a labeled local-context segmented switch. Commands and revision
 status remain separate from these choice groups.
 
 Target logical Frame landscape is 1280×800, with larger desktop layouts as another

@@ -8,7 +8,7 @@ foundation without rewriting those qualification records.
 
 ## Restart here after context compaction
 
-1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V06, and
+1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V07, and
    [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md) for actual progress and gaps.
 2. Read [DESIGN.md](../../DESIGN.md) for visual direction and
    [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization.
@@ -34,8 +34,8 @@ foundation without rewriting those qualification records.
   generation-checked candidate. Publish and adoption are separate operations.
 - Deleting an in-use definition blocks. Retire preserves existing uses. Replacement
   requires explicit typed mappings; no automatic cascade or cross-app transaction.
-- One responsive workspace, no Frame/Desktop switch. Underlined task tabs, a
-  segmented Edit/Test control and labeled appearance setting have distinct roles.
+- One responsive workspace, no Frame/Desktop switch. Underlined task tabs, matching
+  segmented Edit/Test and Dark/Light controls have distinct roles.
 - Required design targets: logical Frame 1280×800 landscape and desktop 1920×1080.
   Phone portrait authoring is unsupported. A smaller landscape floor is proposed,
   not a reason to shrink Frame targets or raise scene limits.
