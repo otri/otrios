@@ -18,7 +18,7 @@ mod text_viewport;
 pub mod touch_trace;
 mod transport;
 pub use behavior::Behavior;
-pub use client::{Client, ResourceUsage};
+pub use client::{Client, DesignerUsage, ResourceUsage};
 use otrios_interfaces::canvas::*;
 pub use selection::StateSelection;
 use sha2::{Digest, Sha256};

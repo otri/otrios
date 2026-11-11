@@ -186,6 +186,9 @@ fn heading(
 ) -> Result<()> {
     let mut node = b.label(x, y, label, MUTED)?;
     node.frame.width = width;
+    if let Primitive::Text { scale, .. } = &mut node.primitive {
+        *scale = 2;
+    }
     nodes.push(node);
     Ok(())
 }
@@ -553,7 +556,7 @@ pub(super) fn build(
             if independent {
                 "Link sides"
             } else {
-                "Separate sides"
+                "Split sides"
             },
             "Independent padding",
             LocalAction::LayoutPadding(!independent, normalize),
@@ -626,17 +629,40 @@ pub(super) fn build(
             b,
             &mut nodes,
             Rect::new(0., *y, 320., 48.),
-            if clip {
-                "✓  Clip content"
-            } else {
-                "□  Clip content"
-            },
+            "Clip content",
             "Clip content",
             LocalAction::Structure(
                 target.operation(|visual| visual.shape = Shape::Canvas { clip: !clip }),
             ),
-            clip,
+            false,
         )?;
+        let row = nodes.last_mut().unwrap();
+        row.semantics.as_mut().unwrap().checked = clip;
+        row.children[1].frame.x = 36.;
+        row.children[1].frame.width = 276.;
+        let mut outer = background(b.id()?, 20., 20., b.palette.line, 3.);
+        outer.frame.x = 8.;
+        outer.frame.y = 14.;
+        outer.responder = Some(TouchResponder::PassThrough);
+        let mut inner = background(b.id()?, 17., 17., b.palette.surface, 2.);
+        inner.frame.x = 9.5;
+        inner.frame.y = 15.5;
+        inner.responder = Some(TouchResponder::PassThrough);
+        row.children.extend([outer, inner]);
+        if clip {
+            row.children.push(SceneNode {
+                id: b.id()?,
+                frame: Rect::new(12., 18., 12., 12.),
+                primitive: Primitive::Path {
+                    points: vec![[0., 6.], [4., 10.], [12., 0.]],
+                    width: 2.,
+                    color: b.palette.text,
+                },
+                children: vec![],
+                responder: Some(TouchResponder::PassThrough),
+                semantics: None,
+            });
+        }
         *y += 64.;
     }
     Ok(nodes)

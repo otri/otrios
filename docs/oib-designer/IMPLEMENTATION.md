@@ -192,3 +192,34 @@ separate overflow/all-Free-Hug diagnostic presentation remains open. Definition
 editing still needs B5's dedicated working-copy preview: unused definitions are
 not shown in the app canvas until inserted. These are tracked requirements, not
 claims of completed final design. Named styles/modes and Q01–Q16 journeys remain.
+
+### B4 live activation and focused polish
+
+Initial B4 code `1f3e4b0cfe0c4f3f8d12be341e07f588f6969502` activated release
+`868a9d712627fc182275ac9266e73b4cf0ce1e766e9f9887b9204a6050726b96` on Frame/Web.
+The already-connected v31 browser upgraded to the v32 release and returned to
+Live shared space. Native ready reported this same runtime/UI release, OIB Designer,
+stream ready, confirmed state and no input capture. Automatic builder restored on
+this completed code pin.
+
+Through the live browser, created a blank definition and opened its root by
+clicking the visible 24-unit portion of a clipped hierarchy row. Fixed W320 and
+Hug H appeared independently. Selecting Fixed H exposed H48 without changing W;
+returning to Hug removed that ineffective numeric field. One instrumented sizing
+edit took 237.9 ms from pointerdown to the confirmed canvas accessibility summary
+(includes Frame/network/browser work, not photon timing; one sample). Scrolling
+revealed the actual compact alignment, Gap, Padding and Distribution controls.
+
+Visual inspection caught undersized captions, a long padding-toggle label and an
+unadmitted checkmark glyph. The focused correction uses 16-unit capital-height
+captions, a shorter toggle label and a drawn input-pass-through checkbox with real
+checked semantics. Focused layout editor tests pass4/4; full Designer tests pass
+63 with one existing timing diagnostic ignored. Added read-only device-local
+workspace/task/mode/selection/authoring diagnostics to distinguish actual native
+editor selection during input acceptance. This is diagnostic metadata, not a new
+state protocol or product control. Final polish deployment/acceptance follows.
+
+A first synthetic evdev navigation check captured/released both touches, but its
+inspector scroll-limit assertion failed; it did not prove the intended definition
+selection. Do not record that as native authoring acceptance. Use the new workspace
+report to resolve the exact pane/selection/role before further targeted taps.

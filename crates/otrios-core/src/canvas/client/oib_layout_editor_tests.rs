@@ -4,7 +4,7 @@ use super::tests::{focus_address, mounted_fixture_session};
 use super::*;
 use otrios_interfaces::{
     keyboard::Edit,
-    layout::{Direction, Expr, Placement, Sizing},
+    layout::{Direction, Expr, Placement, Shape, Sizing},
     oib::designer::{DefinitionId, NodeId, StructuralProperty as P, StructuralTarget},
 };
 
@@ -443,4 +443,58 @@ fn layout_editor_per_edge_padding_and_bounds_keep_source_and_drafts_bounded() {
     assert!(designer.drafts.drafts().len() <= super::super::oib_property_editor::MAX_DRAFTS);
     let scene = client.scene().unwrap();
     assert!(scene.controls().len() <= 128);
+}
+
+#[test]
+fn layout_captions_and_checkbox_render_with_admitted_font_and_keep_input() {
+    let (mut client, mut authority, mut session, definition, node, _) = blank();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    for heading in ["Width", "Height", "Gap", "Padding", "Distribution"] {
+        let label = d
+            .panels
+            .last()
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|n| matches!(&n.primitive, Primitive::Text { value, .. } if value == heading))
+            .unwrap();
+        assert!(matches!(label.primitive, Primitive::Text { scale, .. } if scale >= 2));
+    }
+    let usage = client.resource_usage().designer.unwrap();
+    assert_eq!(usage.task, "Inspect");
+    assert!(usage.authoring);
+    assert_eq!(
+        usage.selection,
+        format!(
+            "{:?}",
+            client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .selection
+        )
+    );
+    let id = control(&mut client, "Clip content");
+    let scene = client.scene().unwrap();
+    let checkbox = scene.path(id).unwrap().last().unwrap().node;
+    assert!(checkbox.semantics.as_ref().unwrap().checked);
+    assert!(
+        checkbox
+            .children
+            .iter()
+            .any(|n| matches!(n.primitive, Primitive::Path { .. })
+                && n.responder == Some(TouchResponder::PassThrough))
+    );
+    assert!(checkbox.children.iter().all(
+        |n| !matches!(&n.primitive, Primitive::Text { value, .. } if value.contains(['✓','□']))
+    ));
+    assert_eq!(client.designer_activate(id).unwrap(), Some(true));
+    settle(&mut client, &mut authority, &mut session);
+    assert!(matches!(
+        visual(&client, definition, node).shape,
+        Shape::Canvas { clip: false }
+    ));
 }

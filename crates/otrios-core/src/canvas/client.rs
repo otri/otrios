@@ -209,10 +209,19 @@ impl StressWorkload {
         Ok(changed)
     }
 }
+/// Device-local editor diagnostics, independent of replicated authoring state.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DesignerUsage {
+    pub task: &'static str,
+    pub mode: &'static str,
+    pub selection: String,
+    pub authoring: bool,
+}
 /// Read-only diagnostics sampled by the app owner. These logical byte/capacity
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
+    pub designer: Option<DesignerUsage>,
     pub oib: Option<super::oib::Info>,
     pub chat: Option<super::chat::Info>,
     pub sampled_monotonic_ms: u64,
@@ -1983,6 +1992,11 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            designer: self.active.as_ref().and_then(|m| {
+                m.designer
+                    .as_ref()
+                    .map(|d| d.usage(m.binding.as_ref().is_none_or(|b| b.ui_editable)))
+            }),
             oib: self
                 .active
                 .as_ref()

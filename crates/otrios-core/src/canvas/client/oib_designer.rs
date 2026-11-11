@@ -311,6 +311,21 @@ impl Designer {
             revision: None,
         })
     }
+    pub(super) fn usage(&self, authoring: bool) -> super::DesignerUsage {
+        super::DesignerUsage {
+            task: match self.workspace_task {
+                Task::Library => "Library",
+                Task::Layers => "Layers",
+                Task::Inspect => "Inspect",
+            },
+            mode: match self.mode {
+                DesignerMode::Edit => "Edit",
+                DesignerMode::Test => "Test",
+            },
+            selection: format!("{:?}", self.selection),
+            authoring,
+        }
+    }
     pub(super) fn focus_layout(&self) -> bool {
         self.focus_layout
     }
