@@ -102,6 +102,19 @@ fn name(value: &str) -> Result<()> {
     }
 }
 
+/// An owned bound endpoint may author its fallback, like descriptor.default.
+/// This never makes its read-only causal value or an inherited outlet writable.
+fn authored_fallback(
+    definition: &ComponentDefinition,
+    node: NodeId,
+    property: &PropertyDescriptor,
+) -> bool {
+    property.policy.live_literal && property.editor != PropertyEditor::ReadOnly
+        || definition.root == node
+            && definition.properties.iter().any(|p| p.id == property.id)
+            && super::admission::bound_declaration(property)
+}
+
 fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
     match operation {
         DefinitionEdit::CreateDefinition {
@@ -251,7 +264,7 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
             .into_iter()
             .find(|descriptor| descriptor.id == *property)
             .ok_or("Unknown definition property")?;
-            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+            if !authored_fallback(self::definition(document, *definition)?, *node, &descriptor) {
                 return Err("OIB property is read-only".into());
             }
             super::validate_property_value(&descriptor, value)?;
@@ -294,7 +307,7 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
             .into_iter()
             .find(|d| d.id == *property)
             .ok_or("Unknown definition property")?;
-            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+            if !authored_fallback(self::definition(document, *definition)?, *node, &descriptor) {
                 return Err("OIB property is read-only".into());
             }
             definition_mut(seed, *definition)?
@@ -399,9 +412,11 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
             descriptor,
         } => {
             super::admission::valid_descriptor(descriptor)?;
-            if !descriptor.policy.live_literal || descriptor.policy.app_binding {
+            if !(descriptor.policy.live_literal && !descriptor.policy.app_binding
+                || super::admission::bound_declaration(descriptor))
+            {
                 return Err(
-                    "Declared endpoints require literal policy and cannot grant app bindings"
+                    "Declared endpoints require literal policy or a typed bound forwarding contract"
                         .into(),
                 );
             }
@@ -471,7 +486,9 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                     property: *property,
                 },
             )?;
-            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+            if !(descriptor.policy.live_literal && descriptor.editor != PropertyEditor::ReadOnly
+                || super::admission::bound_declaration(&descriptor))
+            {
                 return Err("Exposed property requires an admitted writable root property".into());
             }
             let def = definition_mut(seed, *definition)?;

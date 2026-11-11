@@ -88,6 +88,12 @@ pub(super) fn valid_descriptor(p: &PropertyDescriptor) -> Result<()> {
         "Unavailable OIB property editor",
     )
 }
+pub(super) fn bound_declaration(p: &PropertyDescriptor) -> bool {
+    !p.policy.live_literal
+        && p.policy.app_binding
+        && p.editor == PropertyEditor::ReadOnly
+        && matches!(p.value_type, ValueType::Number | ValueType::Boolean)
+}
 pub(super) fn declarations(
     classes: &[ClassDescriptor],
     definitions: &[ComponentDefinition],
@@ -134,10 +140,21 @@ pub(super) fn declarations(
                 p.id.0 >= first
                     && p.id.0 < def.next_property
                     && names.insert(&p.name)
-                    && p.policy.live_literal
-                    && !p.policy.app_binding,
+                    && ((p.policy.live_literal && !p.policy.app_binding) || bound_declaration(p)),
                 "Invalid definition endpoint identity, name or capability policy",
             )?;
+            if p.policy.app_binding {
+                binding_kind(
+                    classes,
+                    definitions,
+                    def.id,
+                    &PropertyPath {
+                        references: vec![],
+                        node: def.root,
+                        property: p.id,
+                    },
+                )?;
+            }
         }
     }
     Ok(())
@@ -173,6 +190,15 @@ fn check_assignments(
                     source.value_type == descriptor.value_type,
                     "OIB forwarding type mismatch",
                 )?;
+                if source.policy.app_binding {
+                    let origin = containing.ok_or("Top-level forwarding is unsupported")?;
+                    require(
+                        descriptor.policy.app_binding
+                            && binding_kind(&doc.classes, &doc.definitions, origin, from)?
+                                == binding_kind(&doc.classes, &doc.definitions, def, &a.target)?,
+                        "Bound forwarding requires the same admitted control effect",
+                    )?;
+                }
             }
             AssignmentSource::AppBinding(_) => require(
                 descriptor.policy.app_binding,
@@ -474,10 +500,27 @@ pub fn validate(seed: &Seed) -> Result<()> {
                 "Invalid exposed OIB target list",
             )?;
             for target in &exposed.targets {
+                let destination = property(doc, def.id, target)?;
                 require(
-                    property(doc, def.id, target)?.value_type == source.value_type,
+                    destination.value_type == source.value_type,
                     "OIB exposed property type mismatch",
                 )?;
+                if source.policy.app_binding {
+                    require(
+                        destination.policy.app_binding
+                            && binding_kind(
+                                &doc.classes,
+                                &doc.definitions,
+                                def.id,
+                                &PropertyPath {
+                                    references: vec![],
+                                    node: def.root,
+                                    property: exposed.property,
+                                },
+                            )? == binding_kind(&doc.classes, &doc.definitions, def.id, target)?,
+                        "Bound forwarding requires the same admitted control effect",
+                    )?;
+                }
             }
         }
         for slot in &def.slots {

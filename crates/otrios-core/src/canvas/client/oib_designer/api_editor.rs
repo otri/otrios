@@ -29,6 +29,16 @@ pub(super) fn definition(selection: &Selection) -> Option<DefinitionId> {
         _ => None,
     }
 }
+fn bound_field(descriptor: &PropertyDescriptor) -> bool {
+    !descriptor.policy.live_literal
+        && descriptor.policy.app_binding
+        && descriptor.editor == PropertyEditor::ReadOnly
+        && matches!(
+            descriptor.value_type,
+            otrios_interfaces::layout::ValueType::Number
+                | otrios_interfaces::layout::ValueType::Boolean
+        )
+}
 fn operation(
     state: &StateAdapter,
     definition: DefinitionId,
@@ -186,6 +196,7 @@ pub(super) fn model(
                 });
             }
         } else {
+            let bound = bound_field(&field.descriptor);
             let root_node = definition
                 .nodes
                 .iter()
@@ -196,8 +207,11 @@ pub(super) fn model(
                     .into_iter()
                     .filter(|p| {
                         p.value_type == field.descriptor.value_type
-                            && p.policy.live_literal
-                            && p.editor != PropertyEditor::ReadOnly
+                            && if bound {
+                                bound_field(p)
+                            } else {
+                                p.policy.live_literal && p.editor != PropertyEditor::ReadOnly
+                            }
                     })
             {
                 let mut targets = definition
@@ -277,24 +291,29 @@ pub(super) fn model(
                 descriptor.name = format!("{base}_{suffix}");
             }
             descriptor.label = descriptor.name.clone();
-            descriptor.policy = PropertyPolicy {
-                live_literal: true,
-                app_binding: false,
-            };
-            descriptor.editor = match descriptor.value_type {
-                otrios_interfaces::layout::ValueType::Text => PropertyEditor::TextSuggestions,
-                otrios_interfaces::layout::ValueType::Number => PropertyEditor::NumberSuggestions,
-                otrios_interfaces::layout::ValueType::Color => PropertyEditor::Palette,
-                otrios_interfaces::layout::ValueType::Boolean => PropertyEditor::Toggle,
-                _ => PropertyEditor::ReadOnly,
-            };
-            if descriptor.value_type == otrios_interfaces::layout::ValueType::Number {
-                descriptor.number_range = Some(descriptor.number_range.unwrap_or([0., 1000.]));
-                descriptor.number_step = Some(descriptor.number_step.unwrap_or(1.));
+            if !bound {
+                descriptor.policy = PropertyPolicy {
+                    live_literal: true,
+                    app_binding: false,
+                };
+                descriptor.editor = match descriptor.value_type {
+                    otrios_interfaces::layout::ValueType::Text => PropertyEditor::TextSuggestions,
+                    otrios_interfaces::layout::ValueType::Number => {
+                        PropertyEditor::NumberSuggestions
+                    }
+                    otrios_interfaces::layout::ValueType::Color => PropertyEditor::Palette,
+                    otrios_interfaces::layout::ValueType::Boolean => PropertyEditor::Toggle,
+                    _ => PropertyEditor::ReadOnly,
+                };
+                if descriptor.value_type == otrios_interfaces::layout::ValueType::Number {
+                    descriptor.number_range = Some(descriptor.number_range.unwrap_or([0., 1000.]));
+                    descriptor.number_step = Some(descriptor.number_step.unwrap_or(1.));
+                }
             }
             let label = format!("Expose as {}", descriptor.name);
-            let result = if !field.descriptor.policy.live_literal
-                || field.descriptor.editor == PropertyEditor::ReadOnly
+            let result = if !bound
+                && (!field.descriptor.policy.live_literal
+                    || field.descriptor.editor == PropertyEditor::ReadOnly)
             {
                 Err("This endpoint requires a declared binding contract".into())
             } else if writable && !imported {

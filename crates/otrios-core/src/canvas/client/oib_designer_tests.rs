@@ -6353,7 +6353,7 @@ fn definition_layers_reveals_only_current_component_and_selects_inserted_child()
     );
 }
 
-fn activate_api_control(client: &mut Client, label: &str) -> u32 {
+pub(in crate::canvas::client) fn activate_api_control(client: &mut Client, label: &str) -> u32 {
     let (id, y) = {
         let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
         let row = d

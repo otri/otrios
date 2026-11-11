@@ -31,7 +31,7 @@ fn module(body: &str, data: &[(u32, Vec<u8>)]) -> Vec<u8> {
 fn packed(at: u32, len: usize) -> u64 {
     (len as u64) << 32 | u64::from(at)
 }
-fn snapping_guest(step: u16) -> Vec<u8> {
+pub(super) fn snapping_guest(step: u16) -> Vec<u8> {
     let bytes = encode_output(&Output {
         commands: vec![Command::Emit {
             outlet: 1,
@@ -108,7 +108,7 @@ fn code(bytes: Vec<u8>) -> ComponentCode {
         bytes,
     }
 }
-fn library_ui(bytes: Vec<u8>) -> Ui {
+pub(super) fn library_ui(bytes: Vec<u8>) -> Ui {
     let mut ui = fixture::imported();
     let seed = fixture::seed_mut(&mut ui);
     let body = &mut seed.resolved_libraries[0];

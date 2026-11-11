@@ -2,6 +2,9 @@
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
 mod api_editor;
 mod authoring;
+#[cfg(test)]
+#[path = "oib_bound_endpoint_tests.rs"]
+mod bound_endpoint_tests;
 mod editing;
 mod layout_editor;
 mod style;

@@ -955,3 +955,35 @@ and records its contextual `BaselineIdentity::Property` role; later resets reuse
 the live mapped identity. Source, forwarding, preset and visual/action paths use
 that mapping. A fresh global definition namespace may retain its signed local
 property IDs. Reset cannot make an old endpoint address writable again.
+
+## T22. Exposed behavior-bound properties
+
+The first bound declaration is an input to an existing Slider/Toggle behavior,
+not an arbitrary app action or new guest program. A local root may expose a
+read-only Number or Boolean with `live_literal=false`, `app_binding=true` and a
+ReadOnly editor. Its outgoing forwarding graph must reach an admitted concrete
+Slider/Set or Toggle/Toggle endpoint. Every branch must agree on type, numeric
+range and concrete effect; unresolved, ambiguous, cyclic and over-depth proofs
+reject. A declaration's Number type or app-binding flag alone grants no write.
+
+The same resolver proves declaration admission and occurrence binding choices.
+Connections still require an existing writable app field, exact projection and
+signed field/effect grant. App-bound sources cannot forward into literal-only
+targets. Literal, forwarded and AppBinding sources remain distinct; a behavior
+endpoint does not acquire an editable causal literal cell. Owned authored root
+fallbacks may configure initial/sample values and survive removal/Undo, while
+inherited read-only defaults stay protected.
+
+Designer exposes the linked Value endpoint by creating a declared bound property
+and its forwarding edge in one private command. The instance inspector can then
+connect that outer endpoint using admitted field choices, inspect its source or
+explicitly disconnect. A definition preview creates one private sample field at
+the outer source and preserves forwarding aliases to the guest outlet. Test
+gestures execute the existing bounded Wasmi ABI against that sample adapter;
+they never change real app fields, authored defaults or pending shared edits.
+
+Document/component navigation improvements are deferred to a separate slice.
+Generic changed events, arbitrary action routing, new control effects and editable guest code
+remain separate capability gates; this slice does not relabel numericSet as a
+general action API. State protocol v37 distinguishes the expanded declaration
+admission contract while preserving release-control v1.

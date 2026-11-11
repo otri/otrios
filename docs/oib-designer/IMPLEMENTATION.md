@@ -1219,3 +1219,23 @@ and Q01–Q16/F01–F06 qualification. Those gates remain open. The removal moda
 shared-runtime barrier is tested; a full browser accessibility/focus audit remains
 part of final UI qualification (background semantic controls still appear in its
 browser snapshot). Do not claim the complete Designer goal is finished.
+
+## Next slice restraint — 2026-11-11
+
+The user asked to keep the work from expanding. The current uncommitted slice
+is limited to exposing existing Slider Value and connecting it through existing
+binding choices. Focused bound-endpoint tests pass, including a real Wasmi guest
+writing one private sample and an outer occurrence binding under a signed grant.
+This work is not yet deployed. Additional scope navigation was set aside under
+work/deferred-scope-navigation; actions, slots and broader UX changes stay queued.
+T22 records the binding rules; T21 remains the last verified live release.
+
+T22 local validation: the existing Designer suite passed 90 tests with one
+existing ignored timing diagnostic. Five binding-route tests pass, including
+type/range mismatch and invalid source rejection. The additional focused bound
+fallback removal/Undo test passes. Workspace all-target compilation with canvas,
+strict runtime-library Clippy with signed-bundles, 27 browser session tests and
+diff checks pass. The real Wasmi fixture snaps sample input 687 to 600 without
+changing app fields or emitting transport data; outer occurrence connection
+retains the existing signed field/effect checks. No navigation or new action UI
+is part of this slice. Publication/live acceptance remains pending below.

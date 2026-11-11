@@ -21,17 +21,7 @@ fn endpoint(
         node: object.node,
         property: id,
     };
-    let descriptor = property(doc, root.definition, &path)?;
-    let (_, node) = path_node(doc, root.definition, &object.references, object.node)?;
-    let kind = class(doc, node.class)?.implementation;
-    if !descriptor.policy.app_binding
-        || !matches!(
-            (kind, descriptor.value_type),
-            (ClassKind::O2DSlider, ValueType::Number) | (ClassKind::O2DToggle, ValueType::Boolean)
-        )
-    {
-        return Err("Only admitted slider-value and toggle-checked endpoints can reconnect".into());
-    }
+    let kind = binding_kind(&doc.classes, &doc.definitions, root.definition, &path)?;
     Ok((path, kind))
 }
 

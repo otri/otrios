@@ -7,11 +7,13 @@ use otrios_interfaces::oib::designer::Document;
 use otrios_interfaces::oib::designer::*;
 mod admission;
 pub mod authoring;
+mod binding;
 pub mod connections;
 mod hierarchy;
 pub mod placement;
 mod sources;
 pub use admission::{validate, validate_layout};
+pub(in crate::canvas) use binding::binding_kind;
 pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
 pub use sources::{
     AuthoredOrigin, PropertyRegisterView, PropertySources, SourceHop, SourceRole, property_sources,
@@ -95,7 +97,14 @@ pub(in crate::canvas) fn node_descriptors(
     def: &ComponentDefinition,
     node: &DefinitionNode,
 ) -> Result<Vec<PropertyDescriptor>> {
-    let mut result = descriptors(doc, node.class)?;
+    node_descriptors_for(&doc.classes, def, node)
+}
+fn node_descriptors_for(
+    classes: &[ClassDescriptor],
+    def: &ComponentDefinition,
+    node: &DefinitionNode,
+) -> Result<Vec<PropertyDescriptor>> {
+    let mut result = class_descriptors(classes, node.class)?;
     if node.id == def.root {
         result.extend(def.properties.iter().cloned());
     }
