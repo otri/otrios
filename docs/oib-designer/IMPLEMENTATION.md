@@ -91,3 +91,48 @@ Evidence before first live publication:
 The HTML study under prototype/ is design evidence only (latest V09), not runtime
 acceptance. No full repository preflight or rollback/signature qualification was
 run for this slice, following the requested focused live loop.
+
+## First live slice — B1–B3, 2026-11-11
+
+Code commit `ab8a3216f620caf203a36de45f9544097a8285ee` is pushed on
+`feat/oib-designer-interface`. Existing `watch-dashboard.py --once` compiled the
+Mac tooling, optimized Wasm browser host, ARM direct host/authority and probes,
+then activated release
+`eb06630bf0c0570fba4a6a3f35afcf19140b156b032bf5fcd2472891b7e19afa`.
+Both Frame authority and native supervisor reported that release active. The
+existing automatic builder was paused during the build, advanced to this completed
+code commit and restored. No additional verification campaign, rollback staging,
+state inventory or data preservation was performed.
+
+Focused live acceptance on `https://otrios.otri.ca`:
+
+- A browser already mounted in OIB Designer upgraded automatically. Its WebSocket
+  briefly disconnected during authority restart, then recovered to Live shared space.
+- Two browser sessions used actual 1280×800 and 1920×1080 CSS viewports on the new
+  release. Library/Layers/Inspect retained the canvas; layer selection opened the
+  real inspector and its color/text fields without stale hidden-pane geometry.
+- In the first session, Test changed Volume from 50.7% to 90%. The second session
+  remained at 50.7%, with Brightness unchanged at 56.7% in both. Returning to Edit
+  restored 50.7% in the first session. No authored defaults were changed.
+- Light editor chrome was inspected visually; authored dark panels and green paint
+  remained unchanged. This is editor appearance, not authored component mode support.
+- A real inspector field received focus, then Library navigation cleared focus and
+  retained the shared values. Prototype and Rust keyboard/capture tests provide the
+  additional bounded software-keyboard coverage; physical evdev/touch/color acceptance
+  was not performed in this slice.
+
+B1–B3 are live. The overall implementation goal remains active. Next is B4, the
+canonical reusable layout model and actual measure/allocation/compiler/inspector
+integration, followed by coherent Apply/lifecycle, named styles and catalog journeys.
+Do not treat the current imported `Accent` field, per-field Apply or fixed design
+frames as delivery of those later slices.
+
+B4 restart map: canonical source `otrios-interfaces/src/oib/graph.rs::Visual` and
+`designer.rs::DefinitionNode`; admission/expansion/compiler in core
+`canvas/oib/graph.rs`; source codec and canonical round-trip in
+`canvas/oib/document.rs`; structural property/admission paths in
+`canvas/oib/document/authoring.rs`, `canvas/state/oib.rs` and the Designer helpers.
+Shared renderer layout records need actual retained layout support, not a second
+editor-only solver. Inspect `dashboard/layout/composition.rs` and `resizing.rs` for
+checked arithmetic patterns. Change state protocol v31 in both session.rs and
+web/shared/session.mjs when source wire shape changes, preserving control v1.
