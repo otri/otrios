@@ -1,0 +1,93 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# OIB Designer implementation goal and work record
+
+Date: 2026-11-11. Status: **implementation in progress** on
+`feat/oib-designer-interface`, based on the reviewed design/prototype history.
+The active goal is to implement the final responsive Designer, qualify its
+representative controls and eventually complete signed Frame/Web acceptance.
+
+## User steering and scope
+
+Build toward the final model in TECHNICAL_DESIGN.md and J01–J27. Current PoC data
+is disposable: use a clean versioned cutover when the model changes. Do not build
+migrations, preserve obsolete editor profiles or add fallback authoring engines.
+The user prioritized the final design and then explicitly selected live-first
+iteration so attached browsers observe the tests on the Frame. Publish coherent
+slices through the existing deployment path; no extra signature-check campaign or
+rollback preparation is requested. No live data inventory/backup work. Existing
+normal package admission remains part of the standard publish path.
+
+Runtime changes/tests remain LGPL in core; public types/codecs/tooling/docs remain
+Apache. Keep pinned Rust/dependencies and existing scene/input/resource ceilings.
+No new service, trust root, native module backend or general transaction system.
+
+## Restart checklist
+
+1. Read this file and current git status/diff. Do not assume a partial slice is live.
+2. Read TECHNICAL_DESIGN.md, SHELL_UX.md, COPY_AUDIT.md and CONTROL_MATRIX.md.
+3. Preserve the final UI decisions: one responsive canvas/task dock; underlined
+   Library/Layers/Inspect tabs; matching Edit/Test and Dark/Light segmented controls;
+   one useful Apply status; compact alignment/spacing; no permanent tutorial copy.
+4. Consult the implementation ledger below, then focused test evidence. Prototype
+   assertions are not runtime qualification. Keep incomplete capabilities gated.
+5. Continue the next unfinished slice without reopening the discarded data/profile
+   compatibility question. Update this record after meaningful integration/tests.
+
+## Concrete delivery sequence
+
+| Slice | Final behavior | Owned paths / validation |
+| --- | --- | --- |
+| B1 Responsive shared-runtime shell | One canvas and right task dock; local tabs/mode/context, no host-selected Studio/Frame profile; keyboard/scroll and hidden-hit correctness | core client/oib_workspace.rs, oib_designer.rs and shared client integration; real Scene/input tests |
+| B2 Test isolation | Separate local sample adapter; live adapter never swapped or used for sample writes; reset on changed source, no navigation/business effects | core client/state preview fork and selectors/dispatch; outbound isolation tests |
+| B3 Local editor appearance/copy | Monochrome Dark/Light chrome, source-aware fields and useful status; authored swatch colors untouched | Designer Builder/editing helpers; palette and identity tests |
+| B4 Canonical layout model | Versioned per-node container/item Horizontal/Vertical, Fixed/Hug/Fill both axes, bounds, padding, packing/alignment, clipping/Free placement | public graph/source codec, core measure/compile and actual inspector fields; golden cycles/overflow/hits |
+| B5 Coherent editing lifecycle | Bounded local working copy, one expected-generation Apply, typed API/slots, conditional history, dependency-safe removal/retirement/repair | extend existing canonical EditBatch and causal property transaction boundary; process receipt/conflict tests |
+| B6 Styles/modes | RFC0037 typed variables/styles, state recipes, inherited modes, field-source tracing and paint proof | public schema/admission + core resolver; both-mode/source/contrast tests |
+| B7 Representative catalog | Q01–Q16 and F01–F06 exercised end-to-end through the real Designer | per-row evidence in CONTROL_MATRIX; no thumbnail-only completion |
+| B8 Live qualification | Coherent source/schema cutover, focused native/browser visual/input/performance | existing publish path, live slices visible to attached browsers |
+
+B1–B3 can compile before the layout schema changes, but do not expose invented
+layout controls or claim the final Designer is complete. B4–B6 can introduce a
+breaking PoC state version with fresh source/data. Each slice must leave a
+reviewable tested source, not a partial multi-write approximation of Apply.
+
+## Inventory findings that constrain implementation
+
+- Current runtime Test forwards into real app state. The final Test promise needs
+  B2; relabeling existing dispatch as sample-only would be incorrect.
+- Existing structural inspector already supports Name, X/Y, Width/Height, Visible,
+  Text, Color and Radius through typed generation-checked edits. Reuse that
+  machinery while replacing its presentation and extending the canonical model.
+- Current `Visual` has frame expressions/ResizeRule, not reusable Auto Layout.
+  Root composition helpers are useful for chrome, not a substitute layout ABI.
+- Causal property writes and structural EditBatch currently have different commit
+  boundaries. Final Apply must group them in one bounded document transaction.
+- Existing host palettes are compiled constants. Local chrome appearance can be
+  explicit now; component Light/Dark requires actual style resolution. Never
+  recolor arbitrary authored colors by equality with a theme constant.
+- Existing 512-node/128-control, source/coordinate and keyboard budgets still apply
+  jointly. Hide inactive task contents from paint, input and semantics together.
+
+## Working roles and current ledger
+
+Parent owns technical plan, Designer state/actions/Builder/inspector integration,
+final cross-contract choices and validation. The geometry role owns a new
+`oib_workspace.rs`; the sample-adapter role owns client.rs and its narrowly scoped
+state clone API. They share the working tree with disjoint file ownership.
+
+Current: B1–B3 implementation is integrated; focused Designer regression adaptation
+and live publication remain in progress. Retired the host profile selector, divider
+resize state and old projection module. Test uses a transportless sample fork and
+waits for captured input before adopting changed source. One shared status waits
+for confirmation; the inspector no longer repeats a Saved row.
+
+Evidence before first live publication:
+
+- `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline`: **59 passed**, one existing ignored timing diagnostic. Covers editing/deletion/conflicts, responsive task routing, hidden hits, keyboard, bounded scene construction and invalid-focus/mode transitions.
+- Same command filtered to `oib_workspace`: **3 passed**, including active dock controls and unchanged authored preview paint across widths 800–1920.
+- Same command filtered to `light_surface`: **1 passed**, including themed outline/input pass-through after resize/pressed fill and rejection without mutation.
+- Core `cargo check`, dashboard `oib_instance_probe` check and core library Clippy with `-D warnings` passed during integration. Final component regression `--lib component_behavior_tests` passed **14/14**, including all five sample-isolation/source/reconnect cases. Live acceptance remains pending.
+
+The HTML study under prototype/ is design evidence only (latest V09), not runtime
+acceptance. No full repository preflight or rollback/signature qualification was
+run for this slice, following the requested focused live loop.

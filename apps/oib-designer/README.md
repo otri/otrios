@@ -23,8 +23,10 @@ The editor supports local components/presets, shapes, text, linked references,
 removal, names, literal design/placement values, slots and admitted app fields.
 One generation-guarded batch validates and publishes structural changes;
 properties retain their independent causal contexts. Selection, scrolling and
-Edit/Test mode are local. Desktop Studio is the browser default and Focus is the
-native default.
+Edit/Test mode are local. Native and browser hosts share one responsive canvas
+and task dock with Library, Layers and Inspect tabs. Test uses local sample values;
+its gestures do not write the shared app state. Dark/Light currently changes editor
+chrome; authored component modes arrive with named style resolution.
 
 Current state protocol is v31 with release-control v1. App features include
 `otrios-oib-v2`, `otrios-oib-designer-v2`, `otrios-oib-library-v1` and

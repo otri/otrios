@@ -37,9 +37,6 @@ impl CanvasApp {
         install_panic_reporter();
         let mut app = Self::default();
         app.inner.set_software_keyboard(false);
-        app.inner
-            .set_oib_designer_studio(true)
-            .expect("Idle local preference");
         app
     }
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {

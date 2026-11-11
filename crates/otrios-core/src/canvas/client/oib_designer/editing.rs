@@ -77,7 +77,13 @@ fn label(b: &mut Builder, y: f32, value: &str, color: [u8; 4]) -> Result<SceneNo
             (*n <= 256).then_some(c)
         })
         .collect();
-    Ok(text(b.id()?, Rect::new(0., y, 320., 32.), &value, 2, color))
+    Ok(text(
+        b.id()?,
+        Rect::new(0., y, 320., 32.),
+        &value,
+        2,
+        b.palette.role(color),
+    ))
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn inspector(
@@ -114,22 +120,8 @@ pub(super) fn inspector(
     for address in retired {
         drafts.cancel(&address);
     }
-    let mut nodes = vec![
-        label(b, 0., "Selection", WHITE)?,
-        label(
-            b,
-            40.,
-            if status.contains("Saving") {
-                "Saving..."
-            } else if conflicts.is_empty() {
-                "Saved"
-            } else {
-                "Conflict - active retained"
-            },
-            MUTED,
-        )?,
-    ];
-    let mut y = 84.;
+    let mut nodes = vec![label(b, 0., "Selection", WHITE)?];
+    let mut y = 44.;
     if let Some(notice) = notice {
         nodes.push(label(b, y, notice, ACCENT)?);
         y += 40.;
@@ -186,12 +178,9 @@ pub(super) fn inspector(
                 semantics.checked = expanded;
             }
             if expanded {
-                super::style::set_surface_fill(
-                    &mut info.children[0],
-                    otrios_interfaces::theme::LINE,
-                )?;
+                super::style::set_surface_fill(&mut info.children[0], b.palette.selected)?;
                 if let Primitive::Text { color, .. } = &mut info.children[1].primitive {
-                    *color = ACCENT;
+                    *color = b.palette.background;
                 }
             }
             nodes.push(info);
@@ -256,7 +245,7 @@ pub(super) fn inspector(
             let mut input = b.focus_button(0., y, 320., "", LocalAction::FocusField(field.id))?;
             // Match the browser editor surface so native values are visibly
             // editable instead of blending into the properties panel.
-            style::set_surface_fill(&mut input.children[0], BG)?;
+            style::set_surface_fill(&mut input.children[0], b.palette.background)?;
             b.actions.remove(&input.id);
             input.id = field.id;
             input.semantics = Some(SwitchSemantics {
@@ -645,7 +634,8 @@ impl Designer {
             return Ok(());
         }
         let width = root.frame.width;
-        let mut children = vec![background(KEY_BASE, width, 240., CARD, 0.)];
+        let palette = self.appearance.palette();
+        let mut children = vec![background(KEY_BASE, width, 240., palette.surface, 0.)];
         for key in 0..KEY_COUNT {
             let (row, col, columns): (u16, u16, u16) = match key {
                 0..=11 => (0, key, 12),
@@ -658,12 +648,17 @@ impl Designer {
             let pressed = keyboard.pressed(key) || keyboard.feedback_key() == Some(key);
             // Reuse the key's control canvas for the two paint layers rather
             // than adding a decorative wrapper per key to the combined scene.
-            let mut node = style::surface(
+            let mut node = style::surface_with_outline(
                 [id, id + 1, KEY_BASE + 300 + u32::from(key)],
                 w - 8.,
                 52.,
-                if pressed { LINE } else { CARD },
-                12.,
+                if pressed {
+                    palette.selected
+                } else {
+                    palette.surface
+                },
+                palette.line,
+                8.,
             );
             node.frame.x = f32::from(col) * w + 4.;
             node.frame.y = 8. + f32::from(row) * 56.;
@@ -672,7 +667,11 @@ impl Designer {
                 Rect::new(8., 16., (w - 24.).max(1.), 28.),
                 &keyboard.label(key),
                 2,
-                if pressed { ACCENT } else { WHITE },
+                if pressed {
+                    palette.background
+                } else {
+                    palette.text
+                },
             ));
             node.responder = Some(TouchResponder::Activate(Action::KeyboardKey(key)));
             node.semantics = Some(SwitchSemantics {
@@ -817,7 +816,7 @@ impl Client {
         )?;
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         d.details = Some(trace);
-        d.layers_open = false;
+        d.workspace_task = Task::Inspect;
         repaint(m)?;
         Ok(true)
     }
@@ -959,7 +958,7 @@ impl Client {
         d.drafts
             .place_cursor(id, end)
             .map_err(|e| format!("Property caret: {e:?}"))?;
-        d.layers_open = false;
+        d.workspace_task = Task::Inspect;
         m.keyboard.focus();
         repaint(m)?;
         self.reveal_editor_field(id)?;

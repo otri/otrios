@@ -4,26 +4,16 @@ mod authoring;
 mod editing;
 mod style;
 use super::oib_property_editor::PropertyDrafts;
+use super::oib_workspace::{self, Appearance, Task};
 use super::*;
 use crate::canvas::oib::document::{
     HierarchyKey, HierarchyRow, HierarchyScope, ObjectInfo, PropertyInfo,
 };
-use crate::dashboard::components::{ACCENT, CARD, MUTED, WHITE, background, canvas, text};
+use crate::dashboard::components::{ACCENT, MUTED, WHITE, background, canvas, text};
 use otrios_interfaces::{
     oib::designer::{DesignerMode, InstanceId, PropertyAddress, PropertyEditor, Selection},
     scene::{Primitive, Rect, SwitchSemantics},
-    theme::{BG, LINE},
 };
-
-pub(super) fn outlined_surface(
-    ids: [u32; 3],
-    width: f32,
-    height: f32,
-    fill: [u8; 4],
-    radius: f32,
-) -> SceneNode {
-    style::surface(ids, width, height, fill, radius)
-}
 
 // Separate from u16 authored nodes, keyboard, ink and host chrome namespaces.
 const FIRST: u32 = 2_700_000_000;
@@ -46,9 +36,6 @@ const WINDOW_STEP: f32 = 8. * ROW;
 #[derive(Clone, Debug, PartialEq)]
 enum LocalAction {
     Select(Selection),
-    Layers,
-    Profile,
-    Resize(usize),
     Palette,
     Placement(Selection),
     EditComponent(Selection),
@@ -67,9 +54,10 @@ enum LocalAction {
         Option<Value>,
     ),
     TreeExpand(HierarchyKey),
-    TreeScope(HierarchyScope),
     Expand(Selection),
     Mode(DesignerMode),
+    Workspace(Task),
+    Appearance(Appearance),
     Write(PropertyAddress, Option<Value>),
     RestoreDesign(PropertyAddress, u64),
     Resolve(PropertyAddress),
@@ -168,9 +156,8 @@ fn retain_inspector_ids(
 pub(super) struct Designer {
     selection: Selection,
     focus_layout: bool,
-    layers_open: bool,
-    pub(super) studio: super::oib_focus_layout::Studio,
-    resize_origin: Option<[f32; 2]>,
+    workspace_task: Task,
+    appearance: Appearance,
     palette_open: bool,
     placement_open: bool,
     management: Option<ManagedComponent>,
@@ -214,9 +201,8 @@ impl Clone for Designer {
         Self {
             selection: self.selection.clone(),
             focus_layout: self.focus_layout,
-            layers_open: self.layers_open,
-            studio: self.studio,
-            resize_origin: self.resize_origin,
+            workspace_task: self.workspace_task,
+            appearance: self.appearance,
             palette_open: self.palette_open,
             placement_open: self.placement_open,
             management: self.management.clone(),
@@ -280,9 +266,8 @@ impl Designer {
         Some(Self {
             selection: Selection::Document(metadata.id),
             focus_layout: seed.instance_surface.is_some() && metadata.hierarchy_viewport.is_some(),
-            layers_open: false,
-            studio: Default::default(),
-            resize_origin: None,
+            workspace_task: Task::Inspect,
+            appearance: Appearance::Dark,
             palette_open: false,
             placement_open: false,
             management: None,
@@ -322,23 +307,32 @@ impl Designer {
     pub(super) fn management_visible(&self) -> bool {
         self.focus_layout && self.management.is_some()
     }
-    pub(super) fn layers_open(&self) -> bool {
-        self.layers_open
+    pub(super) fn workspace_task(&self) -> Task {
+        self.workspace_task
+    }
+    pub(super) fn workspace_mode(&self) -> DesignerMode {
+        self.mode
+    }
+    pub(super) fn appearance(&self) -> Appearance {
+        self.appearance
     }
     fn local_action(&self, id: u32) -> Option<LocalAction> {
-        use super::oib_focus_layout::{LAYERS, PROFILE, RESIZE_LEFT, RESIZE_RIGHT};
-        if self.focus_layout && id == PROFILE {
-            Some(LocalAction::Profile)
-        } else if self.focus_layout && id == LAYERS && !self.studio.enabled {
-            Some(LocalAction::Layers)
-        } else if self.focus_layout
-            && self.studio.enabled
-            && [RESIZE_LEFT, RESIZE_RIGHT].contains(&id)
-        {
-            Some(LocalAction::Resize(usize::from(id == RESIZE_RIGHT)))
-        } else {
-            self.actions.get(&id).cloned()
+        if self.focus_layout {
+            let action = match id {
+                oib_workspace::TAB_LIBRARY => Some(LocalAction::Workspace(Task::Library)),
+                oib_workspace::TAB_LAYERS => Some(LocalAction::Workspace(Task::Layers)),
+                oib_workspace::TAB_INSPECT => Some(LocalAction::Workspace(Task::Inspect)),
+                oib_workspace::MODE_EDIT => Some(LocalAction::Mode(DesignerMode::Edit)),
+                oib_workspace::MODE_TEST => Some(LocalAction::Mode(DesignerMode::Test)),
+                oib_workspace::APPEARANCE_DARK => Some(LocalAction::Appearance(Appearance::Dark)),
+                oib_workspace::APPEARANCE_LIGHT => Some(LocalAction::Appearance(Appearance::Light)),
+                _ => None,
+            };
+            if action.is_some() {
+                return action;
+            }
         }
+        self.actions.get(&id).cloned()
     }
     pub(super) fn root_selection(&self, instance: u64) -> Option<Selection> {
         self.objects.iter().find(|o| matches!(&o.selection,Selection::Object(a) if a.instance.0 == instance && a.references.is_empty())).map(|o| o.selection.clone())
@@ -353,9 +347,6 @@ impl Designer {
         self.pending_viewport = Some(viewport);
     }
     pub(super) fn cancel(&mut self) {
-        if let Some(widths) = self.resize_origin.take() {
-            self.studio.widths = widths;
-        }
         self.capture = None;
         for panel in &mut self.panels {
             panel.scroll.cancel();
@@ -386,9 +377,13 @@ impl Designer {
             .fold(false, |changed, p| p.scroll.tick(now) || changed)
     }
     fn select(&mut self, selection: Selection) -> bool {
-        if self.selection == selection {
+        if self.selection == selection && self.workspace_task == Task::Inspect {
             return false;
         }
+        if self.workspace_task != Task::Inspect {
+            self.invalidate_bounds();
+        }
+        self.workspace_task = Task::Inspect;
         if self.focus_layout {
             self.tree_scope = match &selection {
                 Selection::Definition(_) | Selection::DefinitionNode { .. } => {
@@ -448,6 +443,7 @@ impl Designer {
             return Err("Designer object model budget exceeded".into());
         }
         let mut builder = Builder::at(self.next_id);
+        builder.palette = self.appearance.palette();
         if structure {
             self.management_nodes.clear();
         }
@@ -602,7 +598,7 @@ impl Designer {
                 &mut nodes,
                 &self.actions,
                 &mut builder.actions,
-                usize::from(single)..usize::from(single) + 2,
+                usize::from(single)..usize::from(single) + 1,
             );
             let mut retired = Vec::new();
             fn ids(node: &SceneNode, out: &mut Vec<u32>) {
@@ -639,23 +635,44 @@ impl Designer {
         layout: &Scene,
         preview: Option<u32>,
         status: &str,
+        confirmed: bool,
     ) -> Result<()> {
         // Structural rejection must remain visible even while the detailed
         // inspector notice is scrolled out of view. Reuse persistent chrome;
         // this adds no scene nodes, input targets or shared state.
-        if let Some(title) = find_node(root, super::oib_focus_layout::PROPERTIES_TITLE)
+        if let Some(title) = find_node(root, oib_workspace::PROPERTIES_TITLE)
             && let Primitive::Text { value, color, .. } = &mut title.primitive
         {
             let rejected = status.contains("Structure rejected:");
             *value = if rejected {
                 "Change rejected"
             } else {
-                "Properties"
+                match self.workspace_task {
+                    Task::Library => "Library",
+                    Task::Layers => "Layers",
+                    Task::Inspect => "Inspect",
+                }
             }
             .into();
-            *color = if rejected { ACCENT } else { WHITE };
+            *color = self.appearance.palette().text;
         }
-        if let Some(toolbar) = find_node(root, super::oib_focus_layout::PROPERTIES_ACTIONS) {
+        if let Some(node) = find_node(root, oib_workspace::STATUS)
+            && let Primitive::Text { value, .. } = &mut node.primitive
+        {
+            *value = if self.drafts.drafts().iter().any(|d| d.error.is_some()) {
+                "Fix invalid values"
+            } else if status.contains("rejected") || status.contains("Conflict") {
+                "Changes need review"
+            } else if !confirmed || status.contains("Saving") {
+                "Applying changes"
+            } else if self.drafts.drafts().iter().any(|d| d.dirty) {
+                "Unapplied changes"
+            } else {
+                "All changes applied"
+            }
+            .into();
+        }
+        if let Some(toolbar) = find_node(root, oib_workspace::PROPERTIES_ACTIONS) {
             toolbar.children = self.management_nodes.clone();
             let width = ((toolbar.frame.width - 8.) / 2.).max(1.);
             for (index, node) in toolbar.children.iter_mut().enumerate() {
@@ -668,22 +685,20 @@ impl Designer {
         for panel in &self.panels {
             let node =
                 find_node(root, u32::from(panel.viewport)).ok_or("Missing designer viewport")?;
-            if self.focus_layout
-                && !self.layers_open
-                && !self.studio.enabled
-                && self
-                    .panels
-                    .first()
-                    .is_some_and(|p| p.viewport == panel.viewport)
-            {
+            let hierarchy_panel = self
+                .panels
+                .first()
+                .is_some_and(|p| p.viewport == panel.viewport)
+                && self.panels.len() > 1;
+            if self.focus_layout && (hierarchy_panel == (self.workspace_task == Task::Inspect)) {
                 node.children.clear();
                 node.responder = None;
                 continue;
             }
             let offset = panel.scroll.info().offset[1];
-            // Studio keeps both panes visible, including over a software
+            // The responsive workspace retains panel geometry over a software
             // keyboard. Smaller slabs keep their combined overscan bounded.
-            let window_step = if self.studio.enabled {
+            let window_step = if self.focus_layout {
                 2. * ROW
             } else {
                 WINDOW_STEP
@@ -704,23 +719,6 @@ impl Designer {
                 .filter(|row| row.frame.y < bottom && row.frame.y + row.frame.height > top)
                 .cloned()
                 .collect();
-            if Some(panel.viewport) == self.panels.last().map(|p| p.viewport) {
-                let status_y = if self.panels.len() == 1 {
-                    ROW + 28.
-                } else {
-                    28.
-                };
-                if let Some(label) = node.children.iter_mut().find(|n| n.frame.y == status_y)
-                    && let Primitive::Text { value, .. } = &mut label.primitive
-                {
-                    let status = if let Some(mode) = self.pending_mode {
-                        format!("{status} / {mode:?} pending")
-                    } else {
-                        status.to_string()
-                    };
-                    *value = status.chars().take(128).collect();
-                }
-            }
             node.responder = None;
             // The signed viewport sets the real available width. Rows occupy it
             // completely, including padding/corners, without covering siblings.
@@ -773,8 +771,13 @@ impl Designer {
                 .into_iter()
                 .enumerate()
                 {
-                    let mut edge =
-                        background(FIRST - 9 + i as u32, rect.width, rect.height, ACCENT, 0.);
+                    let mut edge = background(
+                        FIRST - 9 + i as u32,
+                        rect.width,
+                        rect.height,
+                        self.appearance.palette().focus,
+                        0.,
+                    );
                     edge.frame = rect;
                     outline.children.push(edge);
                 }
@@ -800,8 +803,9 @@ impl Designer {
             if matches!(
                 capture.action,
                 Some(
-                    LocalAction::Layers
-                        | LocalAction::Profile
+                    LocalAction::Workspace(_)
+                        | LocalAction::Appearance(_)
+                        | LocalAction::Mode(_)
                         | LocalAction::EditComponent(_)
                         | LocalAction::Placement(_)
                         | LocalAction::DeleteComponent(_)
@@ -828,6 +832,7 @@ fn find_node(node: &mut SceneNode, id: u32) -> Option<&mut SceneNode> {
     node.children.iter_mut().find_map(|n| find_node(n, id))
 }
 struct Builder {
+    palette: oib_workspace::Palette,
     next: u32,
     nodes: usize,
     actions: BTreeMap<u32, LocalAction>,
@@ -839,6 +844,7 @@ impl Builder {
     }
     fn at(next: u32) -> Self {
         Self {
+            palette: Appearance::Dark.palette(),
             next,
             nodes: 0,
             actions: BTreeMap::new(),
@@ -871,7 +877,7 @@ impl Builder {
             Rect::new(x, y, 240., 24.),
             &value,
             1,
-            color,
+            self.palette.role(color),
         ))
     }
     fn focus_button(
@@ -934,9 +940,16 @@ impl Builder {
     ) -> Result<SceneNode> {
         let id = self.id()?;
         let mut bg = if outlined {
-            style::surface([self.id()?, self.id()?, self.id()?], width, 32., CARD, 12.)
+            style::surface_with_outline(
+                [self.id()?, self.id()?, self.id()?],
+                width,
+                32.,
+                self.palette.surface,
+                self.palette.line,
+                8.,
+            )
         } else {
-            background(self.id()?, width, 32., CARD, 4.)
+            background(self.id()?, width, 32., self.palette.surface, 4.)
         };
         bg.responder = Some(TouchResponder::PassThrough);
         let label_node = self.label(8., 8., label, WHITE)?;
@@ -1035,7 +1048,7 @@ fn focus_hierarchy(
     tree: &[HierarchyRow],
     selected: &Selection,
     collapsed: &[HierarchyKey],
-    scope: HierarchyScope,
+    _scope: HierarchyScope,
     mode: DesignerMode,
     tools: AuthoringTools<'_>,
 ) -> Result<(Vec<SceneNode>, f32)> {
@@ -1044,42 +1057,8 @@ fn focus_hierarchy(
         open: palette_open,
         placement,
     } = tools;
-    let mut nodes = vec![
-        b.focus_button(
-            0.,
-            0.,
-            140.,
-            "Layers",
-            LocalAction::TreeScope(HierarchyScope::Composition),
-        )?,
-        b.focus_button(
-            148.,
-            0.,
-            140.,
-            "Components",
-            LocalAction::TreeScope(HierarchyScope::Components),
-        )?,
-        b.focus_button(
-            0.,
-            56.,
-            288.,
-            &format!("Mode: {mode:?}"),
-            LocalAction::Mode(if mode == DesignerMode::Edit {
-                DesignerMode::Test
-            } else {
-                DesignerMode::Edit
-            }),
-        )?,
-    ];
-    let active_scope = usize::from(scope == HierarchyScope::Components);
-    style::set_surface_fill(&mut nodes[active_scope].children[0], LINE)?;
-    if let Primitive::Text { color, .. } = &mut nodes[active_scope].children[1].primitive {
-        *color = ACCENT;
-    }
-    if let Some(semantics) = &mut nodes[active_scope].semantics {
-        semantics.checked = true;
-    }
-    let mut y = 116.;
+    let mut nodes = vec![];
+    let mut y = 0.;
     if mode == DesignerMode::Edit && !structure.is_empty() {
         let mut palette = b.focus_button(
             0.,
@@ -1096,9 +1075,9 @@ fn focus_hierarchy(
             semantics.checked = palette_open;
         }
         if palette_open {
-            style::set_surface_fill(&mut palette.children[0], LINE)?;
+            style::set_surface_fill(&mut palette.children[0], b.palette.selected)?;
             if let Primitive::Text { color, .. } = &mut palette.children[1].primitive {
-                *color = ACCENT;
+                *color = b.palette.background;
             }
         }
         nodes.push(palette);
@@ -1170,12 +1149,12 @@ fn focus_hierarchy(
                 Rect::new(indent + 48., 16., (232. - indent).max(1.), 28.),
                 &row.name,
                 2,
-                MUTED,
+                b.palette.muted,
             );
             canvas(
                 b.id()?,
                 Rect::new(0., y, 288., 52.),
-                vec![background(b.id()?, 288., 52., CARD, 0.), label],
+                vec![background(b.id()?, 288., 52., b.palette.surface, 0.), label],
             )
         };
         if let Some(label) = node.children.get_mut(1) {
@@ -1184,9 +1163,9 @@ fn focus_hierarchy(
         }
         let selected_row = row.selection.as_ref() == Some(selected);
         if selected_row {
-            style::set_surface_fill(&mut node.children[0], LINE)?;
+            style::set_surface_fill(&mut node.children[0], b.palette.selected)?;
             if let Primitive::Text { color, .. } = &mut node.children[1].primitive {
-                *color = ACCENT;
+                *color = b.palette.background;
             }
         }
         if children {
@@ -1202,9 +1181,9 @@ fn focus_hierarchy(
                 LocalAction::TreeExpand(row.key.clone()),
             )?;
             if selected_row {
-                style::set_surface_fill(&mut disclosure.children[0], LINE)?;
+                style::set_surface_fill(&mut disclosure.children[0], b.palette.selected)?;
                 if let Primitive::Text { color, .. } = &mut disclosure.children[1].primitive {
-                    *color = ACCENT;
+                    *color = b.palette.background;
                 }
             }
             node.children.push(disclosure);
@@ -1461,6 +1440,7 @@ impl Mount {
         let mut inspector_only = false;
         let previous_viewport = self.viewport;
         let previous_management = designer.management_visible();
+        let previous_task = designer.workspace_task;
         let result = (|| {
             let mut changed = false;
             if !blocked && let Some(mode) = designer.pending_mode {
@@ -1562,7 +1542,7 @@ impl Mount {
                 if objects.iter().any(|o| o.selection == target) && trace.is_ok() {
                     designer.select(target);
                     designer.details = Some(trace?);
-                    designer.layers_open = false;
+                    designer.workspace_task = Task::Inspect;
                     designer.editor_notice = None;
                 } else {
                     designer.editor_notice = Some("Source is no longer available".into());
@@ -1660,14 +1640,12 @@ impl Mount {
             {
                 designer.management = Some(ManagedComponent { instance: allocation.id, root: root.selection.clone() });
             }
-            // Frame Focus discards the closed Layers pane from the presented
-            // scene. Its structural candidates can run full admission, so only
-            // prepare them when that pane is visible. Opening it rebuilds from
-            // the current confirmed document; Desktop Studio keeps it visible.
+            // Structural candidates can run full admission. Prepare them only
+            // while the Library or Layers task is visible.
             if editable
                 && self.doc.confirmed()
                 && designer.mode == DesignerMode::Edit
-                && (!designer.focus_layout || designer.layers_open || designer.studio.enabled)
+                && (!designer.focus_layout || designer.workspace_task != Task::Inspect)
             {
                 use otrios_interfaces::oib::InstanceOperation;
                 let generation = self.doc.oib_structural_generation().unwrap_or(0);
@@ -1987,6 +1965,10 @@ impl Mount {
                 || self
                     .designer
                     .as_ref()
+                    .is_some_and(|d| d.workspace_task != previous_task)
+                || self
+                    .designer
+                    .as_ref()
                     .is_some_and(|d| d.management_visible() != previous_management)
             {
                 self.invalidate();
@@ -2021,6 +2003,11 @@ impl Client {
             designer.revision = None;
         }
         let changed = designer.select(selection) || reveal_placement;
+        if changed && previous.workspace_task != Task::Inspect {
+            // Selecting a layer opens Inspect, which changes the projected dock.
+            // Discard the cached task geometry before synchronizing its bounds.
+            m.invalidate();
+        }
         if changed && let Err(error) = m.refresh_designer() {
             m.designer = Some(previous);
             return Err(error);
@@ -2136,37 +2123,61 @@ impl Client {
         }
         Ok(changed)
     }
-    /// Device-local presentation only; never creates a shared UI edit.
-    pub fn set_oib_designer_studio(&mut self, enabled: bool) -> Result<bool> {
-        if self.input_busy() {
-            return Ok(false);
-        }
-        if self.active.as_ref().is_some_and(|m| {
-            m.oib_activation_blocked() || m.designer.as_ref().is_some_and(|d| d.editor_focused())
-        }) {
-            return Ok(false);
-        }
-        let changed = self.designer_studio.enabled != enabled;
-        self.designer_studio.enabled = enabled;
-        if let Some(m) = &mut self.active {
-            if let Some(d) = &mut m.designer {
-                d.studio = self.designer_studio;
-                d.invalidate_bounds();
+    /// Finish a field before hiding Inspect. The older general blur route keeps
+    /// invalid text but clears focus, so restore that owner when Apply failed.
+    fn designer_blur_workspace_field(&mut self) -> Result<bool> {
+        let focused = self
+            .active
+            .as_ref()
+            .and_then(|m| m.designer.as_ref())
+            .and_then(|d| {
+                let focus = d.drafts.focused()?;
+                let field = d.drafts.draft(&focus.address)?.field(focus.part)?;
+                Some((focus.address.clone(), field.id))
+            });
+        self.designer_blur_focused()?;
+        if let Some((address, id)) = focused {
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            let d = m.designer.as_mut().ok_or("Missing designer")?;
+            if d.drafts.draft(&address).is_some_and(|draft| draft.dirty) {
+                d.drafts
+                    .focus(id)
+                    .map_err(|e| format!("Property focus: {e:?}"))?;
+                m.keyboard.focus();
+                m.invalidate();
+                return Ok(false);
             }
-            m.invalidate();
         }
-        Ok(changed)
+        Ok(true)
     }
     /// Queue a local mode switch while any gesture/edit owns the current graph.
     pub fn set_oib_designer_mode(&mut self, mode: DesignerMode) -> Result<bool> {
+        if self
+            .active
+            .as_ref()
+            .and_then(|m| m.designer.as_ref())
+            .is_some_and(|d| d.mode == mode && d.pending_mode.is_none())
+        {
+            return Ok(false);
+        }
         let busy = self.input_busy();
+        // A click on the mode control ends ordinary field focus. Preserve a
+        // captured pointer, an invalid draft, and the existing receipt barrier.
+        if !busy && !self.designer_blur_workspace_field()? {
+            return Ok(false);
+        }
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let blocked = busy || m.oib_activation_blocked();
         let Some(designer) = &mut m.designer else {
             return Ok(false);
         };
+        let previous = designer.clone();
         let changed = designer.set_mode(mode, blocked);
         if changed {
+            if let Err(error) = m.sync_designer_preview() {
+                m.designer = Some(previous);
+                return Err(error);
+            }
             m.refresh_designer()?;
             m.invalidate_presentation();
         }
@@ -2220,18 +2231,6 @@ impl Client {
             LocalAction::Apply(address) => self.designer_commit_property(&address, false),
             LocalAction::Discard(address) => self.designer_discard_property(&address),
             LocalAction::Select(selection) => self.designer_select_after_blur(selection),
-            LocalAction::TreeScope(scope) => {
-                if self.input_busy() {
-                    return Ok(false);
-                }
-                let m = self.active.as_mut().ok_or("No Canvas")?;
-                let d = m.designer.as_mut().ok_or("Missing designer")?;
-                d.tree_scope = scope;
-                d.revision = None;
-                d.panels[0].scroll.set_offset([0., 0.]);
-                m.refresh_designer()?;
-                Ok(true)
-            }
             LocalAction::TreeExpand(key) => {
                 if self.input_busy() {
                     return Ok(false);
@@ -2259,17 +2258,62 @@ impl Client {
                 Ok(true)
             }
             LocalAction::Structure(operation) => self.edit_oib_structure(operation),
-            LocalAction::Profile => self.set_oib_designer_studio(!self.designer_studio.enabled),
-            LocalAction::Resize(_) => Ok(false), // Pointer drag owns resize; activation alone does not.
-            LocalAction::Layers => {
+            LocalAction::Workspace(task) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                if self
+                    .active
+                    .as_ref()
+                    .and_then(|m| m.designer.as_ref())
+                    .is_some_and(|d| d.workspace_task == task)
+                {
+                    return Ok(false);
+                }
+                if task != Task::Inspect {
+                    if !self.designer_blur_workspace_field()? {
+                        return Ok(false);
+                    }
+                    // Failed validation keeps its field visible and focused.
+                    if self
+                        .active
+                        .as_ref()
+                        .and_then(|m| m.designer.as_ref())
+                        .is_some_and(Designer::editor_focused)
+                    {
+                        return Ok(false);
+                    }
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                if d.workspace_task == task {
+                    return Ok(false);
+                }
+                d.workspace_task = task;
+                if task != Task::Inspect {
+                    d.tree_scope = if task == Task::Library {
+                        HierarchyScope::Components
+                    } else {
+                        HierarchyScope::Composition
+                    };
+                }
+                d.revision = None;
+                d.invalidate_bounds();
+                m.refresh_designer()?;
+                m.invalidate();
+                Ok(true)
+            }
+            LocalAction::Appearance(appearance) => {
                 if self.input_busy() {
                     return Ok(false);
                 }
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 let d = m.designer.as_mut().ok_or("Missing designer")?;
-                d.layers_open = !d.layers_open;
+                if d.appearance == appearance {
+                    return Ok(false);
+                }
+                d.appearance = appearance;
                 d.revision = None;
-                d.invalidate_bounds();
                 m.refresh_designer()?;
                 m.invalidate();
                 Ok(true)
@@ -2449,17 +2493,14 @@ impl Client {
                 if matches!(
                     action,
                     Some(
-                        LocalAction::Layers
-                            | LocalAction::Profile
-                            | LocalAction::Resize(_)
+                        LocalAction::Workspace(_)
+                            | LocalAction::Appearance(_)
+                            | LocalAction::Mode(_)
                             | LocalAction::EditComponent(_)
                             | LocalAction::Placement(_)
                             | LocalAction::DeleteComponent(_)
                     )
                 ) {
-                    if matches!(action, Some(LocalAction::Resize(_))) {
-                        designer.resize_origin = Some(designer.studio.widths);
-                    }
                     designer.capture = Some(Capture {
                         pointer: event.id,
                         start: event.position,
@@ -2518,30 +2559,6 @@ impl Client {
                 designer.capture = Some(capture);
                 return Ok((Some(false), None));
             }
-            if let Some(LocalAction::Resize(side)) = capture.action {
-                let origin = designer.resize_origin.ok_or("Missing resize origin")?;
-                if event.phase == PointerPhase::Cancel {
-                    designer.studio.widths = origin;
-                } else {
-                    let dx = event.position[0] - capture.start[0];
-                    if dx.is_finite() {
-                        let other = 1 - side;
-                        let lower = [320., 352.][side];
-                        let upper = [480.0_f32, 560.][side]
-                            .min((m.viewport[0] - 208. - origin[other]).max(lower));
-                        designer.studio.widths[side] =
-                            (origin[side] + if side == 0 { dx } else { -dx }).clamp(lower, upper);
-                    }
-                }
-                if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel) {
-                    designer.resize_origin = None;
-                } else {
-                    designer.capture = Some(capture);
-                }
-                designer.invalidate_bounds();
-                m.invalidate();
-                return Ok((Some(true), None));
-            }
             capture.moving |= (event.position[0] - capture.start[0])
                 .abs()
                 .max((event.position[1] - capture.start[1]).abs())
@@ -2568,7 +2585,6 @@ impl Client {
             }
             Ok((Some(true), action))
         })();
-        self.designer_studio = designer.studio;
         m.designer = Some(designer);
         let (handled, action) = result?;
         if handled.is_some() {
@@ -2657,3 +2673,7 @@ fn admits_viewport(
 #[cfg(test)]
 #[path = "oib_designer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "oib_workspace_focus_tests.rs"]
+mod workspace_focus_tests;

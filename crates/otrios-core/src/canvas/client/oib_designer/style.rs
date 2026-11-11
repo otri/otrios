@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded decorative surfaces matching the authored 1.5-unit outline.
 use crate::dashboard::components::{background, canvas};
-use otrios_interfaces::{
-    scene::{Color, Primitive, Rect, SceneNode, TouchResponder},
-    theme::LINE,
-};
+use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode, TouchResponder};
 
 const OUTLINE: f32 = 1.5;
 const MAX_SIZE: f32 = 8192.;
@@ -37,16 +34,17 @@ fn inner_frame(width: f32, height: f32) -> Rect {
 
 /// IDs are supplied by the caller's namespace and must be distinct.
 /// Construction normalizes invalid dimensions; fallible resizing rejects them.
-pub(super) fn surface(
+pub(super) fn surface_with_outline(
     ids: [u32; 3],
     width: f32,
     height: f32,
     fill: Color,
+    outline: Color,
     corner_radius: f32,
 ) -> SceneNode {
     let (width, height) = (dimension(width), dimension(height));
     let corner_radius = radius(corner_radius, width, height);
-    let mut outer = background(ids[1], width, height, LINE, corner_radius);
+    let mut outer = background(ids[1], width, height, outline, corner_radius);
     let frame = inner_frame(width, height);
     let mut inner = background(
         ids[2],
@@ -111,7 +109,7 @@ fn validate(node: &SceneNode) -> Result<(), String> {
     let Primitive::Superellipse {
         radius: outer_radius,
         exponent: 4.,
-        color: LINE,
+        color: _,
     } = outer.primitive
     else {
         return Err("Unexpected decorative surface outline".into());
@@ -164,4 +162,37 @@ pub(super) fn set_surface_fill(node: &mut SceneNode, fill: Color) -> Result<(), 
     };
     *color = fill;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn light_surface_keeps_outline_and_pass_through_when_resized_or_pressed() {
+        let outline = [112, 112, 112, 255];
+        let mut node =
+            surface_with_outline([100, 101, 102], 80., 48., [244, 244, 244, 255], outline, 8.);
+        resize_surface(&mut node, 144., 56.).unwrap();
+        set_surface_fill(&mut node, [21, 21, 21, 255]).unwrap();
+        assert!(
+            matches!(node.children[0].primitive, Primitive::Superellipse { color, .. } if color == outline)
+        );
+        assert!(matches!(
+            node.children[1].primitive,
+            Primitive::Superellipse {
+                color: [21, 21, 21, 255],
+                ..
+            }
+        ));
+        assert!(
+            node.children
+                .iter()
+                .all(|child| child.responder == Some(TouchResponder::PassThrough))
+        );
+        assert_eq!(node.responder, Some(TouchResponder::PassThrough));
+        let before = node.clone();
+        assert!(resize_surface(&mut node, f32::NAN, 56.).is_err());
+        assert_eq!(node, before);
+    }
 }

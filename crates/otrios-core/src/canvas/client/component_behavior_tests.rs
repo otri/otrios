@@ -155,7 +155,7 @@ fn replacement(ui: &Ui, bytes: Vec<u8>) -> Ui {
     seed.graph.as_mut().unwrap().imports.as_mut().unwrap().locks[0].revision = [2; 32];
     next
 }
-fn mounted(ui: &Ui) -> (Client, crate::canvas::Document, Session) {
+fn mounted_preview(ui: &Ui) -> (Client, crate::canvas::Document, Session) {
     let ui = fixture::admit(ui);
     let scope = "l2:client";
     let mut authority = crate::canvas::Document::new(ui.state_schema.clone(), scope).unwrap();
@@ -211,8 +211,16 @@ fn mounted(ui: &Ui) -> (Client, crate::canvas::Document, Session) {
     client.active = Some(mount);
     pump(&mut client, &mut authority, &mut session);
     client.set_oib_designer_mode(DesignerMode::Test).unwrap();
-    client.set_oib_designer_studio(false).unwrap();
     client.set_viewport([1280., 800.]).unwrap();
+    (client, authority, session)
+}
+// Existing execution/receipt tests exercise an app, independently of Designer.
+fn mounted(ui: &Ui) -> (Client, crate::canvas::Document, Session) {
+    let (mut client, authority, session) = mounted_preview(ui);
+    let mount = client.active.as_mut().unwrap();
+    mount.designer = None;
+    mount.sync_designer_preview().unwrap();
+    mount.invalidate();
     (client, authority, session)
 }
 fn pump(client: &mut Client, authority: &mut crate::canvas::Document, session: &mut Session) {
@@ -292,6 +300,191 @@ fn pointer(client: &mut Client, id: u32, phase: PointerPhase, point: [f32; 2], a
 }
 fn fields(client: &Client) -> [u16; 4] {
     [1, 2, 3, 4].map(|id| client.value(id).unwrap())
+}
+
+#[test]
+fn designer_test_guest_writes_only_local_samples_and_reentry_resets() {
+    let ui = library_ui(snapping_guest(100));
+    let (mut client, authority, _session) = mounted_preview(&ui);
+    let baseline = authority.value(1).unwrap();
+    let (control, _, _) = slider(&client, 20);
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 600);
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.typed_value(1).unwrap(),
+        Value::Number(f32::from(baseline))
+    );
+    assert_eq!(authority.value(1).unwrap(), baseline);
+    assert_eq!(client.dispatch_usage().pending_fields, 0);
+    assert!(
+        client.confirmed(),
+        "local samples never wait for authority receipts"
+    );
+    assert!(client.reload_ready());
+    assert!(
+        client.outgoing().unwrap().is_none(),
+        "sample edits have no wire output"
+    );
+    client.set_oib_designer_mode(DesignerMode::Edit).unwrap();
+    assert_eq!(client.value(1).unwrap(), baseline);
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    assert_eq!(client.value(1).unwrap(), baseline);
+    client.event(client.epoch(), control, 437, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 400);
+    assert!(client.outgoing().unwrap().is_none());
+}
+
+#[test]
+fn designer_test_keeps_captured_guest_until_release_without_authority_edits() {
+    let ui = library_ui(snapping_guest(100));
+    let next = replacement(&ui, snapping_guest(250));
+    let (mut client, mut authority, mut session) = mounted_preview(&ui);
+    let baseline_value = authority.value(1).unwrap();
+    let (_, origin, width) = slider(&client, 20);
+    let presented = client.active.as_ref().unwrap().oib_generation;
+    pointer(
+        &mut client,
+        9,
+        PointerPhase::Down,
+        [origin[0] + width * 0.437, origin[1]],
+        1000,
+    );
+    assert_eq!(client.value(1).unwrap(), 400);
+    assert!(client.active.as_ref().unwrap().input.dragging(9));
+    assert!(client.outgoing().unwrap().is_none());
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&next, generation, baseline)
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(client.active.as_ref().unwrap().oib_generation, presented);
+    pointer(
+        &mut client,
+        9,
+        PointerPhase::Move,
+        [origin[0] + width * 0.687, origin[1]],
+        1010,
+    );
+    assert_eq!(client.value(1).unwrap(), 600);
+    pointer(
+        &mut client,
+        9,
+        PointerPhase::Up,
+        [origin[0] + width * 0.687, origin[1]],
+        1020,
+    );
+    pump(&mut client, &mut authority, &mut session);
+    assert_ne!(client.active.as_ref().unwrap().oib_generation, presented);
+    assert_eq!(client.value(1).unwrap(), baseline_value);
+    assert_eq!(authority.value(1).unwrap(), baseline_value);
+    assert!(client.confirmed());
+}
+
+#[test]
+fn designer_test_reconnect_receives_source_without_losing_capture_or_sending_samples() {
+    let ui = library_ui(snapping_guest(100));
+    let next = replacement(&ui, snapping_guest(250));
+    let (mut client, mut authority, mut session) = mounted_preview(&ui);
+    let value = authority.value(1).unwrap();
+    let (_, origin, width) = slider(&client, 20);
+    pointer(
+        &mut client,
+        8,
+        PointerPhase::Down,
+        [origin[0] + width * 0.437, origin[1]],
+        1000,
+    );
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&next, generation, baseline)
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let (candidate, mut replacement_session) = qualified_candidate(&client, &mut authority, &next);
+    client.activate_candidate(candidate, true, vec![]).unwrap();
+    assert!(client.active.as_ref().unwrap().input.dragging(8));
+    assert_eq!(client.value(1).unwrap(), 400);
+    pointer(
+        &mut client,
+        8,
+        PointerPhase::Move,
+        [origin[0] + width * 0.687, origin[1]],
+        1010,
+    );
+    assert_eq!(client.value(1).unwrap(), 600);
+    pointer(
+        &mut client,
+        8,
+        PointerPhase::Up,
+        [origin[0] + width * 0.687, origin[1]],
+        1020,
+    );
+    pump(&mut client, &mut authority, &mut replacement_session);
+    assert_eq!(client.value(1).unwrap(), value);
+    let (control, _, _) = slider(&client, 20);
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 500);
+    assert_eq!(authority.value(1).unwrap(), value);
+    assert!(client.confirmed());
+    assert!(client.outgoing().unwrap().is_none());
+}
+
+#[test]
+fn designer_test_discards_guest_local_state_between_runs() {
+    let ui = library_ui(stateful_snapping_guest(100));
+    let (mut client, _authority, _session) = mounted_preview(&ui);
+    let (control, _, _) = slider(&client, 20);
+    client.event(client.epoch(), control, 437, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 400);
+    client.event(client.epoch(), control, 437, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 500);
+    client.set_oib_designer_mode(DesignerMode::Edit).unwrap();
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    client.event(client.epoch(), control, 437, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 400);
+    assert!(client.outgoing().unwrap().is_none());
+}
+
+#[test]
+fn designer_test_source_refresh_resets_fixture_and_keeps_live_receipts() {
+    let ui = library_ui(snapping_guest(100));
+    let next = replacement(&ui, snapping_guest(250));
+    let (mut client, mut authority, mut session) = mounted_preview(&ui);
+    let (control, _, _) = slider(&client, 20);
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(client.value(1).unwrap(), 600);
+    authority
+        .set_typed_authority(&[(1, Value::Number(123.))])
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.typed_value(1).unwrap(),
+        Value::Number(123.)
+    );
+    assert_eq!(
+        client.value(1).unwrap(),
+        600,
+        "live values do not overwrite an active fixture"
+    );
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&next, generation, baseline)
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client.value(1).unwrap(),
+        123,
+        "new authored source starts a fresh sample fixture"
+    );
+    let (control, _, _) = slider(&client, 20);
+    client.event(client.epoch(), control, 687, 0).unwrap();
+    assert_eq!(
+        client.value(1).unwrap(),
+        500,
+        "new library code is active locally"
+    );
+    assert_eq!(authority.value(1).unwrap(), 123);
+    assert!(client.confirmed());
+    assert!(client.outgoing().unwrap().is_none());
 }
 
 #[test]

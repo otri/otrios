@@ -1,7 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer: technical design
 
-Date: 2026-11-11. Status: **proposed implementation target**. This document is a
+Date: 2026-11-11. Status: **selected implementation target; build-out in progress**.
+Follow [IMPLEMENTATION.md](IMPLEMENTATION.md) for the concrete slices, active goal,
+source ownership and actual runtime validation. Current PoC data is disposable;
+use a clean versioned cutover instead of migration or obsolete UI compatibility. This document is a
 contract design, not evidence of implemented Auto Layout, named styles or a new
 editor release. Read [the package entry point](README.md),
 [UX journeys](UX_JOURNEYS.md), [visual reference](../../DESIGN.md) and
@@ -18,7 +21,7 @@ admission, input, signing or performance acceptance.
 | Appearance | Definition-node defaults; compiled theme constants; limited live colors | Typed named styles, variable modes, source-aware full appearance inspector |
 | Runtime | Shared Rust scene/layout/input, Wasmi component ABI 1; library-owned Slider | New generic layout compiler and incremental dependencies, additional admitted controls |
 | Packaging | Verified exact signed library closure; compatible L1/L2 adoption and rollback | Contract fingerprints/capability admission for layout/styles/new exports |
-| Editor shell | Frame Focus and resizable Desktop Studio, retained hierarchy/inspector scrolling | Consistent full lifecycle, impact review, catalog qualification and draft handling |
+| Editor shell | Responsive canvas/task dock replacing earlier Frame Focus/Desktop Studio profiles; retained panel scrolling | Consistent full lifecycle, impact review, catalog qualification and draft handling |
 
 Sources of truth are `crates/otrios-interfaces/src/oib/{designer,graph,library}.rs`,
 `crates/otrios-core/src/canvas/oib/`, `canvas/client/oib_designer*`,
@@ -519,7 +522,7 @@ floating dependency resolution or a new service to make publication convenient.
 | M3 Styles and composition | RFC 0037 resolver, modes, source-aware inspector, LabelledSlider | Paint proof, forwarding/binding/contrast/state tests; native/Web matching |
 | M4 Dependency lifecycle | Impact index, blocked delete, retire and explicit replacement | Stale-index, in-use, override/route repair and signed export tests |
 | M5 Base catalog | Qualified representative controls and flows | Each matrix row has actual evidence, not a thumbnail |
-| M6 Signed release | Completed validated feature set | Signed closure, compatible rollback, focused live Frame/browser acceptance |
+| M6 Live release | Completed validated feature set | Existing publisher path and focused live Frame/browser acceptance; no extra signature checks or rollback preparation |
 
 M1–M6 can be subdivided into reviewable commits but should not expose fake working
 controls. Keep unavailable features honest. Wrap/grid, richer typography, assets,
@@ -530,7 +533,7 @@ Acceptance must include: blank component; composed LabelledSlider; definition
 update with untouched and overridden instances; long/multiline content; Fill/Hug
 cycles and overflow; state/mode previews; disabled and captured input; dependency
 removal/replacement/retirement; stale Apply, lost reply, reconnect and authority
-restart; signed update/rollback; no cross-Space mutation; aggregate resource and
+restart; live update; no cross-Space mutation; aggregate resource and
 actual present timing. Report each actual command, platform and evidence source.
 Broad repository checks are warranted for the runtime contract cutover, not as a
 pretend validation of this documentation-only proposal.

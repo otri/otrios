@@ -12,9 +12,10 @@ feature. Runtime implementation and tests live in `otrios-core`.
 
 Open **Test Playground → OIB Designer** in the selected Space. Audio and Display
 are real initial SettingsPanel instances. Power is a preset without a hidden
-initial object. SettingsPanel has an Accessories slot. The browser defaults to
-Desktop Studio and Frame to Focus. Selection, scrolling and Edit/Test mode are
-local; Edit selects preview objects and Test invokes admitted app actions.
+initial object. SettingsPanel has an Accessories slot. Both hosts use the same
+responsive canvas and Library/Layers/Inspect task dock. Selection, scrolling and
+Edit/Test mode are local; Test exercises local sample values without writing shared
+app state. Dark/Light currently changes editor chrome, pending authored style modes.
 
 Designer imports SettingsPanel, LabeledSlider and LabeledToggle from the signed
 [OIB 2D library](../libraries/oib-2d/README.md). Shell, binding presets, business

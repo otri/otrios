@@ -1015,6 +1015,34 @@ impl StateAdapter {
         }
         Ok(result)
     }
+    /// A RAM-only fixture for Designer Test. Transport ownership, receipts and
+    /// queued authority commands stay on the original adapter. This adapter is
+    /// never passed to generate/receive; its bounded intent overlay is local.
+    pub(in crate::canvas) fn preview_clone(&self) -> Self {
+        let mut pending = self
+            .flight
+            .as_ref()
+            .map_or_else(BTreeMap::new, |f| f.values.iter().cloned().collect());
+        pending.extend(self.pending.clone());
+        Self {
+            doc: self.doc.clone(),
+            read_only: false,
+            writer: self.writer,
+            replica: None,
+            pending,
+            pending_since: None,
+            dispatch: self.dispatch,
+            clock: self.clock,
+            last_issue: None,
+            deadline: None,
+            flight: None,
+            acknowledged: 0,
+            slot: None,
+            ack: None,
+            hello_sent: true,
+            resync: false,
+        }
+    }
     pub fn restore_pending(&mut self, old: &Self) -> Result<()> {
         if self.read_only {
             return Ok(());

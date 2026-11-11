@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer design package
 
-Date: 2026-11-11. Status: **M0 design and rapid prototype; production implementation
-not started**. This package is the proposed complete editing experience, not an
+Date: 2026-11-11. Status: **runtime interface build-out in progress**. Read
+[IMPLEMENTATION.md](IMPLEMENTATION.md) first for the active goal and slice ledger. This package is the proposed complete editing experience, not an
 announcement that its features are deployed. It extends the existing D2/L1/L2
 foundation without rewriting those qualification records.
 
@@ -80,6 +80,6 @@ M4 dependency lifecycle; M5 full representative-control qualification; M6 signed
 Frame/Web delivery. See T12 for exit criteria. Detailed wire addresses, bounds and
 mixed structural/property Apply must be finalized before production coding.
 
-This request authorizes design and prototype testing, not an automatic deployment
-of the prototype as OIB Designer. Existing live OTriOS remains unchanged. No full
-repository preflight or runtime qualification is claimed by this package.
+The user has now authorized the real interface build-out, prioritizing final
+design over current PoC data. Live-first iteration uses coherent tested slices on the existing Frame/Web system;
+no runtime qualification is claimed until its evidence is recorded.

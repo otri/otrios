@@ -372,9 +372,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let changed = match step["op"].as_str().ok_or("Operation required")? {
             "restore" => client.restore_oib(step["defaults"].as_bool().unwrap_or(false))?,
             "add" => client.instantiate_oib(id, name)?,
-            "studio" => {
-                client.set_oib_designer_studio(step["enabled"].as_bool().unwrap_or(true))?
-            }
             "insert" => client.insert_oib(
                 step["prototype"].as_u64().unwrap_or(id),
                 step["before"].as_u64(),

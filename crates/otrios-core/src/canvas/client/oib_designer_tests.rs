@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::*;
 pub(super) use crate::test_support::oib_designer as designer_fixture;
+use otrios_interfaces::theme::CARD;
 use otrios_interfaces::{
     layout::ValueType,
     oib::{Cell, Seed, designer::*},
@@ -691,7 +692,7 @@ fn populated_designer(base: &Scene) -> (Seed, Designer) {
 }
 fn presented(d: &Designer, base: &Scene) -> Scene {
     let mut root = base.root().clone();
-    d.present(&mut root, base, None, "Active").unwrap();
+    d.present(&mut root, base, None, "Active", true).unwrap();
     let scene = Scene::new(root).expect("combined app/chrome scene fits 512 nodes");
     assert!(scene.controls().len() <= 128);
     scene
@@ -1022,7 +1023,7 @@ fn fixture_sync(
 fn mounted_six_panel_fixture(focus: bool) -> Client {
     mounted_fixture_session(focus).0
 }
-fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Session) {
+pub(super) fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Session) {
     mounted_fixture_session_with_count(focus, 4)
 }
 fn mounted_fixture_session_with_count(
@@ -1467,7 +1468,8 @@ fn nonzero_selector_evaluates_numeric_state_and_rejects_other_types() {
 }
 
 #[test]
-fn frame_focus_drawer_geometry_hits_and_release_outside_are_local() {
+fn responsive_workspace_tasks_keep_canvas_visible_and_changes_local() {
+    use super::super::oib_workspace::{TAB_INSPECT, TAB_LAYERS};
     let mut client = mounted_six_panel_fixture(true);
     let m = client.active.as_ref().unwrap();
     let root_before = m.doc.oib_root();
@@ -1476,104 +1478,34 @@ fn frame_focus_drawer_geometry_hits_and_release_outside_are_local() {
     let hierarchy = u32::from(seed.designer.as_ref().unwrap().hierarchy_viewport.unwrap());
     let inspector = u32::from(seed.inspector_viewport);
     let preview = u32::from(seed.instance_surface.as_ref().unwrap().preview_viewport);
-    for viewport in [[1280., 800.], [800., 1280.]] {
+    for viewport in [[1280., 800.], [800., 1280.], [1920., 1080.]] {
         client.set_viewport(viewport).unwrap();
-        let closed = client.scene().unwrap();
-        let panel = closed.path(inspector).unwrap();
-        let panel = panel.last().unwrap();
-        assert_eq!(panel.node.frame.width, 320.);
-        assert!(panel.origin[0] > viewport[0] / 2.);
-        let canvas = closed.path(preview).unwrap();
-        assert_eq!(canvas.last().unwrap().origin, [16., 80.]);
-        assert!(!closed.controls().iter().any(|c| {
-            closed
-                .path(c.node.id)
-                .unwrap()
-                .iter()
-                .any(|p| p.node.id == hierarchy)
-        }));
-        assert!(
-            client
-                .designer_activate(super::super::oib_focus_layout::LAYERS)
-                .unwrap()
-                .unwrap()
-        );
-        let opened = client.scene().unwrap();
-        let layer = opened.path(hierarchy).unwrap();
-        assert_eq!(layer.last().unwrap().origin, [16., 128.]);
-        let hit = opened.hit_path([200., 400.]);
-        assert!(
-            !hit.iter().any(|n| n.node.id == preview),
-            "drawer barrier covers preview"
-        );
-        // Empty gutters need a real modal hit target too; decoration passes
-        // through, and a Consume canvas alone does not establish a leaf hit.
-        for point in [
-            [310., 200.],
-            [310., 66.],
-            [1., 300.],
-            [310., viewport[1] - 1.],
+        for (tab, active, hidden) in [
+            (TAB_LAYERS, hierarchy, inspector),
+            (TAB_INSPECT, inspector, hierarchy),
         ] {
-            let hit = opened.hit_path(point);
-            assert!(
-                !hit.iter().any(|n| n.node.id == preview),
-                "blank drawer gutter leaks at {point:?}"
-            );
-            assert!(
-                hit.iter()
-                    .any(|n| n.node.responder == Some(TouchResponder::Consume))
-            );
-            let mut router = crate::dashboard::input::InputRouter::default();
-            for phase in [PointerPhase::Down, PointerPhase::Move, PointerPhase::Up] {
-                let delivery = router.dispatch(
-                    opened.clone(),
-                    PointerEvent {
-                        id: 991,
-                        phase,
-                        position: point,
-                    },
-                );
-                assert!(
-                    delivery.action.is_none() && delivery.gesture.is_none(),
-                    "drawer gutter must never dispatch an app action or drag"
-                );
-            }
+            assert!(client.designer_activate(tab).unwrap().unwrap());
+            let scene = client.scene().unwrap();
+            let canvas = scene.path(preview).unwrap();
+            let canvas = canvas.last().unwrap();
+            let panel = scene.path(active).unwrap();
+            let panel = panel.last().unwrap();
+            assert_eq!(canvas.origin[0], 16.);
+            assert!(canvas.node.frame.width > 0.);
+            assert!(panel.origin[0] > canvas.origin[0] + canvas.node.frame.width);
+            assert!(panel.node.frame.width >= 320.);
+            assert!(scene.path(hidden).unwrap().last().unwrap().origin[0] < 0.);
+            assert!(!scene.controls().iter().any(|c| {
+                scene
+                    .path(c.node.id)
+                    .unwrap()
+                    .iter()
+                    .any(|n| n.node.id == hidden)
+            }));
+            assert!(count_nodes(scene.root()) <= 512);
+            assert!(scene.controls().len() <= 128);
         }
-        assert!(
-            client
-                .designer_activate(super::super::oib_focus_layout::LAYERS)
-                .unwrap()
-                .unwrap()
-        );
     }
-    for (phase, position) in [
-        (PointerPhase::Down, [120., 24.]),
-        (PointerPhase::Up, [600., 24.]),
-    ] {
-        assert_eq!(
-            client
-                .designer_pointer(
-                    PointerEvent {
-                        id: 777,
-                        phase,
-                        position
-                    },
-                    100
-                )
-                .unwrap(),
-            Some(true)
-        );
-    }
-    assert!(
-        !client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .layers_open
-    );
     let m = client.active.as_ref().unwrap();
     assert_eq!(m.doc.oib_root(), root_before);
     assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields_before);
@@ -1610,7 +1542,7 @@ fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
         }
     }
     client
-        .designer_activate(super::super::oib_focus_layout::LAYERS)
+        .designer_activate(super::super::oib_workspace::TAB_LAYERS)
         .unwrap();
     {
         let m = client.active.as_mut().unwrap();
@@ -1644,7 +1576,9 @@ fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
         }
     }
     client
-        .designer_action(LocalAction::TreeScope(HierarchyScope::Components))
+        .designer_action(LocalAction::Workspace(
+            super::super::oib_workspace::Task::Library,
+        ))
         .unwrap();
     let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
     assert!(
@@ -1659,7 +1593,7 @@ fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
     );
 }
 
-fn editor_address(property: u64) -> PropertyAddress {
+pub(super) fn editor_address(property: u64) -> PropertyAddress {
     PropertyAddress::Occurrence {
         instance: InstanceId(20),
         path: PropertyPath {
@@ -1699,7 +1633,10 @@ fn editor_value(client: &Client, property: u64) -> Value {
 fn focus_property(client: &mut Client, property: u64) -> u32 {
     focus_address(client, editor_address(property))
 }
-fn focus_address(client: &mut Client, address: PropertyAddress) -> u32 {
+pub(super) fn focus_address(client: &mut Client, address: PropertyAddress) -> u32 {
+    client
+        .designer_activate(super::super::oib_workspace::TAB_INSPECT)
+        .unwrap();
     let m = client.active.as_mut().unwrap();
     m.font = Some(Arc::new(crate::dashboard::font::test_font()));
     let d = m.designer.as_ref().unwrap();
@@ -2288,7 +2225,9 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
                 .is_some_and(|draft| !draft.dirty),
             "the next Apply starts from the newly confirmed accent"
         );
-        client.designer_action(LocalAction::Layers).unwrap();
+        client
+            .designer_activate(super::super::oib_workspace::TAB_LAYERS)
+            .unwrap();
         let tools = &client
             .active
             .as_ref()
@@ -2306,7 +2245,9 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
                 .iter()
                 .all(|(_, operation)| operation.generation == structure)
         );
-        client.designer_action(LocalAction::Layers).unwrap();
+        client
+            .designer_activate(super::super::oib_workspace::TAB_INSPECT)
+            .unwrap();
     }
 }
 #[test]
@@ -2622,10 +2563,13 @@ fn frame_focus_managed_back_does_not_cover_layers_button() {
     m.quit_control = Some(255);
     m.invalidate();
     let scene = client.scene().unwrap();
-    let hit = scene.hit_path([120., 24.]);
+    let tab = scene.path(super::super::oib_workspace::TAB_LAYERS).unwrap();
+    let tab = tab.last().unwrap();
+    let point = [tab.origin[0] + 24., tab.origin[1] + 24.];
+    let hit = scene.hit_path(point);
     assert!(
         hit.iter()
-            .any(|p| p.node.id == super::super::oib_focus_layout::LAYERS)
+            .any(|p| p.node.id == super::super::oib_workspace::TAB_LAYERS)
     );
     let back = scene
         .controls()
@@ -2642,14 +2586,14 @@ fn frame_focus_managed_back_does_not_cover_layers_button() {
                     PointerEvent {
                         id: 9,
                         phase,
-                        position: [120., 24.]
+                        position: point
                     },
                     1
                 )
                 .unwrap()
         );
     }
-    assert!(
+    assert_eq!(
         client
             .active
             .as_ref()
@@ -2657,7 +2601,8 @@ fn frame_focus_managed_back_does_not_cover_layers_button() {
             .designer
             .as_ref()
             .unwrap()
-            .layers_open
+            .workspace_task(),
+        super::super::oib_workspace::Task::Layers
     );
 }
 
@@ -2860,27 +2805,12 @@ fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
 fn frame_focus_split_buttons_and_color_swatches_keep_their_declared_widths() {
     let mut client = mounted_six_panel_fixture(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.designer_action(LocalAction::Layers).unwrap();
-    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
-    let scope = *d
-        .actions
-        .iter()
-        .find(|(_, a)| **a == LocalAction::TreeScope(HierarchyScope::Composition))
-        .unwrap()
-        .0;
-    assert_eq!(
-        client
-            .scene()
-            .unwrap()
-            .path(scope)
-            .unwrap()
-            .last()
-            .unwrap()
-            .node
-            .frame
-            .width,
-        140.
-    );
+    client
+        .designer_activate(super::super::oib_workspace::TAB_LAYERS)
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let scope = scene.path(super::super::oib_workspace::TAB_LAYERS).unwrap();
+    assert_eq!(scope.last().unwrap().node.frame.width, 96.);
     client
         .inspect_oib_selection(Selection::Object(ObjectAddress {
             instance: InstanceId(20),
@@ -2888,7 +2818,9 @@ fn frame_focus_split_buttons_and_color_swatches_keep_their_declared_widths() {
             node: NodeId(1),
         }))
         .unwrap();
-    client.designer_action(LocalAction::Layers).unwrap();
+    client
+        .designer_activate(super::super::oib_workspace::TAB_INSPECT)
+        .unwrap();
     let action = LocalAction::Apply(editor_address(2));
     let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
     let apply = *d.actions.iter().find(|(_, a)| **a == action).unwrap().0;
@@ -2956,7 +2888,9 @@ fn frame_focus_outlined_keyboard_and_both_panes_keep_combined_limits() {
                 node: NodeId(1),
             }))
             .unwrap();
-        client.designer_action(LocalAction::Layers).unwrap();
+        client
+            .designer_activate(super::super::oib_workspace::TAB_LAYERS)
+            .unwrap();
         {
             let m = client.active.as_mut().unwrap();
             let d = m.designer.as_mut().unwrap();
@@ -3013,63 +2947,23 @@ fn frame_focus_outlined_keyboard_and_both_panes_keep_combined_limits() {
 }
 
 #[test]
-fn desktop_studio_keeps_three_panels_and_resizes_locally_with_cancel() {
-    use super::super::oib_focus_layout::{PROFILE, RESIZE_LEFT, RESIZE_RIGHT};
+fn responsive_workspace_tabs_have_real_hits_and_cancel_without_switching() {
+    use super::super::oib_workspace::{TAB_INSPECT, TAB_LAYERS, TAB_LIBRARY, Task};
     let mut client = mounted_six_panel_fixture(true);
     client.set_viewport([1280., 800.]).unwrap();
-    let generation = client.active.as_ref().unwrap().doc.oib_generation();
-    let state = client.active.as_ref().unwrap().doc.oib_root();
-    assert!(client.set_oib_designer_studio(true).unwrap());
-    let seed = crate::canvas::oib::seed(&client.active.as_ref().unwrap().ui).unwrap();
-    let hierarchy = u32::from(seed.designer.as_ref().unwrap().hierarchy_viewport.unwrap());
-    let inspector = u32::from(seed.inspector_viewport);
-    let preview = u32::from(seed.instance_surface.as_ref().unwrap().preview_viewport);
-    let scene = client.scene().unwrap();
-    assert_eq!(
-        scene.path(hierarchy).unwrap().last().unwrap().origin,
-        [32., 144.]
-    );
-    assert_eq!(
-        scene.path(preview).unwrap().last().unwrap().origin,
-        [352., 80.]
-    );
-    assert_eq!(
-        scene
-            .path(inspector)
-            .unwrap()
-            .last()
-            .unwrap()
-            .node
-            .frame
-            .width,
-        320.
-    );
-    assert!(scene.controls().iter().any(|c| {
-        scene
-            .path(c.node.id)
-            .unwrap()
-            .iter()
-            .any(|p| p.node.id == hierarchy)
-    }));
-    assert!(scene.controls().len() <= 128);
-    for (handle, dx, cancel) in [(RESIZE_LEFT, 80., false), (RESIZE_RIGHT, -64., true)] {
+    let before = client.active.as_ref().unwrap().doc.oib_root();
+    for (tab, task) in [
+        (TAB_LIBRARY, Task::Library),
+        (TAB_LAYERS, Task::Layers),
+        (TAB_INSPECT, Task::Inspect),
+    ] {
         let scene = client.scene().unwrap();
-        let handle_path = scene.path(handle).unwrap();
-        let pos = handle_path.last().unwrap().origin;
-        let point = [pos[0] + 8., pos[1] + 200.];
-        let before = client.designer_studio.widths;
-        for (phase, offset) in [
-            (PointerPhase::Down, 0.),
-            (PointerPhase::Move, dx),
-            (
-                if cancel {
-                    PointerPhase::Cancel
-                } else {
-                    PointerPhase::Up
-                },
-                dx,
-            ),
-        ] {
+        let path = scene.path(tab).unwrap();
+        let n = path.last().unwrap();
+        let point = [n.origin[0] + 24., n.origin[1] + 24.];
+        assert!(scene.hit_path(point).iter().any(|n| n.node.id == tab));
+        assert_eq!([n.node.frame.width, n.node.frame.height], [96., 48.]);
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
             assert!(
                 client
                     .pointer_at(
@@ -3077,41 +2971,68 @@ fn desktop_studio_keeps_three_panels_and_resizes_locally_with_cancel() {
                         PointerEvent {
                             id: 4,
                             phase,
-                            position: [point[0] + offset, point[1]],
+                            position: point
                         },
                         10
                     )
                     .unwrap()
             );
         }
-        if cancel {
-            assert_eq!(client.designer_studio.widths, before);
-        } else {
-            assert_eq!(client.designer_studio.widths[0], 400.);
-        }
-        assert!(!client.input_busy());
-        assert!(client.scene().unwrap().controls().len() <= 128);
+        assert_eq!(
+            client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .workspace_task(),
+            task
+        );
     }
-    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), state);
+    let scene = client.scene().unwrap();
+    let path = scene.path(TAB_LIBRARY).unwrap();
+    let n = path.last().unwrap();
+    let point = [n.origin[0] + 24., n.origin[1] + 24.];
+    for phase in [PointerPhase::Down, PointerPhase::Cancel] {
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 4,
+                    phase,
+                    position: point,
+                },
+                11,
+            )
+            .unwrap();
+    }
     assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_generation(),
-        generation
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .workspace_task(),
+        Task::Inspect
     );
-    assert!(client.designer_activate(PROFILE).unwrap().unwrap());
-    assert!(!client.designer_studio.enabled);
-    assert!(client.designer_activate(PROFILE).unwrap().unwrap());
-    assert_eq!(client.designer_studio.widths[0], 400.);
+    assert!(!client.input_busy());
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), before);
 }
 
 #[test]
-fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
+fn responsive_workspace_tasks_and_editor_keep_clips_and_scene_budgets() {
     let mut maximum_nodes = 0;
     let mut maximum_controls = 0;
     for viewport in [[800., 1280.], [1280., 800.], [1920., 1080.]] {
-        for widths in [[320., 352.], [480., 560.]] {
+        for task in [
+            super::super::oib_workspace::TAB_LAYERS,
+            super::super::oib_workspace::TAB_INSPECT,
+        ] {
             let mut client = mounted_six_panel_fixture(true);
             client.set_viewport(viewport).unwrap();
-            client.set_oib_designer_studio(true).unwrap();
             client
                 .inspect_oib_selection(Selection::Object(ObjectAddress {
                     instance: InstanceId(20),
@@ -3122,7 +3043,6 @@ fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
             {
                 let m = client.active.as_mut().unwrap();
                 let d = m.designer.as_mut().unwrap();
-                d.studio.widths = widths;
                 d.tree_closed.clear();
                 d.revision = None;
                 m.refresh_designer().unwrap();
@@ -3130,7 +3050,7 @@ fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
             }
             let before = client.active.as_ref().unwrap().doc.oib_root();
             for keyboard in [false, true] {
-                eprintln!("Studio case {viewport:?} widths={widths:?} keyboard={keyboard}");
+                client.designer_activate(task).unwrap();
                 let field = keyboard.then(|| focus_property(&mut client, 2));
                 let limits: Vec<_> = client
                     .active
@@ -3147,9 +3067,7 @@ fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
                     for second in [0., 303., 305., 607., limits[1]] {
                         fixture_scroll_to(&mut client, 0, first);
                         fixture_scroll_to(&mut client, 1, second);
-                        let scene = client
-                            .scene()
-                            .expect("both Studio panes and six roots admit");
+                        let scene = client.scene().expect("task pane and six roots admit");
                         maximum_nodes = maximum_nodes.max(count_nodes(scene.root()));
                         maximum_controls = maximum_controls.max(scene.controls().len());
                         assert!(count_nodes(scene.root()) <= 512);
@@ -3158,6 +3076,9 @@ fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
                         for panel in &d.panels {
                             let path = scene.path(u32::from(panel.viewport)).unwrap();
                             let p = path.last().unwrap();
+                            if p.origin[0] < 0. {
+                                continue;
+                            }
                             let parent = path[path.len() - 2];
                             assert!(
                                 p.origin[1] + p.node.frame.height
@@ -3178,114 +3099,31 @@ fn desktop_studio_expanded_panes_and_editor_keep_clips_and_combined_budgets() {
         }
     }
     eprintln!(
-        "Studio six-root joint panel cases: maximum {maximum_nodes} nodes/{maximum_controls} controls"
+        "Responsive six-root panel cases: maximum {maximum_nodes} nodes/{maximum_controls} controls"
     );
 }
 
 #[test]
-fn desktop_studio_resize_limits_pointer_identity_and_hidden_handles_are_safe() {
-    use super::super::oib_focus_layout::{RESIZE_LEFT, RESIZE_RIGHT};
+fn responsive_workspace_chrome_has_no_retired_profile_or_divider_controls() {
     let mut client = mounted_six_panel_fixture(true);
-    client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
-    let before = client.active.as_ref().unwrap().doc.oib_root();
-    for (id, delta, expected) in [(RESIZE_LEFT, 2000., 480.), (RESIZE_RIGHT, -2000., 560.)] {
+    for viewport in [[800., 1280.], [1280., 800.], [1920., 1080.]] {
+        client.set_viewport(viewport).unwrap();
         let scene = client.scene().unwrap();
-        let path = scene.path(id).unwrap();
-        let p = path.last().unwrap();
-        let pos = [p.origin[0] + 8., p.origin[1] + 20.];
-        client
-            .pointer_at(
-                client.epoch(),
-                PointerEvent {
-                    id: 9,
-                    phase: PointerPhase::Down,
-                    position: pos,
-                },
-                1,
-            )
-            .unwrap();
-        // A second pointer cannot release or retarget the captured divider.
         assert!(
-            !client
-                .pointer_at(
-                    client.epoch(),
-                    PointerEvent {
-                        id: 10,
-                        phase: PointerPhase::Up,
-                        position: pos
-                    },
-                    2
-                )
-                .unwrap()
+            scene
+                .controls()
+                .iter()
+                .all(|c| c.node.id < 2_690_000_000 || c.node.id >= 2_700_000_000)
         );
-        for phase in [PointerPhase::Move, PointerPhase::Up] {
-            client
-                .pointer_at(
-                    client.epoch(),
-                    PointerEvent {
-                        id: 9,
-                        phase,
-                        position: [pos[0] + delta, pos[1]],
-                    },
-                    3,
-                )
-                .unwrap();
-        }
-        let side = usize::from(id == RESIZE_RIGHT);
-        assert_eq!(client.designer_studio.widths[side], expected);
-        assert!(!client.input_busy());
+        assert!(count_nodes(scene.root()) <= 512);
+        assert!(scene.controls().len() <= 128);
     }
-    // Host blur/cancel restores the same preference as a pointer Cancel. A
-    // later profile switch must not resurrect a canceled preview width.
-    let widths = client.designer_studio.widths;
-    let scene = client.scene().unwrap();
-    let path = scene.path(RESIZE_LEFT).unwrap();
-    let p = path.last().unwrap();
-    let pos = [p.origin[0] + 8., p.origin[1] + 20.];
-    for (phase, delta) in [(PointerPhase::Down, 0.), (PointerPhase::Move, -80.)] {
-        client
-            .pointer_at(
-                client.epoch(),
-                PointerEvent {
-                    id: 9,
-                    phase,
-                    position: [pos[0] + delta, pos[1]],
-                },
-                4,
-            )
-            .unwrap();
-    }
-    assert_ne!(client.designer_studio.widths, widths);
-    client.cancel().unwrap();
-    assert_eq!(client.designer_studio.widths, widths);
-    assert!(!client.input_busy());
-    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), before);
-    client.set_oib_designer_studio(false).unwrap();
-    let scene = client.scene().unwrap();
-    assert!(
-        !scene
-            .controls()
-            .iter()
-            .any(|p| [RESIZE_LEFT, RESIZE_RIGHT].contains(&p.node.id))
-    );
-    assert!(!client.activate(client.epoch(), RESIZE_LEFT).unwrap());
-    client.set_oib_designer_studio(true).unwrap();
-    assert_eq!(
-        client
-            .active
-            .as_ref()
-            .unwrap()
-            .designer
-            .as_ref()
-            .unwrap()
-            .studio
-            .widths,
-        widths
-    );
 }
 
 fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
+    client
+        .designer_activate(super::super::oib_workspace::TAB_LIBRARY)
+        .unwrap();
     let (id, y) = {
         let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
         let row = d.panels[0]
@@ -3294,7 +3132,7 @@ fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
             .find(|n| n.semantics.as_ref().is_some_and(|s| s.label == label))
             .unwrap_or_else(|| {
                 panic!(
-                    "Missing Studio tool: {label}; confirmed={} status={} factories={:?}",
+                    "Missing workspace tool: {label}; confirmed={} status={} factories={:?}",
                     client.active.as_ref().unwrap().doc.confirmed(),
                     client.active.as_ref().unwrap().doc.oib_status_text(),
                     client.active.as_ref().unwrap().doc.oib_canvas_factories()
@@ -3319,6 +3157,9 @@ fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
     id
 }
 fn activate_studio_root(client: &mut Client, instance: u64) {
+    client
+        .designer_activate(super::super::oib_workspace::TAB_LAYERS)
+        .unwrap();
     let selection = client
         .active
         .as_ref()
@@ -3366,10 +3207,9 @@ fn activate_studio_root(client: &mut Client, instance: u64) {
 }
 
 #[test]
-fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting() {
+fn responsive_workspace_visible_palette_authors_power_and_reorders_without_retargeting() {
     let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let temporary: Vec<_> = client
         .active
         .as_ref()
@@ -3581,12 +3421,11 @@ fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting
 }
 
 #[test]
-fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties() {
-    use super::super::oib_focus_layout::PROPERTIES_TITLE;
+fn responsive_workspace_structural_rejection_stays_visible_above_scrolled_properties() {
+    use super::super::oib_workspace::PROPERTIES_TITLE;
     use otrios_interfaces::oib::authoring::EditBatch as InstanceOperation;
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     fixture_scroll_to(&mut client, 1, 600.);
     assert!(
         client
@@ -3653,7 +3492,7 @@ fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties()
     let title_path = scene.path(PROPERTIES_TITLE).unwrap();
     let title = title_path.last().unwrap();
     assert!(
-        matches!(&title.node.primitive, Primitive::Text { value, color, .. } if value == "Change rejected" && *color == ACCENT)
+        matches!(&title.node.primitive, Primitive::Text { value, color, .. } if value == "Change rejected" && *color == super::super::oib_workspace::Appearance::Dark.palette().text)
     );
     let m = client.active.as_ref().unwrap();
     let d = m.designer.as_ref().unwrap();
@@ -3689,7 +3528,7 @@ fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties()
     let scene = client.scene().unwrap();
     let title = scene.path(PROPERTIES_TITLE).unwrap();
     assert!(
-        matches!(&title.last().unwrap().node.primitive, Primitive::Text { value, color, .. } if value == "Properties" && *color == WHITE)
+        matches!(&title.last().unwrap().node.primitive, Primitive::Text { value, color, .. } if value == "Inspect" && *color == super::super::oib_workspace::Appearance::Dark.palette().text)
     );
     assert!(
         client
@@ -3716,7 +3555,7 @@ fn studio_scene_control(client: &Client, label: &str) -> (u32, [f32; 2]) {
         .controls()
         .into_iter()
         .find(|p| p.node.semantics.as_ref().is_some_and(|s| s.label == label))
-        .unwrap_or_else(|| panic!("Missing visible Studio control {label}"));
+        .unwrap_or_else(|| panic!("Missing visible workspace control {label}"));
     (
         control.node.id,
         [
@@ -3727,10 +3566,9 @@ fn studio_scene_control(client: &Client, label: &str) -> (u32, [f32; 2]) {
 }
 
 #[test]
-fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_safely() {
+fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_power_safely() {
     let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let temporary: Vec<_> = client
         .active
         .as_ref()
@@ -4063,10 +3901,9 @@ fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_
 }
 
 #[test]
-fn desktop_studio_component_management_respects_test_readonly_and_fixed_ownership() {
+fn responsive_workspace_component_management_respects_test_readonly_and_fixed_ownership() {
     let mut client = mounted_six_panel_fixture(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let has_delete = |c: &Client| {
         c.scene().unwrap().controls().iter().any(|p| {
             p.node
@@ -4120,10 +3957,9 @@ fn desktop_studio_component_management_respects_test_readonly_and_fixed_ownershi
 }
 
 #[test]
-fn desktop_studio_info_disclosure_has_visible_open_closed_state() {
+fn responsive_workspace_info_disclosure_has_visible_open_closed_state() {
     let mut client = mounted_six_panel_fixture(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     client
         .inspect_oib_selection(Selection::Object(ObjectAddress {
             instance: InstanceId(20),
@@ -4158,7 +3994,7 @@ fn desktop_studio_info_disclosure_has_visible_open_closed_state() {
         );
         assert_eq!(semantics.checked, expanded);
         assert!(
-            matches!(&button.children[1].primitive, Primitive::Text { value, color, .. } if value == if expanded { "v Info" } else { "> Info" } && *color == if expanded { ACCENT } else { WHITE })
+            matches!(&button.children[1].primitive, Primitive::Text { value, color, .. } if value == if expanded { "v Info" } else { "> Info" } && *color == if expanded { super::super::oib_workspace::Appearance::Dark.palette().background } else { super::super::oib_workspace::Appearance::Dark.palette().role(WHITE) })
         );
         assert!(client.activate(client.epoch(), id).unwrap());
         assert_eq!(
@@ -4179,10 +4015,9 @@ fn desktop_studio_info_disclosure_has_visible_open_closed_state() {
 }
 
 #[test]
-fn desktop_studio_delete_release_after_remote_removal_keeps_replacement_safe() {
+fn responsive_workspace_delete_release_after_remote_removal_keeps_replacement_safe() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let target = match &client
         .active
         .as_ref()
@@ -4292,10 +4127,9 @@ fn desktop_studio_delete_release_after_remote_removal_keeps_replacement_safe() {
 }
 
 #[test]
-fn desktop_studio_delete_discards_own_dirty_draft_and_retains_unrelated_draft() {
+fn responsive_workspace_delete_discards_own_dirty_draft_and_retains_unrelated_draft() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     client
         .inspect_oib_selection(Selection::Object(ObjectAddress {
             instance: InstanceId(20),
@@ -4421,10 +4255,9 @@ fn desktop_studio_delete_discards_own_dirty_draft_and_retains_unrelated_draft() 
 }
 
 #[test]
-fn desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_targets() {
+fn responsive_workspace_shared_definition_tools_preserve_instances_values_and_stale_targets() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let fields = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
     let allocations = authority.oib_allocations().unwrap();
     let values = authority.oib_values(2).unwrap();
@@ -4520,11 +4353,10 @@ fn desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_ta
 }
 
 #[test]
-fn desktop_studio_design_fields_retain_stale_drafts_and_create_editable_components() {
+fn responsive_workspace_design_fields_retain_stale_drafts_and_create_editable_components() {
     use otrios_interfaces::oib::authoring::{DefinitionBatch, DefinitionEdit};
     let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
     client
         .inspect_oib_selection(Selection::Definition(DefinitionId(10)))
@@ -4638,10 +4470,9 @@ fn desktop_studio_design_fields_retain_stale_drafts_and_create_editable_componen
 }
 
 #[test]
-fn desktop_studio_connects_an_unbound_preset_through_visible_source_choices() {
+fn responsive_workspace_connects_an_unbound_preset_through_visible_source_choices() {
     let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
-    client.set_oib_designer_studio(true).unwrap();
     client
         .inspect_oib_selection(Selection::Definition(DefinitionId(12)))
         .unwrap();
@@ -5158,7 +4989,10 @@ fn compatible_library_activation_waits_for_held_slider_and_final_receipt_without
         .edit_oib_property(&label, Some(Value::Text("Pinned volume".into())))
         .unwrap();
     pump(&mut client, &mut authority, &mut session);
-    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    // This exercises a running app's final state receipt. Designer Test now
+    // uses isolated sample values and therefore cannot exercise app writes.
+    client.active.as_mut().unwrap().designer = None;
+    client.active.as_mut().unwrap().invalidate();
     client.set_viewport([1280., 800.]).unwrap();
     let override_version = client
         .active

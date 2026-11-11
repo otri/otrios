@@ -8,8 +8,8 @@ mod host_moves;
 mod host_panel;
 mod host_transfers;
 mod oib_designer;
-mod oib_focus_layout;
 mod oib_property_editor;
+mod oib_workspace;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -59,8 +59,19 @@ struct CaptureValidation {
     access: (bool, bool, bool),
     quit_control: Option<u8>,
     binding: Option<otrios_interfaces::canvas::MountBinding>,
-    projection: Option<(bool, bool, bool, oib_focus_layout::Studio)>,
+    projection: Option<(
+        bool,
+        bool,
+        oib_workspace::Task,
+        otrios_interfaces::oib::designer::DesignerMode,
+        oib_workspace::Appearance,
+    )>,
     backdrop: Option<SceneNode>,
+}
+struct DesignerPreview {
+    generation: Option<u64>,
+    admitted: Option<Vec<u8>>,
+    doc: StateAdapter,
 }
 struct Mount {
     epoch: u32,
@@ -74,6 +85,8 @@ struct Mount {
     oib_selected: Option<u64>,
     designer: Option<oib_designer::Designer>,
     doc: StateAdapter,
+    // Never used for synchronization; sample values exist only during Test.
+    designer_preview: Option<DesignerPreview>,
     behavior: Option<Behavior>,
     component_runtime: Arc<super::component_behavior::Runtime>,
     components: super::oib::component_behaviors::Instances,
@@ -227,7 +240,6 @@ pub struct ResourceUsage {
 #[derive(Default)]
 pub struct Client {
     component_runtime: Arc<super::component_behavior::Runtime>,
-    designer_studio: oib_focus_layout::Studio,
     transfer_caps: super::host_ui::transfers::Capabilities,
     transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
     next_transfer: u32,
@@ -2732,6 +2744,8 @@ impl Client {
             current.visible = candidate.visible;
             current.view = candidate.view;
             current.quit_control = candidate.quit_control;
+            current.sync_designer_preview()?;
+            current.visible = selected_values(&current)?;
             current.invalidate();
             candidate = current;
         }
@@ -2789,7 +2803,6 @@ impl Client {
             chat.managed(candidate.quit_control);
         }
         if let Some(d) = &mut candidate.designer {
-            d.studio = self.designer_studio;
             d.invalidate_bounds();
             candidate.invalidate();
         }
@@ -2999,6 +3012,23 @@ impl Client {
         {
             return Ok(false);
         }
+        if self.active.as_ref().is_some_and(Mount::designer_testing)
+            && !matches!(
+                h.operation,
+                Operation::Set
+                    | Operation::Toggle
+                    | Operation::Cycle(_)
+                    | Operation::Focus
+                    | Operation::Key(_)
+            )
+        {
+            // Test has no navigation, source-edit, chat or business side effects.
+            return Ok(false);
+        }
+        self.active
+            .as_mut()
+            .ok_or("No Canvas")?
+            .sync_designer_preview()?;
         if self
             .active
             .as_ref()
@@ -3016,16 +3046,25 @@ impl Client {
             ));
             let m = self.active.as_mut().ok_or("No Canvas")?;
             m.component_calls = m.component_calls.saturating_add(1);
+            let doc = if m.designer_testing() {
+                &mut m
+                    .designer_preview
+                    .as_mut()
+                    .ok_or("Missing Designer Test fixture")?
+                    .doc
+            } else {
+                &mut m.doc
+            };
             match m
                 .components
-                .dispatch(&m.ui, &mut m.doc, control, event, capture_allowed)
+                .dispatch(&m.ui, doc, control, event, capture_allowed)
             {
                 Ok(outcome) => {
                     if outcome.capture == Some(false) {
                         m.input.cancel_pointer(event.pointer);
                         m.captured_handlers.remove(&event.pointer);
                         m.capture_validation = None;
-                        m.doc.flush_pending();
+                        m.sample_doc_mut()?.flush_pending();
                     }
                     let changed = if outcome.changed { m.refresh()? } else { false };
                     return Ok(changed || outcome.changed);
@@ -3037,7 +3076,7 @@ impl Client {
                     m.input.cancel_pointer(event.pointer);
                     m.captured_handlers.remove(&event.pointer);
                     m.capture_validation = None;
-                    m.doc.flush_pending();
+                    m.sample_doc_mut()?.flush_pending();
                     return Ok(true);
                 }
             }
@@ -3176,9 +3215,9 @@ impl Client {
             return Err("Behavior exceeded event field scope".into());
         }
         if h.kind != GestureKind::Activate {
-            m.doc.defer(&commands)?;
+            m.sample_doc_mut()?.defer(&commands)?;
             m.refresh()
-        } else if m.doc.set(&commands)? {
+        } else if m.sample_doc_mut()?.set(&commands)? {
             m.refresh()
         } else {
             Ok(false)
@@ -3451,7 +3490,7 @@ impl Client {
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
-            m.doc.flush_pending();
+            m.sample_doc_mut()?.flush_pending();
         }
         Ok(changed)
     }
@@ -3539,6 +3578,9 @@ impl Client {
         }
         match d.action {
             Some(Action::AppNavigate(id)) => {
+                if self.active.as_ref().is_some_and(Mount::designer_testing) {
+                    return Ok(false);
+                }
                 if let Some(n) = self
                     .active
                     .as_ref()
@@ -3796,8 +3838,8 @@ impl Client {
         let editor = m.editors.get_mut(&field).ok_or("Undeclared editor")?;
         let changed = editor.edit(edit);
         if changed {
-            m.doc
-                .set_typed(&[(field, Value::Text(editor.text().into()))])?;
+            let value = Value::Text(editor.text().into());
+            m.sample_doc_mut()?.set_typed(&[(field, value)])?;
             m.refresh()?;
             m.invalidate();
         }
@@ -3837,7 +3879,6 @@ impl Client {
         if let Some(m) = &mut self.active {
             if let Some(designer) = &mut m.designer {
                 designer.cancel();
-                self.designer_studio = designer.studio;
             }
             if let Some(scroll) = &mut m.preview_scroll {
                 scroll.cancel();
@@ -4067,7 +4108,8 @@ impl Client {
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active.as_mut().map_or_else(Vec::new, |m| {
-            if self.managed_transport && m.binding.is_none()
+            if m.designer_testing()
+                || self.managed_transport && m.binding.is_none()
                 || m.binding.as_ref().is_some_and(|b| !b.editable)
             {
                 return vec![];
@@ -4228,6 +4270,66 @@ impl Mount {
         self.layout_scene.take();
         self.invalidate_presentation();
     }
+    fn designer_testing(&self) -> bool {
+        self.designer.is_some() && !self.designer_editing()
+    }
+    /// Reset the fixture on entry, exit, and activation of new authored source.
+    /// The live adapter remains mounted so remote receipts always reach it.
+    pub(super) fn sync_designer_preview(&mut self) -> Result<()> {
+        let testing = self.designer_testing();
+        if testing
+            && (self.designer_preview.is_none() || !self.oib_activation_blocked())
+            && self.designer_preview.as_ref().is_none_or(|preview| {
+                preview.generation != self.oib_generation
+                    || preview.admitted != self.doc.admitted_oib_hash()
+            })
+        {
+            let components = super::oib::component_behaviors::Instances::prepare(
+                &self.ui,
+                &self.layout,
+                &self.component_runtime,
+                None,
+            )?;
+            self.designer_preview = Some(DesignerPreview {
+                generation: self.oib_generation,
+                admitted: self.doc.admitted_oib_hash(),
+                doc: self.doc.preview_clone(),
+            });
+            self.components = components;
+            self.invalidate_local_scene();
+        } else if !testing && self.designer_preview.is_some() {
+            let components = super::oib::component_behaviors::Instances::prepare(
+                &self.ui,
+                &self.layout,
+                &self.component_runtime,
+                None,
+            )?;
+            self.designer_preview = None;
+            self.components = components;
+            self.invalidate_local_scene();
+        }
+        Ok(())
+    }
+    fn sample_doc(&self) -> &StateAdapter {
+        if self.designer_testing() {
+            self.designer_preview
+                .as_ref()
+                .map_or(&self.doc, |preview| &preview.doc)
+        } else {
+            &self.doc
+        }
+    }
+    fn sample_doc_mut(&mut self) -> Result<&mut StateAdapter> {
+        if self.designer_testing() {
+            Ok(&mut self
+                .designer_preview
+                .as_mut()
+                .ok_or("Missing Designer Test fixture")?
+                .doc)
+        } else {
+            Ok(&mut self.doc)
+        }
+    }
     fn number(&self, id: u16) -> Result<u16> {
         match self.read(id)? {
             Value::Number(n) => Ok(n as u16),
@@ -4239,7 +4341,7 @@ impl Mount {
             .get(&id)
             .cloned()
             .map(Ok)
-            .unwrap_or_else(|| self.doc.typed_value(id))
+            .unwrap_or_else(|| self.sample_doc().typed_value(id))
     }
     fn invalidate(&mut self) {
         if let Some(chat) = &mut self.chat {
@@ -4373,9 +4475,14 @@ impl Mount {
             oib_changed = true;
         }
         oib_changed |= self.refresh_designer()?;
+        self.sync_designer_preview()?;
         self.oib_paint_refresh = false;
+        let sample_doc = self
+            .designer_preview
+            .as_ref()
+            .map_or(&self.doc, |preview| &preview.doc);
         for (id, editor) in &mut self.editors {
-            if let Value::Text(text) = self.doc.typed_value(*id)?
+            if let Value::Text(text) = sample_doc.typed_value(*id)?
                 && editor.text() != text
             {
                 editor.replace(&text);
@@ -4425,9 +4532,10 @@ impl Mount {
             projection: self.designer.as_ref().map(|d| {
                 (
                     d.focus_layout(),
-                    d.layers_open(),
                     d.management_visible(),
-                    d.studio,
+                    d.workspace_task(),
+                    d.workspace_mode(),
+                    d.appearance(),
                 )
             }),
             backdrop: self.host_backdrop.clone(),
@@ -4459,9 +4567,10 @@ impl Mount {
             || self.designer.as_ref().map(|d| {
                 (
                     d.focus_layout(),
-                    d.layers_open(),
                     d.management_visible(),
-                    d.studio,
+                    d.workspace_task(),
+                    d.workspace_mode(),
+                    d.appearance(),
                 )
             }) != capture.projection
             || self.host_backdrop != capture.backdrop
@@ -5014,6 +5123,7 @@ fn qualify(
         oib_view: None,
         oib_selected: None,
         doc,
+        designer_preview: None,
         behavior,
         component_runtime,
         components: Default::default(),
@@ -5252,13 +5362,14 @@ fn resolve_layout_arc(m: &Mount, incremental: bool) -> Result<Arc<Scene>> {
                 .find(|h| matches!(h.operation, Operation::Back))
                 .map(|h| h.control)
         });
-        Arc::new(oib_focus_layout::project(
+        Arc::new(oib_workspace::project(
             &scene,
             seed,
             back,
-            designer.layers_open(),
             m.keyboard.visible,
-            designer.studio,
+            designer.workspace_task(),
+            designer.workspace_mode(),
+            designer.appearance(),
             designer.management_visible(),
         )?)
     } else {
@@ -5305,6 +5416,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
                     ""
                 }
             ),
+            m.doc.confirmed() && !m.doc.oib_saving(),
         )?;
         if let Some(font) = &m.font {
             designer.present_editor_fields(&mut root, font);
@@ -5521,7 +5633,9 @@ fn move_item(m: &mut Mount, node: u16, target: usize) -> Result<bool> {
     let Ok(key) = reflow::between(left.as_deref(), right.as_deref(), item.field) else {
         return Ok(false);
     };
-    if m.doc.set_typed(&[(item.field, Value::Text(key))])? {
+    if m.sample_doc_mut()?
+        .set_typed(&[(item.field, Value::Text(key))])?
+    {
         m.refresh()
     } else {
         Ok(false)
