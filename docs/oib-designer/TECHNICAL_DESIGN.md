@@ -588,3 +588,23 @@ styles, catalog qualification and live Frame/Web acceptance remain open.
 Implementation entry points are `canvas/state/oib/apply.rs`,
 `client/oib_working_copy.rs`, `client/oib_editor.rs` and `oib/graph_preview.rs`;
 finish those gates and focused validation before the signed deployment workflow.
+
+### T14.1 Live boundary and remaining gates
+
+The initial B5 working-copy/Apply/leave slice is now live on Frame/Web at code
+`a5b1e3a`, release `4faf7ae090027833d1a3773236b2a790928a9ba42adb43a18311f5e40295e3ab`.
+Live pointer acceptance required a correction to outside-panel toolbar capture;
+one action classification now serves both Down and matching Up validation.
+Designer68 passed (one ignored timing diagnostic), guest14, Apply11, preview12,
+leave3, real macOS process/WebSocket1 and browser session/update22 passed. Live
+Frame/browser edits confirmed generations31/32 with no insertion for preview,
+no private publication before Apply, and working Stay/Discard barriers.
+
+This does not close full B5 or desktop/canvas visual qualification. Local history
+must restore selection; post-Apply history is still conditional-work pending.
+Typed API/slots, imported linking, dependency impact/retirement/replacement and
+full style/mode resolution remain open. The 1920 browser observation initially
+retained uniform fit of the 1280 scene; validate the settled viewport adapter.
+Snapshot capture timed out and alternate browser access was unavailable, so
+visual capture/human native touch/color acceptance remains unproven. See the
+final IMPLEMENTATION.md restart list for authoritative next work.

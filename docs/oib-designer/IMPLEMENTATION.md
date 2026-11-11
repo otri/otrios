@@ -75,8 +75,7 @@ final cross-contract choices and validation. The geometry role owns a new
 `oib_workspace.rs`; the sample-adapter role owns client.rs and its narrowly scoped
 state clone API. They share the working tree with disjoint file ownership.
 
-Current: B1–B3 are live (see acceptance below); B4 initial runtime/UI implementation
-is validated locally and preparing for live publication. Retired the host profile selector, divider
+Current: B1–B4 initial runtime/UI slices and the initial B5 working-copy/Apply/leave slice are live; see the most recent acceptance record below. Full B4–B7 gates remain open. Retired the host profile selector, divider
 resize state and old projection module. Test uses a transportless sample fork and
 waits for captured input before adopting changed source. One shared status waits
 for confirmation; the inspector no longer repeats a Saved row.
@@ -261,7 +260,9 @@ Final targeted tests: layout editor 4/4; Designer 63 passed plus one pre-existin
 ignored timing diagnostic; strict core Clippy passed. No further folder inventory
 or broad source scan is needed; the user explicitly requested targeted files only.
 
-## Next B5 restart map and decisions
+## Historical B5 planning record
+
+The atomic boundary and private preview below have since been implemented. Use the final B5 acceptance/restart section for current work.
 
 Use already-identified files; do not repeat repository-wide inventories.
 `canvas/state/oib/structure.rs::{oib_validate_structure,oib_structure_write}` stages
@@ -354,3 +355,84 @@ A real Client pointer regression now covers New/Undo/Redo/Discard/Apply,
 release-outside and Cancel, proving no publication until Apply. Final Designer
 suite: **68 passed**, one existing ignored diagnostic; strict core library Clippy
 passed. The corrected release still requires live pointer acceptance below.
+
+## Corrected B5 live acceptance — 2026-11-11
+
+Code commit `a5b1e3a9a68f30f5b727821ec584da347719a230` is published as
+`4faf7ae090027833d1a3773236b2a790928a9ba42adb43a18311f5e40295e3ab`.
+Both Frame and attached browser activated that exact release. The automatic
+builder was restored and its source pin advanced to the completed code commit.
+Protocol: state v33/control v1. No PR or broad preflight was opened/run.
+
+Actual focused browser/native behavior:
+
+- At 1280×800, actual pointer clicks New → Undo → Redo → Discard changed the local
+  copy without changing the authority's generation 30. New immediately opened an
+  unused definition preview; no app Insert was needed. Redo restored the source,
+  but after undoing creation the selection remained Document: history selection
+  restoration is still a follow-up, not completed UX.
+- A calibrated synthetic native evdev New tap selected private definition 68,
+  reported reload_ready=false, zero guest instances/errors in its blank preview,
+  and retained shared generation 30 and the same three app instances. Native
+  Discard returned to Document, reload_ready=true and unchanged shared state.
+- The browser created definition 68, set W456 and renamed it `B5 live component`.
+  Enter staged each field locally. One global Apply confirmed generation 31;
+  the Frame received it without a new app instance. Native Library scrolling and
+  selecting the shared component opened Definition(68) in Inspect.
+- Native Height Fixed then global Apply produced generation 32. The independent
+  browser received H48 alongside W456, with All changes applied. Frame ready
+  remained stream_ready/state_confirmed/reload_ready=true, input_busy=false and
+  zero guest errors. The Frame is left on this component in Inspect.
+- Browser W500 remained private. Back opened Apply/Discard/Stay; an underlying
+  Undo tap was blocked and inputs were removed. Stay retained W500. Back then
+  Discard navigated to Home without publication; the Frame stayed at generation
+  32. Fresh browser navigation showed original app Volume51% and Brightness57%
+  with All changes applied. The owned browser tab was closed.
+
+Native contacts were software-injected through the real accepted calibration,
+ABS_X/ABS_Y reader, shared input router and GLES host. This is not human physical
+touch/color qualification. The first harness attempt used MT coordinates, which
+this reader ignores; it was corrected to the actual reader's ABS coordinates.
+No calibration, service identity or role changed. Two immediate ready-probe SSH
+reads transiently failed; the later read confirmed the same running process and
+generation 32, so no process restart was inferred or performed.
+
+Visual/viewport limits: the preview snapshot tool timed out after definition
+editing (`Preview automation snapshot timed out after 15000ms`). DOM observations
+and pointer actions stayed responsive. The alternative CUA browser host reported
+unavailable. No new visual capture acceptance is claimed. A 1920×1080 CSS viewport
+was observed, but its first semantic geometry still showed a uniformly fitted
+1280×800 scene (96px controls became129.6px); recheck the settled browser viewport
+adapter before claiming final desktop responsive allocation. Returned to actual
+1280×800 before the remaining checks.
+
+### Restart here
+
+The working-copy slice is live; the full goal stays **active**. Do not rebuild or
+repeat folder inventories simply to recover context. Preserve untracked `work/`.
+Known runtime files: `client/oib_working_copy.rs`, `client/oib_editor.rs`,
+`client/oib_leave.rs`, `client/oib_designer.rs`, `state/oib/apply.rs`,
+`oib/graph_preview.rs`. The native input reader is linux-display `src/touch.c`;
+accepted surface mapping is core `dashboard/display.rs`, and native ready reports
+come from dashboard `native_worker.rs`. Use the existing private builder config,
+not a new service.
+
+Next concrete work:
+
+1. Restore selection coherently through local history; implement conditional
+   post-Apply Undo/Redo and before/local/current review, retaining exact contexts.
+2. Make Library tools/palette clear and compact: remove duplicate New component
+   affordance, admit imported exports for real LabelledSlider linking, and retain
+   visible dependency impact/blocked deletion/retirement/replacement journeys.
+3. Complete typed API/slots editing and RFC0037 descriptive variables/styles,
+   Light/Dark component modes and state recipes; generic legacy Accent remains
+   until that real resolver exists. Do not disguise chrome appearance as styling.
+4. Recheck actual large-browser viewport allocation and recover visual capture;
+   qualify representative controls/flows, wrapping/overflow/scroll/resource gates
+   with actual Frame/Web evidence. Prototype or local tests do not close these.
+
+Final focused correctness before the corrected release: Designer68 passed plus
+one existing ignored diagnostic; atomic Apply11; dedicated preview/clip12;
+component behavior14; leave3; real macOS authority-process/WebSocket test1;
+browser session/update22. Strict core library Clippy with `-D warnings` passed.
+No full repository preflight or full catalog acceptance is claimed.
