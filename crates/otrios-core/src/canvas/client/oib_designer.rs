@@ -2346,16 +2346,8 @@ impl Client {
     fn designer_new_component(&mut self) -> Result<bool> {
         let m = self.active.as_ref().ok_or("No Canvas")?;
         let seed = m.design_doc().oib_authoring_seed()?;
-        let doc = seed.designer.as_ref().ok_or("Missing designer")?;
-        let tools = authoring::tools(
-            m.design_doc(),
-            &seed,
-            &Selection::Document(doc.id),
-            &m.design_doc().oib_allocations()?,
-        )?;
-        let Some((_, op)) = tools
-            .into_iter()
-            .find(|(label, _)| label == "New component")
+        let Some(op) =
+            authoring::new_component(m.design_doc(), &seed, &m.design_doc().oib_allocations()?)?
         else {
             return Ok(false);
         };
@@ -2369,10 +2361,36 @@ impl Client {
         if !m.designer_editing() || m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
             return Ok(false);
         };
+        m.sync_working_copy()?;
+        m.remember_edit_location();
         let w = m.working_copy.as_mut().ok_or("Missing working copy")?;
         let changed = if redo { w.redo()? } else { w.undo()? };
+        let location = w.location();
+        let review = w.history_review().is_some();
+        if review {
+            m.show_history_review();
+            return Ok(true);
+        }
         if changed {
+            if let Some(location) = &location {
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.pending_selection = Some(location.selection.clone());
+            }
             m.working_changed()?;
+            if let Some(location) = location {
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.workspace_task = location.task;
+                if location.task != Task::Inspect {
+                    d.tree_scope = if location.task == Task::Library {
+                        HierarchyScope::Components
+                    } else {
+                        HierarchyScope::Composition
+                    };
+                }
+                d.revision = None;
+                m.refresh()?;
+                m.invalidate();
+            }
         }
         Ok(changed)
     }
@@ -2384,7 +2402,11 @@ impl Client {
         if m.working_copy.as_ref().is_some_and(|w| w.applying()) {
             return Ok(false);
         };
-        m.working_copy = Some(super::oib_working_copy::WorkingCopy::new(&m.doc)?);
+        if let Some(working) = &mut m.working_copy {
+            working.reset_to_live(&m.doc)?;
+        } else {
+            m.working_copy = Some(super::oib_working_copy::WorkingCopy::new(&m.doc)?);
+        }
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         let addresses: Vec<_> = d
             .drafts
@@ -2445,7 +2467,7 @@ impl Client {
         Ok(changed)
     }
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
-        if self.active.as_ref().is_some_and(|m| m.leave.is_some()) {
+        if self.active.as_ref().is_some_and(Mount::local_modal_open) {
             return Ok(false);
         }
         if self
@@ -3001,3 +3023,7 @@ mod workspace_focus_tests;
 #[cfg(test)]
 #[path = "oib_layout_editor_tests.rs"]
 mod layout_editor_tests;
+
+#[cfg(test)]
+#[path = "oib_viewport_tests.rs"]
+mod viewport_tests;

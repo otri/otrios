@@ -436,3 +436,94 @@ one existing ignored diagnostic; atomic Apply11; dedicated preview/clip12;
 component behavior14; leave3; real macOS authority-process/WebSocket test1;
 browser session/update22. Strict core library Clippy with `-D warnings` passed.
 No full repository preflight or full catalog acceptance is claimed.
+
+## B5 follow-up implementation — pending publication, 2026-11-11
+
+The live code remains `a5b1e3a`/release `4faf7ae0…` until the acceptance below.
+The following changes are implemented in the working branch and locally tested:
+
+- Local command history retains selection and task. Undo creation restores its
+  originating selection/task; Redo reopens the created definition. Local and
+  published records share one 64 KiB budget, including retained location data.
+- One accepted Apply becomes one published Undo unit. Clean Undo/Redo prepares a
+  private conditional inverse for explicit Apply. Matching accepted receipts alone
+  move stacks; rejection, delayed/coalesced replies and unknown equal-value causal
+  writes do not refresh guards. Redo derives from the accepted inverse. Normal
+  edits cancel pending inverse classification even if later bytes happen to match.
+- Accepted receipts now carry the actual post-publication property-leaf hashes,
+  ordered as the request's causal changes. State protocol is v34, control remains
+  v1; old stored receipts default to missing proof and cannot establish new undo
+  proof. ClearDefault distinguishes an absent authored default from an explicit
+  equal value, while preserving the independent causal override register.
+- Conditional comparisons show Before/Applied/Current and named component/layer
+  context in a modal with fixed actions and bounded scrolling. It gates pointer,
+  semantic, text and raw app input. Scroll refreshes only the modal presentation,
+  retaining the authored layout cache. Long display summaries explicitly include
+  their full character count; full canonical guards remain unchanged. Conflicted
+  draft roots refresh a clean working base even if the last valid UI generation
+  does not advance, so current alternatives participate in review. An open review
+  retains its captured comparisons and pointer owner when newer sources arrive;
+  it indicates that Inspect loads the latest values. Closing and retrying Undo
+  compares against the latest source rather than silently replacing the dialog.
+- Library no longer repeats New component; the global command has its own pure
+  builder. Link choices include admitted imported export roots, not private library
+  closure helpers. Exact pins and immutable bodies remain unchanged; ownership,
+  cycles, grants, final-source checks and scene/control/source budgets still apply.
+- A transient OIB batch IdentityPlan reserves explicit IDs across definition and
+  preset phases and allocates implicit instances into unreserved holes. Claims
+  must finish as one exact contiguous authority-counter interval; duplicates,
+  retired IDs and holes reject the complete batch. The plan is cleared before
+  publication and is not durable state. This permits New component → Add text →
+  Link imported Slider plus a new-node causal edit in one Apply without renumbering
+  private addresses. There is no general transaction or source-replacement API.
+- A generic signed Blueprint ViewportPolicy defaults to Fit with omitted legacy
+  bytes. Layout v7/capability `otrios-responsive-viewport-v1` admits Responsive with
+  finite minimum dimensions. Designer opts into 800×480 minimum; the browser uses
+  available window size within the existing 8192 coordinate bound. Other apps'
+  default Fit and existing Chat/Map behavior remain. Source and compositionless
+  definition previews retain policy; no app-ID or Frame/Desktop profile selection.
+  Captured resize preserves its Up event and publishes a new viewport revision
+  only when scene extent commits. Core reconciles requested versus presented size
+  even when the next request repeats the cached dimensions.
+
+Known gates remain: conditional graph/deletion restoration with fresh IDs and
+creation-Undo Redo are explicitly unavailable, not retired-ID resurrection; typed
+API/slots and dependency impact/retirement/replacement still need their full UI;
+styles/modes and representative catalog qualification remain open. Some binding
+and property review labels still fall back to numeric identifiers and need signed
+human descriptor names with the style/API work. The Panel+Text+imported Slider
+fixture proves real composition, not completion of the representative catalog.
+
+Known paths for restarting: `client/oib_applied_history.rs`,
+`client/oib_applied_history_tests.rs`, `client/oib_history_review.rs`,
+`client/oib_history_review_tests.rs`, `client/oib_viewport_tests.rs`,
+`oib/history.rs` and `oib/history/text.rs`; identity staging is in
+`state/oib/structure.rs`. Viewport host code is `web/shared/viewport.mjs`,
+`web/canvas/app.js`, `web/canvas/state-worker.js`, `crates/otrios-web-host/src/lib.rs`
+and public `interfaces/src/layout.rs`. Use compiler-reported files for Blueprint
+literal defaults, not folder inventories. No dependencies or ceilings increased.
+
+Focused evidence before publication:
+
+- Designer: 74 passed, one existing ignored diagnostic; actual one-Apply
+  LabelledSlider composition and source-preserving selection/task history passed.
+- Backend conditional Apply/history/identity: 18 passed; full OIB state module:
+  37 passed, one existing ignored diagnostic.
+- Published history manager: all nine focused cases passed, including the
+  conflicted draft/nonadvancing-generation clean-base regression.
+- Review UI: four passed, including 16-row scrolling, long-value summaries,
+  input barriers, cached-layout reuse, 512-node/128-control bounds and an incoming
+  authority edit while a dialog action owns a held pointer.
+- Responsive Rust: 21 passed; JS viewport/worker: 24 passed; v34 session/update:
+  22 passed; component guest behavior: 14 passed.
+- Fresh v34 macOS canvas-server and the real WebSocket B5 test passed: exact
+  property proof persisted across lost reply/restart and ClearDefault retained
+  the causal override. One previously started legacy D2 process test also passed.
+  These are real authority-process/socket proofs, not Linux IPC acceptance.
+- Dashboard artifact compilation with canvas/server/host-sync/direct and
+  `--all-targets --locked --offline` passed. Compiler-discovered legacy Blueprint
+  fixtures received explicit default Fit; legacy wire bytes remain unchanged.
+- Final strict core library Clippy (`--features canvas --lib --locked --offline
+  -- -D warnings`) and `git diff --check` passed after the clean-base and held
+  review fixes. No full preflight or new PR. Existing live publication
+  authorization remains in effect.

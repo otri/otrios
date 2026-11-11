@@ -1589,6 +1589,7 @@ mod tests {
         let mut motion_ui = Vec::new();
         for (id, motion) in [("launcher", false), ("three-d-lab", true)] {
             let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
+                viewport: Default::default(),
                 composition: None,
                 schema: "otrios-layout-v2".into(),
                 templates: vec![Template {

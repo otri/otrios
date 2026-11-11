@@ -35,6 +35,10 @@ pub struct ApplyReceipt {
     pub sequence: u64,
     pub digest: Vec<u8>,
     pub result: ApplyResult,
+    /// Exact post-publication leaf versions, ordered like Apply.changes.
+    /// Empty on rejection or legacy receipts; absence is never proof for Undo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub property_versions: Vec<Vec<u8>>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyResult {
@@ -305,7 +309,8 @@ pub struct DefinitionBatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum DefinitionEdit {
-    /// Both the definition ID and root node ID must be the next authority IDs.
+    /// Both IDs are fresh reservations in the batch's contiguous authority
+    /// interval. Phase ordering may claim them before an earlier preset ID.
     CreateDefinition {
         definition: DefinitionId,
         name: String,
@@ -339,6 +344,12 @@ pub enum DefinitionEdit {
         node: NodeId,
         property: PropertyId,
         value: Value,
+    },
+    /// Remove only the authored fallback; causal overrides remain untouched.
+    ClearDefault {
+        definition: DefinitionId,
+        node: NodeId,
+        property: PropertyId,
     },
     RenameDefinition {
         definition: DefinitionId,

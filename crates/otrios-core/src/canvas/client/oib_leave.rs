@@ -36,6 +36,7 @@ impl Mount {
             .as_ref()
             .is_some_and(|w| w.error.is_some() || w.stale(&self.doc));
         Some(Modal {
+            scroll: None,
             title: if waiting {"Applying changes"} else {"Leave component editor?"}.into(),
             lines: vec![leave.message.clone().unwrap_or_else(||if waiting {"Your changes will finish applying before you leave."} else if invalid {"Some values need correction. Stay to review them, or discard your local changes."} else {"Apply your changes, discard them, or stay in the editor."}.into())],
             actions: vec![
@@ -102,7 +103,7 @@ impl Client {
     }
     pub(super) fn leave_activate(&mut self, id: u32) -> Result<Option<bool>> {
         if self.active.as_ref().is_none_or(|m| m.leave.is_none()) {
-            return Ok(None);
+            return self.history_review_activate(id);
         };
         let enabled = self
             .active
@@ -149,7 +150,7 @@ impl Client {
     }
     pub(super) fn leave_pointer(&mut self, event: PointerEvent) -> Result<Option<bool>> {
         if self.active.as_ref().is_none_or(|m| m.leave.is_none()) {
-            return Ok(None);
+            return self.history_review_pointer(event);
         };
         let hit = self.scene()?.hit_path(event.position).iter().find_map(|n| {
             [LEAVE_APPLY, LEAVE_DISCARD, LEAVE_STAY]

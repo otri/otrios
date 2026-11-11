@@ -74,6 +74,7 @@ fn blueprint() -> Blueprint {
         checked: Expr::Literal(Value::Boolean(false)),
     });
     Blueprint {
+        viewport: ViewportPolicy::Fit,
         schema: "otrios-layout-v2".into(),
         composition: None,
         templates: vec![Template {

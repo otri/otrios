@@ -7,20 +7,49 @@ use otrios_interfaces::oib::{
         Apply, ApplyResult, DefinitionEdit, DocumentEdit, EditBatch, MAX_BATCH_BYTES,
         MAX_OPERATIONS, PresetEdit,
     },
-    designer::PropertyAddress,
+    designer::{PropertyAddress, Selection},
 };
 const HISTORY_BYTES: usize = 64 * 1024;
+use super::oib_applied_history::{AppliedHistory, Direction, Review};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct EditLocation {
+    pub(super) selection: Selection,
+    pub(super) task: oib_workspace::Task,
+}
+#[derive(Clone)]
+struct HistoryEntry {
+    apply: Apply,
+    location: Option<EditLocation>,
+}
+impl HistoryEntry {
+    fn bytes(&self) -> usize {
+        let path_bytes = match self.location.as_ref().map(|l| &l.selection) {
+            Some(Selection::Object(object)) => {
+                object.references.len()
+                    * std::mem::size_of::<otrios_interfaces::oib::designer::NodeId>()
+            }
+            _ => 0,
+        };
+        std::mem::size_of::<Self>()
+            + flexbuffers::to_vec(&self.apply).map_or(HISTORY_BYTES + 1, |b| b.len())
+            + path_bytes
+    }
+}
 pub(super) struct WorkingCopy {
     pub(super) base: StateAdapter,
     pub(super) candidate: StateAdapter,
     pub(super) apply: Apply,
-    undo: Vec<Apply>,
-    redo: Vec<Apply>,
+    undo: Vec<HistoryEntry>,
+    redo: Vec<HistoryEntry>,
+    location: Option<EditLocation>,
     pub(super) error: Option<String>,
     pub(super) submitted: Option<Vec<u8>>,
     pub(super) revision: u64,
     base_ui_generation: Option<u64>,
+    base_oib_root: Option<crate::merkle::Hash>,
+    published: AppliedHistory,
+    base_location: Option<EditLocation>,
 }
 
 #[cfg(test)]
@@ -96,20 +125,26 @@ impl WorkingCopy {
             apply,
             undo: vec![],
             redo: vec![],
+            location: None,
             error: None,
             submitted: None,
             revision: 0,
             base_ui_generation: live.oib_generation(),
+            base_oib_root: live.oib_root(),
+            published: AppliedHistory::default(),
+            base_location: None,
         })
     }
     pub(super) fn dirty(&self) -> bool {
         !self.apply.operations.is_empty() || !self.apply.changes.is_empty()
     }
     pub(super) fn can_undo(&self) -> bool {
-        self.error.is_some() || !self.undo.is_empty()
+        self.error.is_some()
+            || !self.undo.is_empty()
+            || (!self.dirty() && self.published.can_undo())
     }
     pub(super) fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
+        !self.redo.is_empty() || (!self.dirty() && self.published.can_redo())
     }
     pub(super) fn applying(&self) -> bool {
         self.submitted.is_some()
@@ -207,15 +242,43 @@ impl WorkingCopy {
         }
         Ok(())
     }
-    fn history_push(history: &mut Vec<Apply>, value: Apply) {
-        history.push(value);
-        while history
+    pub(super) fn remember_location(&mut self, selection: Selection, task: oib_workspace::Task) {
+        self.location = Some(EditLocation { selection, task });
+        if !self.dirty() && self.undo.is_empty() {
+            self.base_location = self.location.clone();
+        }
+    }
+    pub(super) fn location(&self) -> Option<EditLocation> {
+        self.location.clone()
+    }
+    fn entry(&self) -> HistoryEntry {
+        HistoryEntry {
+            apply: self.apply.clone(),
+            location: self.location.clone(),
+        }
+    }
+    fn trim_history(&mut self) {
+        // Both directions share one budget, including retained selection paths.
+        while self
+            .undo
             .iter()
-            .map(|a| flexbuffers::to_vec(a).map_or(HISTORY_BYTES + 1, |b| b.len()))
+            .chain(&self.redo)
+            .map(HistoryEntry::bytes)
             .sum::<usize>()
+            + self.published.bytes()
             > HISTORY_BYTES
         {
-            history.remove(0);
+            if self.published.evict_oldest() {
+                continue;
+            }
+            if !self.undo.is_empty() {
+                self.undo.remove(0);
+            } else if !self.redo.is_empty() {
+                self.redo.remove(0);
+            } else {
+                self.published.drop_review_detail();
+                break;
+            }
         }
     }
     fn set(&mut self, mut next: Apply) -> Result<bool> {
@@ -237,8 +300,10 @@ impl WorkingCopy {
         })();
         match result {
             Ok(candidate) => {
-                Self::history_push(&mut self.undo, self.apply.clone());
+                self.published.normal_edit();
+                self.undo.push(self.entry());
                 self.redo.clear();
+                self.trim_history();
                 self.apply = next;
                 self.candidate = candidate;
                 self.error = None;
@@ -333,12 +398,19 @@ impl WorkingCopy {
         if self.error.take().is_some() {
             return Ok(true);
         }
-        let Some(previous) = self.undo.pop() else {
-            return Ok(false);
+        let Some(previous) = self.undo.last().cloned() else {
+            return if !self.dirty() {
+                self.prepare_applied(Direction::Undo)
+            } else {
+                Ok(false)
+            };
         };
-        let candidate = self.base.preview_oib_apply(&previous)?;
-        Self::history_push(&mut self.redo, self.apply.clone());
-        self.apply = previous;
+        let candidate = self.base.preview_oib_apply(&previous.apply)?;
+        self.undo.pop();
+        self.redo.push(self.entry());
+        self.apply = previous.apply;
+        self.location = previous.location;
+        self.trim_history();
         self.candidate = candidate;
         self.revision += 1;
         Ok(true)
@@ -347,12 +419,19 @@ impl WorkingCopy {
         if self.applying() {
             return Ok(false);
         }
-        let Some(next) = self.redo.pop() else {
-            return Ok(false);
+        let Some(next) = self.redo.last().cloned() else {
+            return if !self.dirty() {
+                self.prepare_applied(Direction::Redo)
+            } else {
+                Ok(false)
+            };
         };
-        let candidate = self.base.preview_oib_apply(&next)?;
-        Self::history_push(&mut self.undo, self.apply.clone());
-        self.apply = next;
+        let candidate = self.base.preview_oib_apply(&next.apply)?;
+        self.redo.pop();
+        self.undo.push(self.entry());
+        self.apply = next.apply;
+        self.location = next.location;
+        self.trim_history();
         self.candidate = candidate;
         self.error = None;
         self.revision += 1;
@@ -370,8 +449,59 @@ impl WorkingCopy {
         if !live.apply_oib(self.apply.clone())? {
             return Ok(false);
         };
+        self.published.check_submission(&digest);
         self.submitted = Some(digest);
         Ok(true)
+    }
+    pub(super) fn history_review_is_current(&self, live: &StateAdapter) -> bool {
+        self.base_oib_root == live.oib_root()
+    }
+    pub(super) fn history_review(&self) -> Option<&Review> {
+        self.published.review()
+    }
+    pub(super) fn history_review_mut(&mut self) -> Option<&mut Review> {
+        self.published.review_mut()
+    }
+    pub(super) fn clear_history_review(&mut self) {
+        self.published.clear_review();
+    }
+    /// Discard private commands while retaining receipt-owned applied history.
+    pub(super) fn reset_to_live(&mut self, live: &StateAdapter) -> Result<()> {
+        let mut next = Self::new(live)?;
+        next.published = std::mem::take(&mut self.published);
+        next.location = self.location.clone();
+        next.base_location = next.location.clone();
+        // A discarded prepared inverse must not classify a later normal Apply.
+        next.published.normal_edit();
+        *self = next;
+        self.trim_history();
+        Ok(())
+    }
+    fn prepare_applied(&mut self, direction: Direction) -> Result<bool> {
+        let Some(prepared) = self.published.prepare(direction, &self.base)? else {
+            self.trim_history();
+            return Ok(self.published.review().is_some());
+        };
+        let apply = prepared.apply.clone();
+        let location = prepared.location.clone();
+        // set validates the complete private inverse but never sends it.
+        let changed = match self.set(apply) {
+            Ok(changed) => changed,
+            Err(reason) => {
+                self.error = None;
+                self.published.unavailable(direction, reason, vec![]);
+                self.trim_history();
+                return Ok(true);
+            }
+        };
+        if changed {
+            self.published.bind(prepared);
+            if location.is_some() {
+                self.location = location;
+            }
+            self.trim_history();
+        }
+        Ok(changed)
     }
     /// Live receipts remain on the live adapter. A matching durable result, not
     /// a shared status string, decides whether to release the working copy.
@@ -383,25 +513,40 @@ impl WorkingCopy {
             if let Some(receipt) = live.oib_apply_result()?
                 && &receipt.digest == digest
             {
-                match receipt.result {
+                match &receipt.result {
                     ApplyResult::Accepted { .. } => {
-                        *self = Self::new(live)?;
+                        self.published.accepted(
+                            &self.base,
+                            &self.candidate,
+                            &self.apply,
+                            &receipt,
+                            self.base_location.clone(),
+                            self.location.clone(),
+                        )?;
+                        self.reset_to_live(live)?;
                         return Ok(true);
                     }
                     ApplyResult::Rejected { message } => {
                         self.submitted = None;
-                        self.error = Some(message);
+                        self.error = Some(message.clone());
                         return Ok(true);
                     }
                 }
             }
         } else if !self.dirty()
             && self.error.is_none()
-            && (self.base_ui_generation != live.oib_generation() || self.stale(live))
+            && self.history_review().is_none()
+            && (self.base_ui_generation != live.oib_generation()
+                || self.base_oib_root != live.oib_root()
+                || self.stale(live))
         {
-            *self = Self::new(live)?;
+            self.reset_to_live(live)?;
             return Ok(true);
         }
         Ok(false)
     }
 }
+
+#[cfg(test)]
+#[path = "oib_applied_history_tests.rs"]
+mod applied_history_tests;

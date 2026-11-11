@@ -469,8 +469,15 @@ fn compile_preview(
         },
         ..Default::default()
     });
+    let viewport_policy = Layout::from_bytes(&ui.layout)?.viewport_policy();
     let blueprint = Blueprint {
-        schema: otrios_interfaces::layout::AUTO_LAYOUT_FORMAT.into(),
+        schema: if viewport_policy.is_fit() {
+            otrios_interfaces::layout::AUTO_LAYOUT_FORMAT
+        } else {
+            otrios_interfaces::layout::RESPONSIVE_VIEWPORT_FORMAT
+        }
+        .into(),
+        viewport: viewport_policy,
         composition: None,
         templates: vec![Template {
             id: 0,

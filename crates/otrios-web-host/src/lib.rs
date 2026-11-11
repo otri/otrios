@@ -45,6 +45,10 @@ impl CanvasApp {
     pub fn set_layout_viewport(&mut self, width: f32, height: f32) -> Result<(), String> {
         self.inner.set_layout_viewport([width, height])
     }
+    /// Read-only sizing declaration from the currently presented signed layout.
+    pub fn viewport_policy(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.viewport_policy()).map_err(|error| error.to_string())
+    }
     pub fn viewport_size(&self) -> Vec<f32> {
         self.inner
             .scene()

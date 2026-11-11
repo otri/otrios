@@ -40,6 +40,7 @@ fn instance(
 }
 fn blueprint() -> Blueprint {
     Blueprint {
+        viewport: ViewportPolicy::Fit,
         composition: None,
         schema: "otrios-layout-v2".into(),
         templates: vec![
@@ -369,4 +370,110 @@ fn encoding_input_checks_signed_zero_in_numeric_layout_families() {
             tall: plan,
         });
     });
+}
+
+#[test]
+fn responsive_viewport_requires_v7_and_keeps_fit_wire_bytes_unchanged() {
+    #[derive(serde::Serialize)]
+    struct Legacy<'a> {
+        schema: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        composition: &'a Option<Composition>,
+        templates: &'a [Template],
+        root: &'a Instance,
+    }
+    let original = blueprint();
+    let legacy = flexbuffers::to_vec(Legacy {
+        schema: &original.schema,
+        composition: &original.composition,
+        templates: &original.templates,
+        root: &original.root,
+    })
+    .unwrap();
+    assert_eq!(Layout::encode(&original).unwrap(), legacy);
+    let mut responsive = original;
+    responsive.viewport = ViewportPolicy::Responsive {
+        minimum: [800., 480.],
+    };
+    assert!(
+        Layout::encode(&responsive)
+            .unwrap_err()
+            .contains("requires layout v7")
+    );
+    responsive.schema = RESPONSIVE_VIEWPORT_FORMAT.into();
+    let layout = Layout::from_blueprint(responsive.clone()).unwrap();
+    assert_eq!(
+        layout.viewport_policy(),
+        ViewportPolicy::Responsive {
+            minimum: [800., 480.]
+        }
+    );
+    let scene = layout.resolve_viewport(&slots(), [1920., 1080.]).unwrap();
+    assert_eq!(
+        [scene.root().frame.width, scene.root().frame.height],
+        [1920., 1080.]
+    );
+    for minimum in [[0., 480.], [800., 8193.], [f32::NAN, 480.]] {
+        responsive.viewport = ViewportPolicy::Responsive { minimum };
+        assert!(Layout::encode(&responsive).is_err());
+    }
+    responsive.viewport = ViewportPolicy::Fit;
+    let fit = Layout::from_blueprint(responsive)
+        .unwrap()
+        .resolve_viewport(&slots(), [1920., 1080.])
+        .unwrap();
+    assert_eq!(
+        [fit.root().frame.width, fit.root().frame.height],
+        [1280., 800.]
+    );
+}
+#[test]
+fn responsive_compositionless_control_geometry_matches_its_real_scene_extent() {
+    let mut button = node(1, Shape::Canvas { clip: true }, vec![]);
+    button.frame = [
+        Expr::Subtract(Box::new(Expr::Width), Box::new(n(120.))),
+        n(20.),
+        n(100.),
+        n(48.),
+    ];
+    button.responder = Some(Responder::AppEvent {
+        control: 200,
+        drag: false,
+    });
+    button.semantics = Some(Semantics {
+        label: s("Responsive action"),
+        checked: Expr::Literal(Value::Boolean(false)),
+    });
+    let root = node(0, Shape::Canvas { clip: true }, vec![button]);
+    let layout = Layout::from_blueprint(Blueprint {
+        schema: RESPONSIVE_VIEWPORT_FORMAT.into(),
+        viewport: ViewportPolicy::Responsive {
+            minimum: [800., 480.],
+        },
+        composition: None,
+        templates: vec![Template {
+            id: 1,
+            name: "Responsive fixture".into(),
+            parameters: vec![],
+            root,
+        }],
+        root: instance(0, 1, [0., 0., 1280., 800.], vec![], vec![]),
+    })
+    .unwrap();
+    for size in [[1280., 800.], [1920., 1080.], [1600., 900.]] {
+        let scene = layout.resolve_viewport(&BTreeMap::new(), size).unwrap();
+        assert_eq!([scene.root().frame.width, scene.root().frame.height], size);
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|control| control.node.id == 1)
+            .unwrap();
+        assert_eq!(control.origin, [size[0] - 120., 20.]);
+        assert!(
+            scene
+                .hit_path([size[0] - 70., 44.])
+                .iter()
+                .any(|node| node.node.id == 1)
+        );
+    }
 }

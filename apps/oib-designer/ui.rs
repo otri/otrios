@@ -29,9 +29,18 @@ pub fn description() -> Ui {
     let wide = row(
         24.,
         vec![
-            place("hierarchy", [240., 656.]).flex_height(),
-            place("preview", [568., 656.]).flex_height(),
-            place("inspector", [376., 656.]).flex_height(),
+            place("hierarchy", [240., 656.])
+                .minimum([80., 100.])
+                .flex_width()
+                .flex_height(),
+            place("preview", [568., 656.])
+                .minimum([80., 100.])
+                .flex_width()
+                .flex_height(),
+            place("inspector", [376., 656.])
+                .minimum([80., 100.])
+                .flex_width()
+                .flex_height(),
         ],
     )
     .flex_height();
@@ -42,23 +51,25 @@ pub fn description() -> Ui {
                 16.,
                 vec![
                     place("hierarchy", [360., 240.])
-                        .minimum([280., 200.])
+                        .minimum([80., 100.])
                         .flex_width()
                         .flex_height(),
                     place("inspector", [376., 240.])
-                        .minimum([280., 200.])
+                        .minimum([80., 100.])
                         .flex_width()
                         .flex_height(),
                 ],
-            ),
+            )
+            .flex_height(),
             place("preview", [752., 520.])
-                .minimum([568., 280.])
+                .minimum([80., 100.])
                 .flex_width()
                 .flex_height(),
         ],
     )
     .flex_height();
     AppUi::new("oib-designer", "OIB Designer", super::state::description())
+        .with_responsive_viewport([800., 480.])
         .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
         .with_composition(
             column(24., vec![heading(), wide]).flex_height(),

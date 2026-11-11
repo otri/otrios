@@ -7,7 +7,7 @@ import {PresentationLayers} from './presentation-transfer.mjs';
 import {AppTransfers} from './app-transfers.mjs';
 import {TextInputs} from './text-input.mjs';
 import {PointerSamples,sampleTime} from './touch-input.mjs';
-import {layoutViewport,chatViewport,pointerPosition,semanticBounds} from './viewport.mjs';
+import {layoutViewport,chatViewport,pointerPosition,semanticBounds,viewportRequestNeeded} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppRelease} from './app-catalog.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
@@ -86,23 +86,26 @@ try{
   let pendingFrameAck=null;
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
   function resize(){if(graphicsLost||gl.isContextLost())return;try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
-  let layoutWidth=innerWidth,baseViewport=desiredViewport;
+  let layoutWidth=innerWidth,layoutHeight=innerHeight,baseViewport=desiredViewport,requestedViewportContext=null;
   function requestViewport(next){
-    if(next.every((n,i)=>n===desiredViewport[i]))return;
-    desiredViewport=next;moves.clear();
-    for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();
-    command({type:'viewport',size:next,layoutViewport:baseViewport});
+    const context=JSON.stringify([model?.ui,model?.epoch,model?.viewportPolicy||{kind:'fit'}]);
+    if(!viewportRequestNeeded(desiredViewport,next,requestedViewportContext,context))return;
+    desiredViewport=next;requestedViewportContext=context;
+    const preserveInput=model?.viewportPolicy?.kind==='responsive';
+    if(!preserveInput){moves.clear();for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();}
+    command({type:'viewport',size:next,layoutViewport:baseViewport,preserveInput});
   }
   const fitVisibleViewport=()=>{
     const v=window.visualViewport;if(v&&v.scale>1.01)return;
     const width=v?.width||innerWidth,height=v?.height||innerHeight;
     document.documentElement.style.setProperty('--visible-height',`${height}px`);document.documentElement.style.setProperty('--visible-width',`${width}px`);document.documentElement.style.setProperty('--visible-top',`${v?.offsetTop||0}px`);document.documentElement.style.setProperty('--visible-left',`${v?.offsetLeft||0}px`);
+    baseViewport=layoutViewport(layoutWidth,layoutHeight,model?.viewportPolicy||{kind:'fit'});
     if(model)requestViewport(model.presentation==='chat'?chatViewport(width,height):model.presentation==='spaces-map'?chatViewport(width,innerHeight):baseViewport);
     resize();
   };
   window.visualViewport?.addEventListener('resize',fitVisibleViewport);window.visualViewport?.addEventListener('scroll',fitVisibleViewport);fitVisibleViewport();
   resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',()=>{
-    if(!document.activeElement?.matches('.canvas-editor')||innerWidth!==layoutWidth)baseViewport=layoutViewport(innerWidth,innerHeight);
+    if(!document.activeElement?.matches('.canvas-editor')||innerWidth!==layoutWidth)layoutHeight=innerHeight;
     layoutWidth=innerWidth;fitVisibleViewport();
   });
   function accept(f){

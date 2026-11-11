@@ -11,7 +11,7 @@ let timings=false,navigationTiming=null,graphicsPaused=false,graphicsGeneration=
 const timingNow=()=>performance.timeOrigin+performance.now();
 let inputRevision=0,lastInputRevision=-1,composition=null;
 let lastChunked=false;
-let viewportRevision=0,lastTextGeneration=0,lastPaint=0,lastPlacement=0,lastSemantics=0,lastEffects=0,pendingGeometry=false;
+let viewportRevision=0,lastViewportExtent=null,lastTextGeneration=0,lastPaint=0,lastPlacement=0,lastSemantics=0,lastEffects=0,pendingGeometry=false;
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
@@ -39,7 +39,10 @@ function sendFrame(){
   const ui=app.ui_ref();
   const plan=ui?JSON.parse(app.prepare_frame()):{revisions:{content:0,placement:0,semantics:0,effects:0},order:[]};
   const revisions=plan.revisions;
-  const frame={transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const extent=Array.from(app.viewport_size());
+  if(lastViewportExtent&&extent.some((value,index)=>value!==lastViewportExtent[index]))viewportRevision++;
+  lastViewportExtent=extent;
+  const frame={transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent,viewportPolicy:JSON.parse(app.viewport_policy()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   const chunkMetadata=ui?JSON.parse(app.presentation_frame()):null,chunked=chunkMetadata!==null;
@@ -155,7 +158,7 @@ onmessage=async({data:m})=>{try{
   const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
   if(['pointer','pointer-batch','activate','adjust','map-scroll'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
-    case 'viewport':app.cancel_input();if(m.layoutViewport)app.set_layout_viewport(...m.layoutViewport);changed=app.set_viewport(...m.size);viewportRevision++;changed=!!app.ui_ref()||changed;break;
+    case 'viewport':if(!m.preserveInput)app.cancel_input();if(m.layoutViewport)app.set_layout_viewport(...m.layoutViewport);changed=app.set_viewport(...m.size);changed=!!app.ui_ref()||changed;break;
     case 'reduced-motion':app.set_reduced_motion(!!m.reduced);changed=true;break;
     case 'login':monitoring.login(m.username,m.password);break;
     case 'logout':signOut();changed=true;break;

@@ -10,6 +10,7 @@ function workerContext(fields){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
     app.presentation_frame??=()=> 'null';
+    app.viewport_policy??=()=>JSON.stringify({kind:'fit'});
     app.control_is_checkbox??=()=>false;app.text_paints??=()=>new Float32Array();app.overlay_paints??=()=>new Float32Array();
     app.document_chunk_geometry??=()=>new Float32Array();
     app.request_frame??=()=>{dirty=true;};
@@ -320,4 +321,28 @@ test('retained UI chunks obey renderer credit and replay without copying legacy 
   await context.onmessage({data:{type:'frame-ack',serial:replay.serial,documentToken:replay.document.token,presentationToken:replay.uiChunks.token}});
   chunked=false;vm.runInContext('publish()',context);
   const fallback=messages.filter(m=>m.type==='frame').at(-1);assert(!fallback.uiChunks.enabled);assert(fallback.vertices);assert.equal(legacy,1,'switch to document/reflow fallback refreshes compatibility geometry even at same content revision');
+});
+
+test('responsive resize retains captured input until the actual published extent changes',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[],seen=[];let held=true,extent=[1280,800],pending=null,cancelled=0;
+  const fake={ui_ref:()=> 'app:responsive/ui',screen:()=> 'responsive',path:()=> 'responsive',epoch:()=>1,state_ref:()=> 'state',viewport_size:()=>extent,viewport_policy:()=>JSON.stringify({kind:'responsive',minimum:[800,480]}),
+    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',tick:()=>false,take_sign_out:()=>false,outgoing:()=>null,
+    set_layout_viewport:()=>{},cancel_input(){cancelled++;held=false;return true;},set_viewport(w,h){if(held)pending=[w,h];else extent=[w,h];return true;},
+    pointer(...args){seen.push(args);if(args[1]===2){held=false;extent=pending||extent;pending=null;}return true;},
+    vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text_styles:()=>new Float32Array(),text_views:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),text:()=> 'Responsive',title:()=> 'Responsive',controls:()=>[]};
+  const context=workerContext({fake,performance:{timeOrigin:1000,now:()=>500},postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
+  const ack=async frame=>context.onmessage({data:{type:'frame-ack',serial:frame.serial,documentToken:frame.document.token,presentationToken:frame.uiChunks?.token}});
+  const first=messages.find(m=>m.type==='frame');await ack(first);
+  await context.onmessage({data:{type:'viewport',size:[1920,1080],layoutViewport:[1920,1080],preserveInput:true}});
+  const heldFrame=messages.filter(m=>m.type==='frame').at(-1);
+  assert.equal(cancelled,0);assert.equal(heldFrame.viewportPolicy.kind,'responsive');assert.deepEqual(Array.from(heldFrame.extent),[1280,800]);assert.equal(heldFrame.viewportRevision,0);
+  await ack(heldFrame);
+  await context.onmessage({data:{type:'pointer',epoch:1,viewportRevision:0,args:[2,7,300,200,1200]}});
+  const released=messages.filter(m=>m.type==='frame').at(-1);
+  assert.equal(seen.length,1,'release tagged with the held geometry revision is accepted');assert.deepEqual(Array.from(released.extent),[1920,1080]);assert.equal(released.viewportRevision,1);
+  await context.onmessage({data:{type:'pointer',epoch:1,viewportRevision:0,args:[0,8,300,200,1220]}});assert.equal(seen.length,1,'stale coordinates are rejected after committing the new extent');
+  assert(!messages.some(m=>m.type==='error'));
+  await ack(released);await context.onmessage({data:{type:'viewport',size:[1280,800]}});assert.equal(cancelled,1,'default Fit requests retain their previous cancellation path');
 });

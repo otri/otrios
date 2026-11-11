@@ -28,6 +28,7 @@ pub(super) const DISCARD: u32 = BASE + 43;
 pub(super) const APPLY: u32 = BASE + 44;
 pub(super) const MODAL_ACTION_START: u32 = BASE + 400;
 pub(super) const MODAL_ACTION_END: u32 = BASE + 420;
+pub(super) const MODAL_CONTENT: u32 = BASE + 505;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct EditorChrome {
@@ -44,6 +45,8 @@ pub(super) struct Modal {
     pub(super) title: String,
     pub(super) lines: Vec<String>,
     pub(super) actions: Vec<ModalAction>,
+    /// None keeps a small decision fully visible; Some enables bounded scrolling.
+    pub(super) scroll: Option<u16>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ModalAction {
@@ -249,6 +252,9 @@ fn modal_overlay(
     root_height: f32,
     p: Palette,
 ) -> Result<SceneNode, String> {
+    if modal.scroll.is_some() {
+        return scrolling_modal_overlay(modal, width, available_height, root_height, p);
+    }
     let card_width = (width - 64.).clamp(288., 760.);
     let content_width = card_width - 48.;
     let columns = ((content_width / 12.).floor() as usize).clamp(1, 72);
@@ -340,6 +346,185 @@ fn modal_overlay(
     overlay.responder = Some(TouchResponder::Consume);
 
     Ok(overlay)
+}
+struct ScrollDialog {
+    card_width: f32,
+    content_width: f32,
+    title: Vec<String>,
+    lines: Vec<String>,
+    buttons: Vec<(Rect, usize)>,
+    body_top: f32,
+    body_height: f32,
+    content_height: f32,
+    card_height: f32,
+}
+fn scroll_dialog(modal: &Modal, width: f32, available_height: f32) -> Result<ScrollDialog, String> {
+    let card_width = (width - 64.).clamp(288., 760.);
+    let content_width = card_width - 48.;
+    let columns = ((content_width / 12.).floor() as usize).clamp(1, 72);
+    let title = wrapped_lines(std::slice::from_ref(&modal.title), columns);
+    let lines = wrapped_lines(&modal.lines, columns);
+    let content_height = (lines.len().max(2) as f32) * 24.;
+    if title.len() > 4 || content_height > 8192. || modal.actions.len() > 21 {
+        return Err("Designer review content exceeds its bounded viewport".into());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    let mut buttons = vec![];
+    let (mut x, mut y) = (24., 0.);
+    for (index, action) in modal.actions.iter().enumerate() {
+        if !(MODAL_ACTION_START..=MODAL_ACTION_END).contains(&action.id) || !ids.insert(action.id) {
+            return Err("Invalid Designer dialog action".into());
+        }
+        let button_width = (action.label.chars().count() as f32 * 12. + 32.).max(112.);
+        if button_width > content_width {
+            return Err("Designer dialog action label is too long".into());
+        }
+        if x > 24. && x + button_width > card_width - 24. {
+            x = 24.;
+            y += 56.;
+        }
+        buttons.push((Rect::new(x, y, button_width, 48.), index));
+        x += button_width + 8.;
+    }
+    let footer_height = if buttons.is_empty() { 0. } else { y + 48. };
+    let body_top = 24. + title.len() as f32 * 24. + 16.;
+    let body_height =
+        content_height.min(available_height - 32. - body_top - 24. - footer_height - 24.);
+    if body_height < 48. {
+        return Err("Designer review does not fit viewport".into());
+    }
+    let card_height = body_top + body_height + 24. + footer_height + 24.;
+    Ok(ScrollDialog {
+        card_width,
+        content_width,
+        title,
+        lines,
+        buttons,
+        body_top,
+        body_height,
+        content_height,
+        card_height,
+    })
+}
+pub(super) fn modal_scroll_limit(modal: &Modal, width: f32, height: f32) -> Result<u16, String> {
+    let layout = scroll_dialog(modal, width, height)?;
+    Ok((layout.content_height - layout.body_height).max(0.).ceil() as u16)
+}
+fn scrolling_modal_overlay(
+    modal: &Modal,
+    width: f32,
+    available_height: f32,
+    root_height: f32,
+    p: Palette,
+) -> Result<SceneNode, String> {
+    let layout = scroll_dialog(modal, width, available_height)?;
+    let ScrollDialog {
+        card_width,
+        content_width,
+        title,
+        lines,
+        buttons,
+        body_top,
+        body_height,
+        content_height,
+        card_height,
+    } = layout;
+    let offset =
+        f32::from(modal.scroll.unwrap_or(0)).clamp(0., (content_height - body_height).max(0.));
+    let mut children = vec![
+        rect(
+            BASE + 501,
+            Rect::new(0., 0., card_width, card_height),
+            p.line,
+            8.,
+        ),
+        rect(
+            BASE + 502,
+            Rect::new(1., 1., card_width - 2., card_height - 2.),
+            p.surface,
+            7.,
+        ),
+    ];
+    for (index, line) in title.iter().enumerate() {
+        children.push(label(
+            BASE + 560 + index as u32,
+            Rect::new(24., 24. + index as f32 * 24., content_width, 24.),
+            line,
+            2,
+            p.text,
+        ));
+    }
+    let mut content_backdrop = rect(
+        BASE + 506,
+        Rect::new(0., 0., content_width, body_height),
+        p.surface,
+        0.,
+    );
+    content_backdrop.responder = Some(TouchResponder::Consume);
+    let mut body = vec![content_backdrop];
+    for (index, line) in lines.iter().enumerate() {
+        let line_y = index as f32 * 24. - offset;
+        if line_y + 24. >= 0. && line_y <= body_height {
+            body.push(label(
+                BASE + 600 + index as u32,
+                Rect::new(0., line_y, content_width, 24.),
+                line,
+                2,
+                p.muted,
+            ));
+        }
+    }
+    let mut viewport = canvas(
+        MODAL_CONTENT,
+        Rect::new(24., body_top, content_width, body_height),
+        body,
+    );
+    viewport.responder = Some(TouchResponder::Consume);
+    children.push(viewport);
+    for (mut frame, index) in buttons {
+        frame.y += body_top + body_height + 24.;
+        let action = &modal.actions[index];
+        children.push(command(action.id, frame, &action.label, action.enabled, p));
+    }
+    let card = canvas(
+        BASE + 503,
+        Rect::new(
+            (width - card_width) / 2.,
+            (available_height - card_height) / 2.,
+            card_width,
+            card_height,
+        ),
+        children,
+    );
+    let mut backdrop = background(BASE + 504, width, root_height, [0, 0, 0, 176], 0.);
+    backdrop.responder = Some(TouchResponder::Consume);
+    let mut overlay = canvas(
+        BASE + 500,
+        Rect::new(0., 0., width, root_height),
+        vec![backdrop, card],
+    );
+    overlay.responder = Some(TouchResponder::Consume);
+    Ok(overlay)
+}
+/// Dialog scrolling changes only this local overlay; authored layout remains cached.
+pub(super) fn present_modal(
+    root: &mut SceneNode,
+    modal: Option<&Modal>,
+    keyboard: bool,
+    appearance: Appearance,
+) -> Result<(), String> {
+    root.children.retain(|node| node.id != BASE + 500);
+    if let Some(modal) = modal {
+        let height = (root.frame.height - if keyboard { 240. } else { 0. }).max(1.);
+        root.children.push(modal_overlay(
+            modal,
+            root.frame.width,
+            height,
+            root.frame.height,
+            appearance.palette(),
+        )?);
+    }
+    Ok(())
 }
 fn segment_surface(id: u32, frame: Rect, p: Palette) -> SceneNode {
     let mut node = canvas(
@@ -933,6 +1118,7 @@ mod tests {
             let (original, seed) = fixture(width, height);
             let editor = EditorChrome {
                 modal: Some(Modal {
+                    scroll: None,
                     title: "Discard changes?".into(),
                     lines: vec!["Your component has unapplied changes.".into()],
                     actions: vec![
@@ -1006,6 +1192,7 @@ mod tests {
             enabled: true,
         };
         let mut modal = Modal {
+            scroll: None,
             title: "Review changes".into(),
             lines: vec![],
             actions: vec![action.clone(), action.clone()],

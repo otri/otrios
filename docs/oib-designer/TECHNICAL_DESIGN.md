@@ -608,3 +608,45 @@ retained uniform fit of the 1280 scene; validate the settled viewport adapter.
 Snapshot capture timed out and alternate browser access was unavailable, so
 visual capture/human native touch/color acceptance remains unproven. See the
 final IMPLEMENTATION.md restart list for authoritative next work.
+
+## T15. B5 history, composition and viewport contracts
+
+This follow-up is implemented and locally tested; see the final IMPLEMENTATION.md
+entry for live status and restart paths. Full B5–B7 remain in progress.
+
+An accepted Apply is one published history unit. Undo/Redo prepares a new private
+inverse and uses the same explicit Apply boundary. The inverse guards affected
+source fields and actual authoritative property post-versions; reading a later
+coalesced replica's equal value never establishes proof. Only a known accepted
+local inverse may reanchor an overlapping earlier guard. Rejections preserve the
+history entry. Normal edits cancel pending history intent, even if a later local
+Undo returns to identical bytes. Local and published history share 64 KiB.
+
+State v34/control v1 adds ordered authoritative property versions to the durable
+Apply receipt. Missing historical proof is gated. ClearDefault removes only an
+authored fallback; causal register identity is independent. Review presents
+Before/Applied/Current with bounded scrolling, fixed actions, modal input barriers
+and a cached authored layout. Display summaries may be shortened with an explicit
+character count; conditional canonical bytes are never shortened.
+Open comparisons retain their captured source and input owner on incoming edits;
+a status line identifies stale comparisons, and retrying Undo uses current source.
+Unsupported fresh-ID graph restoration is a visible reason; no root rollback or retired-ID
+resurrection is allowed. Full removal/repair and creation Undo→Redo remain gates.
+
+An OIB-only transient identity reservation plan makes phase-ordered mixed batches
+independent of the local order in which definition, preset and instance IDs were
+created. Every new ID must be consumed once and all claims must exactly fill the
+captured authority-counter interval. The plan is private and cleared before the
+single publication. Imported Link choices use admitted exported roots through
+canonical resolution, preserving exact revisions and immutable implementation
+bodies. New component, Text, imported Slider and a new-node property edit can
+therefore be one coherent Apply.
+
+Signed layout v7 adds a reusable Blueprint viewport policy. Fit is the legacy
+omitted default; Responsive is admitted only with its declared capability and
+finite bounds. Designer opts into minimum 800×480. The browser supplies window
+logical dimensions within the existing 8192 bound; the shared renderer resolves
+both composed and compositionless responsive roots. UI entry/policy changes force
+reconciliation even when cached desired dimensions match. Held gestures retain
+their original input revision until scene extent commits. Existing Fit/Chat/Map
+behavior remains; no application-name lookup or host profile controls are added.

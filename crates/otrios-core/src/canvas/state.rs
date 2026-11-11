@@ -30,6 +30,8 @@ struct Receipt {
 }
 #[derive(Clone)]
 pub struct Document {
+    /// Private structural staging only; never serialized or retained on publish.
+    oib_identity_plan: Option<oib::IdentityPlan>,
     oib_ui: Option<std::sync::Arc<Ui>>,
     oib_authored: std::sync::Arc<std::sync::Mutex<Option<oib::AuthoredUi>>>,
     oib_metadata_cache:
@@ -142,6 +144,7 @@ impl Document {
         let tree = Snapshot::empty().edit([0; 16], &edits).map_err(err)?.0;
         Ok(Self {
             oib_ui: None,
+            oib_identity_plan: None,
             oib_authored: Default::default(),
             oib_metadata_cache: Default::default(),
             oib_binding_cache: Default::default(),
@@ -208,6 +211,7 @@ impl Document {
         let actor = root.actor.as_slice().try_into().map_err(err)?;
         let result = Self {
             oib_ui: None,
+            oib_identity_plan: None,
             oib_authored: Default::default(),
             oib_metadata_cache: Default::default(),
             oib_binding_cache: Default::default(),
@@ -339,6 +343,16 @@ impl Document {
                                 && (apply.sequence == 0
                                     || apply.sequence > r.sequence
                                     || apply.digest.len() != 32
+                                    || apply.property_versions.len()
+                                        > otrios_interfaces::oib::authoring::MAX_OPERATIONS
+                                    || apply
+                                        .property_versions
+                                        .iter()
+                                        .any(|version| version.len() != 32)
+                                    || (matches!(
+                                        apply.result,
+                                        otrios_interfaces::oib::authoring::ApplyResult::Rejected { .. }
+                                    ) && !apply.property_versions.is_empty())
                                     || (apply.sequence == r.sequence && apply.digest != r.digest)
                                     || matches!(&apply.result, otrios_interfaces::oib::authoring::ApplyResult::Rejected { message } if message.is_empty() || message.len() > 256)
                                     || matches!(&apply.result, otrios_interfaces::oib::authoring::ApplyResult::Accepted { generation, structural_generation } if *generation == 0 || *structural_generation == 0))
@@ -721,6 +735,14 @@ impl Document {
                 receipt.apply = Some(otrios_interfaces::oib::authoring::ApplyReceipt {
                     sequence,
                     digest,
+                    property_versions: if matches!(
+                        result,
+                        otrios_interfaces::oib::authoring::ApplyResult::Accepted { .. }
+                    ) {
+                        candidate.oib_apply_property_versions(&apply)?
+                    } else {
+                        vec![]
+                    },
                     result,
                 });
                 candidate.change(

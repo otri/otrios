@@ -16,7 +16,7 @@ pub const MAX_PATH_DEPTH: usize = 8;
 const DIGEST_DOMAIN: &[u8] = b"otrios-app-bundle-v1\0";
 const PACKAGE_FEATURE: &str = "otrios-canvas-package-v1";
 const BEHAVIOR_FEATURE: &str = "otrios-canvas-behavior-v1";
-pub(crate) use otrios_interfaces::layout::AUTO_LAYOUT_FEATURE;
+pub(crate) use otrios_interfaces::layout::{AUTO_LAYOUT_FEATURE, RESPONSIVE_VIEWPORT_FEATURE};
 
 pub(crate) fn definitions_use_auto_layout(
     definitions: &[otrios_interfaces::oib::designer::ComponentDefinition],
@@ -31,6 +31,11 @@ fn node_uses_auto_layout(node: &otrios_interfaces::layout::TemplateNode) -> bool
     node.layout.is_some() || node.children.iter().any(node_uses_auto_layout)
 }
 
+fn uses_responsive_viewport(ui: &otrios_interfaces::canvas::Ui) -> Result<bool> {
+    Ok(!crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
+        .viewport_policy()
+        .is_fit())
+}
 fn uses_auto_layout(ui: &otrios_interfaces::canvas::Ui) -> Result<bool> {
     let layout = crate::dashboard::layout::Layout::from_bytes(&ui.layout)?;
     let blueprint = layout.blueprint();
@@ -260,6 +265,9 @@ pub fn pack(
     }
     if uses_auto_layout(&ui)? {
         required_features.push(AUTO_LAYOUT_FEATURE.into());
+    }
+    if uses_responsive_viewport(&ui)? {
+        required_features.push(RESPONSIVE_VIEWPORT_FEATURE.into());
     }
     required_features.sort();
     let info = BundleInfo {
@@ -780,6 +788,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-designer-v2"
                     | "otrios-layout-v5"
                     | AUTO_LAYOUT_FEATURE
+                    | RESPONSIVE_VIEWPORT_FEATURE
                     | "otrios-oib-library-v1"
                     | "otrios-component-behavior-v1"
             )
@@ -813,6 +822,9 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     }
     if uses_auto_layout(&ui)? && !features.contains(AUTO_LAYOUT_FEATURE) {
         return Err("Missing required auto layout feature".into());
+    }
+    if uses_responsive_viewport(&ui)? && !features.contains(RESPONSIVE_VIEWPORT_FEATURE) {
+        return Err("Missing required responsive viewport feature".into());
     }
     canvas::validate_ui_format(&ui)?;
     if canvas::oib::seed(&ui).is_some() && !features.contains(otrios_interfaces::oib::FEATURE) {

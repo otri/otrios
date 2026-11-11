@@ -944,3 +944,30 @@ fn blueprint_auto_layout_requires_feature_in_bundle() {
             .contains("Missing required auto layout feature")
     );
 }
+
+#[test]
+fn responsive_viewport_metadata_requires_its_explicit_bundle_capability() {
+    let original = fixture(None);
+    let mut ui = canvas::decode_ui(&original[UI_PATH]).unwrap();
+    let layout = crate::dashboard::layout::Layout::from_bytes(&ui.layout).unwrap();
+    let mut blueprint = layout.blueprint().clone();
+    blueprint.schema = otrios_interfaces::layout::RESPONSIVE_VIEWPORT_FORMAT.into();
+    blueprint.viewport = otrios_interfaces::layout::ViewportPolicy::Responsive {
+        minimum: [800., 480.],
+    };
+    ui.layout = crate::dashboard::layout::Layout::encode(&blueprint).unwrap();
+    let mut tree = original;
+    tree.insert(UI_PATH.into(), canvas::encode_ui(&ui).unwrap());
+    reseal(&mut tree);
+    assert!(
+        inspect(&tree)
+            .unwrap_err()
+            .contains("Missing required responsive viewport feature")
+    );
+    change_info(&mut tree, |info| {
+        info.required_features
+            .push(RESPONSIVE_VIEWPORT_FEATURE.into());
+        info.required_features.sort();
+    });
+    assert!(inspect(&tree).is_ok());
+}

@@ -133,6 +133,9 @@ impl Layout {
         hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    pub fn viewport_policy(&self) -> ViewportPolicy {
+        self.blueprint.viewport
+    }
     pub fn blueprint(&self) -> &Blueprint {
         &self.blueprint
     }
@@ -200,12 +203,13 @@ impl Layout {
         let _profile = crate::canvas::profiling::span("layout.resolve");
         let bindings = Bindings { local: slots };
         let mut root = self.blueprint.root.clone();
-        if self
-            .blueprint
-            .templates
-            .iter()
-            .find(|template| template.id == root.template)
-            .is_some_and(|template| template.root.layout.is_some())
+        if !self.viewport_policy().is_fit()
+            || self
+                .blueprint
+                .templates
+                .iter()
+                .find(|template| template.id == root.template)
+                .is_some_and(|template| template.root.layout.is_some())
         {
             root.frame[2..].copy_from_slice(&viewport);
         }
@@ -307,10 +311,19 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
             | "otrios-layout-v4"
             | "otrios-layout-v5"
             | "otrios-layout-v6"
+            | "otrios-layout-v7"
     ) || b.templates.is_empty()
         || b.templates.len() > 32
     {
         return Err("Unknown/invalid layout schema/templates".into());
+    }
+    if let ViewportPolicy::Responsive { minimum } = b.viewport
+        && (b.schema != RESPONSIVE_VIEWPORT_FORMAT
+            || minimum
+                .iter()
+                .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v)))
+    {
+        return Err("Responsive viewport requires layout v7 and bounded readable minima".into());
     }
     let mut templates = BTreeSet::new();
     let mut total = 0;
@@ -407,7 +420,9 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         fn has_layout(node: &TemplateNode) -> bool {
             node.layout.is_some() || node.reference_root || node.children.iter().any(has_layout)
         }
-        if b.schema != "otrios-layout-v6" && has_layout(&t.root) {
+        if !matches!(b.schema.as_str(), "otrios-layout-v6" | "otrios-layout-v7")
+            && has_layout(&t.root)
+        {
             return Err("Reusable Auto Layout requires layout v6".into());
         }
         fn has_resize(n: &TemplateNode) -> bool {
@@ -458,7 +473,11 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
     if let Some(plan) = &b.composition {
         if !matches!(
             b.schema.as_str(),
-            "otrios-layout-v3" | "otrios-layout-v4" | "otrios-layout-v5" | "otrios-layout-v6"
+            "otrios-layout-v3"
+                | "otrios-layout-v4"
+                | "otrios-layout-v5"
+                | "otrios-layout-v6"
+                | "otrios-layout-v7"
         ) || b.root.id != 0
             || !b.root.children.is_empty()
         {
@@ -479,7 +498,7 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         }
         if !matches!(
             b.schema.as_str(),
-            "otrios-layout-v4" | "otrios-layout-v5" | "otrios-layout-v6"
+            "otrios-layout-v4" | "otrios-layout-v5" | "otrios-layout-v6" | "otrios-layout-v7"
         ) && (wraps(&plan.wide.content) || wraps(&plan.tall.content))
         {
             return Err("Wrapping flow requires layout v4".into());
@@ -710,7 +729,10 @@ fn resolve_responder(schema: &str, responder: Option<Responder>) -> Result<Optio
     Ok(if let Some(responder) = responder {
         Some(match responder {
             Responder::AppEvent { control, drag } => {
-                if (!matches!(schema, "otrios-layout-v5" | "otrios-layout-v6") && control >= 128)
+                if (!matches!(
+                    schema,
+                    "otrios-layout-v5" | "otrios-layout-v6" | "otrios-layout-v7"
+                ) && control >= 128)
                     || control == 255
                 {
                     return Err("Canvas event index exceeds limit".into());

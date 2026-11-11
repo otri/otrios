@@ -5,7 +5,125 @@ use otrios_interfaces::oib::authoring::{
     DefinitionEdit, DocumentEdit, MAX_BATCH_BYTES, MAX_OPERATIONS, PresetEdit,
 };
 
+/// Reservations preserve command identities when phase ordering places a later
+/// definition edit before an earlier preset/instance allocation.
+#[derive(Clone)]
+pub(in crate::canvas::state) struct IdentityPlan {
+    floor: u64,
+    explicit: BTreeSet<u64>,
+    claimed: BTreeSet<u64>,
+}
+impl IdentityPlan {
+    fn new(
+        source: &otrios_interfaces::oib::authoring::DocumentSource,
+        batch: &InstanceOperation,
+    ) -> Result<Self> {
+        let mut explicit = BTreeSet::new();
+        let mut slots = BTreeSet::new();
+        let mut reserve = |id: u64| -> Result<()> {
+            if id < source.next_identity || id == u64::MAX || !explicit.insert(id) {
+                return Err("Invalid or duplicate reserved OIB identity".into());
+            }
+            Ok(())
+        };
+        for operation in &batch.operations {
+            match operation {
+                DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
+                    definition,
+                    root,
+                    ..
+                }) => {
+                    reserve(definition.0)?;
+                    reserve(root.id.0)?;
+                }
+                DocumentEdit::Definition(DefinitionEdit::CreateNode { node, .. }) => {
+                    reserve(node.id.0)?
+                }
+                DocumentEdit::Definition(DefinitionEdit::SetSlots {
+                    definition,
+                    slots: values,
+                }) => {
+                    for slot in values {
+                        let existing = source
+                            .definitions
+                            .iter()
+                            .find(|d| d.id == *definition)
+                            .is_some_and(|d| d.slots.iter().any(|s| s.id == slot.id));
+                        if !existing && slots.insert((*definition, slot.id)) {
+                            reserve(slot.id.0)?;
+                        }
+                    }
+                }
+                DocumentEdit::Preset(PresetEdit::Create { preset }) => reserve(preset.id)?,
+                _ => {}
+            }
+        }
+        Ok(Self {
+            floor: source.next_identity,
+            explicit,
+            claimed: BTreeSet::new(),
+        })
+    }
+    fn next_implicit(&self) -> Result<u64> {
+        let mut id = self.floor;
+        while self.explicit.contains(&id) || self.claimed.contains(&id) {
+            id = id.checked_add(1).ok_or("OIB identity space exhausted")?;
+        }
+        if id == u64::MAX {
+            return Err("OIB identity space exhausted".into());
+        }
+        Ok(id)
+    }
+    fn explicit(&mut self, id: u64) -> Result<()> {
+        if !self.explicit.contains(&id) || !self.claimed.insert(id) {
+            return Err("OIB identity was not reserved or was already claimed".into());
+        }
+        Ok(())
+    }
+    fn implicit(&mut self, id: u64) -> Result<()> {
+        if id != self.next_implicit()? || !self.claimed.insert(id) {
+            return Err("Invalid implicit OIB identity".into());
+        }
+        Ok(())
+    }
+    fn finish(self, next: u64) -> Result<()> {
+        if !self.explicit.is_subset(&self.claimed)
+            || next.checked_sub(self.floor) != Some(self.claimed.len() as u64)
+            || self
+                .claimed
+                .iter()
+                .any(|id| *id < self.floor || *id >= next)
+        {
+            return Err(
+                "OIB identity reservations must fill one contiguous authority interval".into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 impl Document {
+    pub(super) fn oib_allocating_id(&self) -> Result<u64> {
+        match &self.oib_identity_plan {
+            Some(plan) => plan.next_implicit(),
+            None => self.oib_next_id(),
+        }
+    }
+    pub(super) fn oib_claim_implicit(&mut self, id: u64) -> Result<()> {
+        if let Some(plan) = &mut self.oib_identity_plan {
+            plan.implicit(id)?;
+        }
+        Ok(())
+    }
+    fn oib_claim_explicit(&mut self, next: &mut u64, id: u64) -> Result<()> {
+        if let Some(plan) = &mut self.oib_identity_plan {
+            plan.explicit(id)?;
+            *next = (*next).max(id.checked_add(1).ok_or("OIB identity space exhausted")?);
+            Ok(())
+        } else {
+            claim(next, id)
+        }
+    }
     pub(super) fn oib_validate_structure(&self, batch: &InstanceOperation) -> Result<()> {
         if batch.generation == 0
             || batch.operations.is_empty()
@@ -120,6 +238,12 @@ impl Document {
     ) -> Result<bool> {
         let original = self.tree.hash();
         self.oib_validate_structure(batch)?;
+        if !matches!(batch.operations.as_slice(), [DocumentEdit::Restore { .. }]) {
+            if self.oib_identity_plan.is_some() {
+                return Err("Nested OIB identity reservation".into());
+            }
+            self.oib_identity_plan = Some(IdentityPlan::new(&self.oib_source()?, batch)?);
+        }
         let definitions: Vec<_> = batch
             .operations
             .iter()
@@ -186,6 +310,9 @@ impl Document {
             batch.operations.as_slice(),
             [DocumentEdit::Restore { defaults: true }]
         );
+        if let Some(plan) = self.oib_identity_plan.take() {
+            plan.finish(self.oib_source()?.next_identity)?;
+        }
         if self.tree.hash() != original || reset_defaults {
             self.oib_prepare_final_structure(reset_defaults, writer)?;
         }
@@ -222,10 +349,12 @@ impl Document {
                 DefinitionEdit::CreateDefinition {
                     definition, root, ..
                 } => {
-                    claim(&mut next, definition.0)?;
-                    claim(&mut next, root.id.0)?;
+                    self.oib_claim_explicit(&mut next, definition.0)?;
+                    self.oib_claim_explicit(&mut next, root.id.0)?;
                 }
-                DefinitionEdit::CreateNode { node, .. } => claim(&mut next, node.id.0)?,
+                DefinitionEdit::CreateNode { node, .. } => {
+                    self.oib_claim_explicit(&mut next, node.id.0)?
+                }
                 DefinitionEdit::SetSlots { definition, slots } => {
                     let existing = seed
                         .designer
@@ -237,7 +366,7 @@ impl Document {
                         .ok_or("Unknown slot definition")?;
                     for slot in slots {
                         if !existing.slots.iter().any(|current| current.id == slot.id) {
-                            claim(&mut next, slot.id.0)?;
+                            self.oib_claim_explicit(&mut next, slot.id.0)?;
                         }
                     }
                 }
@@ -294,7 +423,7 @@ impl Document {
         for operation in operations {
             match operation {
                 PresetEdit::Create { preset } => {
-                    claim(&mut next, preset.id)?;
+                    self.oib_claim_explicit(&mut next, preset.id)?;
                     if presets.iter().any(|existing| existing.id == preset.id) {
                         return Err("Preset identity already exists".into());
                     }

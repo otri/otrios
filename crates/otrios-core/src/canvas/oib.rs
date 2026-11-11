@@ -11,6 +11,7 @@ pub(crate) mod component_behaviors;
 pub mod contract;
 pub mod document;
 pub mod graph;
+pub(crate) mod history;
 pub mod imports;
 pub mod instances;
 pub(crate) mod paint;

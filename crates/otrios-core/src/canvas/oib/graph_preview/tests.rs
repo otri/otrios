@@ -840,3 +840,64 @@ fn app_business_field_defaults_are_not_component_sample_defaults() {
     assert_ne!(sample.default, Value::Number(999.));
     assert_ne!(preview.ui.state_schema.id, ui.state_schema.id);
 }
+
+#[test]
+fn designer_responsive_policy_survives_graph_lowering_and_definition_preview() {
+    use otrios_interfaces::layout::{RESPONSIVE_VIEWPORT_FORMAT, ViewportPolicy};
+    let ui = crate::test_support::oib_designer::ui(&[]);
+    let expected = ViewportPolicy::Responsive {
+        minimum: [800., 480.],
+    };
+    let initial = Layout::from_bytes(&ui.layout).unwrap();
+    assert_eq!(initial.viewport_policy(), expected);
+    assert_eq!(initial.blueprint().schema, RESPONSIVE_VIEWPORT_FORMAT);
+    let materialized = materialize(&ui).unwrap();
+    let layout = Layout::from_bytes(&materialized.layout).unwrap();
+    assert_eq!(layout.viewport_policy(), expected);
+    assert_eq!(layout.blueprint().schema, RESPONSIVE_VIEWPORT_FORMAT);
+    for size in [[800., 480.], [1280., 800.], [1920., 1080.], [1600., 900.]] {
+        let mut bindings = BTreeMap::new();
+        for selector in &materialized.selectors {
+            let value = materialized
+                .state_schema
+                .fields
+                .iter()
+                .find(|field| field.id == selector.field)
+                .unwrap()
+                .default
+                .clone();
+            bindings.insert(
+                selector.local,
+                project(value, &selector.projection).unwrap().0,
+            );
+        }
+        let scene = layout
+            .resolve_ordered_with_font(
+                &bindings,
+                size,
+                &[],
+                Some(crate::dashboard::font::admission_font().unwrap()),
+            )
+            .unwrap();
+        assert_eq!([scene.root().frame.width, scene.root().frame.height], size);
+    }
+    let preview = definition_preview(&ui, DefinitionId(12), [320., 240.]).unwrap();
+    assert_eq!(preview.layout.viewport_policy(), expected);
+    assert_eq!(
+        preview.layout.blueprint().schema,
+        RESPONSIVE_VIEWPORT_FORMAT
+    );
+    let scene = preview
+        .layout
+        .resolve_ordered_with_font(
+            &defaults(&preview),
+            [1920., 1080.],
+            &[],
+            Some(crate::dashboard::font::admission_font().unwrap()),
+        )
+        .unwrap();
+    assert_eq!(
+        [scene.root().frame.width, scene.root().frame.height],
+        [1920., 1080.]
+    );
+}

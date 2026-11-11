@@ -853,6 +853,7 @@ pub struct AppUi {
     behavior: Option<BehaviorRef>,
     presentation: Option<Presentation>,
     composition: Option<(Arrangement, Arrangement)>,
+    viewport: ViewportPolicy,
     motion_viewport: Option<String>,
     touch_pad: Option<String>,
     text_scroll: Option<(String, [f32; 2])>,
@@ -870,6 +871,7 @@ impl AppUi {
             behavior: None,
             presentation: None,
             composition: None,
+            viewport: ViewportPolicy::Fit,
             motion_viewport: None,
             touch_pad: None,
             text_scroll: None,
@@ -892,6 +894,11 @@ impl AppUi {
             inspector.into(),
             hierarchy.map(str::to_owned),
         ));
+        self
+    }
+    /// Opt into responsive logical sizing through signed layout metadata.
+    pub fn with_responsive_viewport(mut self, minimum: [f32; 2]) -> Self {
+        self.viewport = ViewportPolicy::Responsive { minimum };
         self
     }
     pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
@@ -1058,7 +1065,9 @@ impl AppUi {
             self.presentation
         };
         let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
-            schema: if wrapping {
+            schema: if !self.viewport.is_fit() {
+                RESPONSIVE_VIEWPORT_FORMAT
+            } else if wrapping {
                 "otrios-layout-v4"
             } else if composition.is_some() {
                 "otrios-layout-v3"
@@ -1067,6 +1076,7 @@ impl AppUi {
             }
             .into(),
             composition,
+            viewport: self.viewport,
             templates: vec![Template {
                 id: 1,
                 name: "App canvas".into(),

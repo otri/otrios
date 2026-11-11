@@ -7,8 +7,10 @@ mod host_map;
 mod host_moves;
 mod host_panel;
 mod host_transfers;
+mod oib_applied_history;
 mod oib_designer;
 mod oib_editor;
+mod oib_history_review;
 mod oib_leave;
 mod oib_property_editor;
 mod oib_working_copy;
@@ -94,6 +96,7 @@ struct Mount {
     definition_presentation: Option<oib_editor::DefinitionPresentation>,
     working_presented: Option<u64>,
     leave: Option<oib_leave::Pending>,
+    review_pointer: Option<oib_history_review::Pointer>,
     behavior: Option<Behavior>,
     component_runtime: Arc<super::component_behavior::Runtime>,
     components: super::oib::component_behaviors::Instances,
@@ -1559,6 +1562,17 @@ impl Client {
         }
         Ok(())
     }
+    /// Signed sizing policy follows the active layout, including private previews.
+    pub fn viewport_policy(&self) -> otrios_interfaces::layout::ViewportPolicy {
+        if self.host_active {
+            return otrios_interfaces::layout::ViewportPolicy::Fit;
+        }
+        self.active
+            .as_ref()
+            .map_or(otrios_interfaces::layout::ViewportPolicy::Fit, |m| {
+                m.layout.viewport_policy()
+            })
+    }
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
         if viewport
             .iter()
@@ -1566,7 +1580,13 @@ impl Client {
         {
             return Err("Invalid viewport size".into());
         }
-        if self.viewport == Some(viewport) {
+        let presented_matches = self.host_active
+            || self.active.as_ref().is_none_or(|m| {
+                let resize = m.layout.blueprint().composition.is_some()
+                    || m.layout.viewport_policy() != otrios_interfaces::layout::ViewportPolicy::Fit;
+                !resize || m.viewport == viewport
+            });
+        if self.viewport == Some(viewport) && presented_matches {
             return Ok(false);
         }
         if self.host_active {
@@ -1586,7 +1606,8 @@ impl Client {
             return Ok(true);
         }
         if let Some(m) = &mut self.active
-            && m.layout.blueprint().composition.is_some()
+            && (m.layout.blueprint().composition.is_some()
+                || m.layout.viewport_policy() != otrios_interfaces::layout::ViewportPolicy::Fit)
         {
             let old = m.viewport;
             m.viewport = viewport;
@@ -1853,6 +1874,7 @@ impl Client {
                 m.designer
                     .as_ref()
                     .is_some_and(oib_designer::Designer::busy)
+                    || m.review_pointer.is_some()
                     || m.input.active()
                     || m.keyboard_pointer.is_some()
                     || m.order_drag.is_some()
@@ -2996,6 +3018,9 @@ impl Client {
         b: u16,
         input: Option<(otrios_interfaces::oib::component_behavior::Event, bool)>,
     ) -> Result<bool> {
+        if self.active.as_ref().is_some_and(Mount::local_modal_open) {
+            return Ok(false);
+        }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -3705,7 +3730,7 @@ impl Client {
     /// mount. A modal never exposes a background composer to the host.
     pub fn text_inputs(&self) -> Result<Vec<otrios_interfaces::keyboard::TextInput>> {
         if self.active.as_ref().is_some_and(|m| {
-            m.leave.is_some() || m.working_copy.as_ref().is_some_and(|w| w.applying())
+            m.local_modal_open() || m.working_copy.as_ref().is_some_and(|w| w.applying())
         }) {
             return Ok(vec![]);
         };
@@ -3838,7 +3863,7 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
-        if self.active.as_ref().is_some_and(|m| m.leave.is_some()) {
+        if self.active.as_ref().is_some_and(Mount::local_modal_open) {
             return Ok(false);
         };
         if self.local_uninstall {
@@ -3972,6 +3997,19 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if self.active.as_ref().is_some_and(|m| {
+            m.leave.is_none()
+                && m.working_copy
+                    .as_ref()
+                    .is_some_and(|w| w.history_review().is_some())
+        }) {
+            if let Some(m) = &mut self.active {
+                m.working_copy.as_mut().unwrap().clear_history_review();
+                m.review_pointer = None;
+                m.invalidate();
+            }
+            return Ok(true);
+        }
         if self.request_leave(oib_leave::Target::Back)? {
             return Ok(true);
         }
@@ -4575,6 +4613,10 @@ impl Mount {
         if self.working_copy.is_some()
             && !self.oib_activation_blocked()
             && self.working_presented.is_some()
+            && self
+                .working_copy
+                .as_ref()
+                .is_none_or(|w| w.history_review().is_none())
         {
             self.oib_generation = self.doc.oib_generation();
         }
@@ -4695,6 +4737,7 @@ impl Mount {
         self.designer
             .as_ref()
             .is_some_and(oib_designer::Designer::busy)
+            || self.review_pointer.is_some()
             || self.input.active()
             || (self.designer.is_some()
                 && (self.keyboard_pointer.is_some()
@@ -5233,6 +5276,7 @@ fn qualify(
         definition_presentation: None,
         working_presented: None,
         leave: None,
+        review_pointer: None,
         behavior,
         component_runtime,
         components: Default::default(),
@@ -5678,6 +5722,15 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         && !m.designer.as_ref().is_some_and(|d| d.focus_layout())
     {
         host_map::present_breadcrumb(&mut root, m, control);
+    }
+    if let Some(designer) = &m.designer {
+        let chrome = m.editor_chrome();
+        oib_workspace::present_modal(
+            &mut root,
+            chrome.modal.as_ref(),
+            m.keyboard.visible,
+            designer.appearance(),
+        )?;
     }
     let scene = Scene::new(root)?;
     if m.designer.is_some() && scene.controls().len() > 128 {

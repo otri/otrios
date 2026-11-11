@@ -6,7 +6,9 @@ use otrios_interfaces::{
     oib::{Allocation, InstanceOperation, Seed, authoring::*, designer::*, graph},
 };
 
-const MAX_TOOLS: usize = 8;
+// At most one link per resolved definition plus five local editing commands.
+// Rows use the existing scrolling/slab projection rather than hiding exports.
+const MAX_TOOLS: usize = MAX_DEFINITIONS + 5;
 
 fn literal(number: f32) -> Expr {
     Expr::Literal(Value::Number(number))
@@ -100,6 +102,131 @@ fn references(
         })
 }
 
+/// Build the global toolbar command separately from Library composition tools.
+pub(super) fn new_component(
+    state: &StateAdapter,
+    seed: &Seed,
+    allocations: &[Allocation],
+) -> Result<Option<InstanceOperation>> {
+    let graph = seed.graph.as_ref().ok_or("Missing canonical graph")?;
+    let next = state.oib_next_identity()?;
+    let Some(class) = graph
+        .classes
+        .iter()
+        .find(|class| class.implementation == ClassKind::O2DPanel)
+    else {
+        return Ok(None);
+    };
+    let (Some(root), Some(preset)) = (next.checked_add(1), next.checked_add(2)) else {
+        return Ok(None);
+    };
+    admitted_operation(
+        state,
+        seed,
+        allocations,
+        vec![
+            DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
+                definition: DefinitionId(next),
+                name: "New component".into(),
+                root: node(root, "Panel", class.id, None, blank_visual()),
+            }),
+            DocumentEdit::Preset(PresetEdit::Create {
+                preset: graph::Preset {
+                    id: preset,
+                    name: "New component".into(),
+                    definition: DefinitionId(next),
+                    assignments: vec![],
+                    frame: None,
+                    palette: true,
+                },
+            }),
+        ],
+    )
+}
+
+/// Only explicitly bound export roots are insertion choices. Internal closure
+/// definitions remain immutable dependencies, never extra Library controls.
+fn imported_exports(seed: &Seed) -> Result<std::collections::BTreeMap<DefinitionId, String>> {
+    let mut exports = std::collections::BTreeMap::new();
+    for binding in seed
+        .graph
+        .as_ref()
+        .and_then(|g| g.imports.as_ref())
+        .into_iter()
+        .flat_map(|i| &i.bindings)
+    {
+        let library = seed
+            .resolved_libraries
+            .iter()
+            .find(|body| body.library == binding.library)
+            .ok_or("Missing bound library body")?;
+        let export = library
+            .graph
+            .exports
+            .iter()
+            .find(|e| e.id == binding.export)
+            .ok_or("Missing bound export")?;
+        let target = binding
+            .definitions
+            .iter()
+            .find(|m| m.source == export.definition)
+            .ok_or("Missing bound export definition")?
+            .target;
+        exports.entry(target).or_insert_with(|| export.name.clone());
+    }
+    Ok(exports)
+}
+
+/// Keep final-source validation identical for toolbar creation and composition.
+/// Imported bodies are resolved only for checking; the authored source contains
+/// local definitions and exact import maps, never copied library definitions.
+fn admitted_operation(
+    state: &StateAdapter,
+    seed: &Seed,
+    allocations: &[Allocation],
+    operations: Vec<DocumentEdit>,
+) -> Result<Option<InstanceOperation>> {
+    let graph = seed.graph.as_ref().ok_or("Missing canonical graph")?;
+    let edits: Vec<_> = operations
+        .iter()
+        .filter_map(|op| match op {
+            DocumentEdit::Definition(edit) => Some(edit.clone()),
+            _ => None,
+        })
+        .collect();
+    let Ok(definitions) = oib::document::authoring::transform(seed, &edits) else {
+        return Ok(None);
+    };
+    let mut presets = graph.presets.clone();
+    for operation in &operations {
+        match operation {
+            DocumentEdit::Preset(PresetEdit::Create { preset }) => presets.push(preset.clone()),
+            DocumentEdit::Preset(PresetEdit::Delete { preset }) => {
+                presets.retain(|p| p.id != *preset)
+            }
+            _ => {}
+        }
+    }
+    presets.sort_by_key(|p| p.id);
+    let Ok(candidate) = oib::graph::with_seed_source(seed, &definitions, &presets) else {
+        return Ok(None);
+    };
+    if oib::instances::expanded_seed(&candidate, allocations).is_err() {
+        return Ok(None);
+    };
+    let batch = EditBatch {
+        generation: state
+            .oib_structural_generation()
+            .ok_or("Missing structural generation")?,
+        operations,
+    };
+    Ok((flexbuffers::to_vec(&batch)
+        .map_err(|e| e.to_string())?
+        .len()
+        <= MAX_BATCH_BYTES)
+        .then_some(batch))
+}
+
 /// Every returned intent captures the observed structural generation. Class
 /// restrictions and a pure final-source admission pass filter unavailable tools;
 /// the authority still performs its complete coherent-publication checks.
@@ -110,38 +237,11 @@ pub(super) fn tools(
     allocations: &[Allocation],
 ) -> Result<Vec<(String, InstanceOperation)>> {
     let graph = seed.graph.as_ref().ok_or("Missing canonical graph")?;
-    let generation = state
-        .oib_structural_generation()
-        .ok_or("Missing structural generation")?;
     let next = state.oib_next_identity()?;
+    let resolved = oib::imports::resolve(seed)?;
+    let exported = imported_exports(seed)?;
+    let imported = oib::imports::imported_definitions(seed);
     let mut candidates: Vec<(String, Vec<DocumentEdit>)> = vec![];
-    if let Some(class) = graph
-        .classes
-        .iter()
-        .find(|class| class.implementation == ClassKind::O2DPanel)
-        && let (Some(root), Some(preset)) = (next.checked_add(1), next.checked_add(2))
-    {
-        candidates.push((
-            "New component".into(),
-            vec![
-                DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
-                    definition: DefinitionId(next),
-                    name: "New component".into(),
-                    root: node(root, "Panel", class.id, None, blank_visual()),
-                }),
-                DocumentEdit::Preset(PresetEdit::Create {
-                    preset: graph::Preset {
-                        id: preset,
-                        name: "New component".into(),
-                        definition: DefinitionId(next),
-                        assignments: vec![],
-                        frame: None,
-                        palette: true,
-                    },
-                }),
-            ],
-        ));
-    }
     let selected = match selection {
         Selection::Definition(id) => graph
             .definitions
@@ -232,15 +332,15 @@ pub(super) fn tools(
                     && accepts(&graph.classes, &class.owned_child_classes, candidate.id)
                     && accepts(&graph.classes, &class.visual_child_classes, candidate.id)
             }) {
-                let mut linked_count = 0;
-                for linked in graph.definitions.iter().filter(|linked| {
-                    !references(&graph.definitions, linked.id, definition.id, &mut vec![])
+                for linked in resolved.definitions.iter().filter(|linked| {
+                    (!imported.contains(&linked.id) || exported.contains_key(&linked.id))
+                        && !references(&resolved.definitions, linked.id, definition.id, &mut vec![])
                 }) {
-                    let Some(root) = linked
+                    if !linked
                         .nodes
                         .iter()
-                        .find(|node| node.id == linked.root && node.visual.is_some())
-                    else {
+                        .any(|node| node.id == linked.root && node.visual.is_some())
+                    {
                         continue;
                     };
                     let mut reference = node(
@@ -248,17 +348,16 @@ pub(super) fn tools(
                         "Linked component",
                         wrapper.id,
                         Some(parent.id),
-                        root.visual.clone().unwrap(),
+                        visual(Shape::Canvas { clip: true }, 160., 100.),
                     );
                     // Wrapper geometry is a safe viewport, independent of the
                     // referenced definition's parameter namespace.
-                    reference.visual = Some(visual(Shape::Canvas { clip: true }, 160., 100.));
                     reference.reference = Some(ComponentReference {
                         definition: linked.id,
                         assignments: vec![],
                     });
                     candidates.push((
-                        format!("Link {}", linked.name),
+                        format!("Link {}", exported.get(&linked.id).unwrap_or(&linked.name)),
                         vec![DocumentEdit::Definition(DefinitionEdit::CreateNode {
                             definition: definition.id,
                             node: reference,
@@ -266,10 +365,6 @@ pub(super) fn tools(
                             before: None,
                         })],
                     ));
-                    linked_count += 1;
-                    if linked_count == 2 {
-                        break;
-                    }
                 }
             }
         }
@@ -316,41 +411,8 @@ pub(super) fn tools(
     }
     let mut result = vec![];
     for (label, operations) in candidates {
-        let definitions: Vec<_> = operations
-            .iter()
-            .filter_map(|operation| match operation {
-                DocumentEdit::Definition(edit) => Some(edit.clone()),
-                _ => None,
-            })
-            .collect();
-        let Ok(definitions) = oib::document::authoring::transform(seed, &definitions) else {
-            continue;
-        };
-        let mut presets = graph.presets.clone();
-        for edit in &operations {
-            match edit {
-                DocumentEdit::Preset(PresetEdit::Create { preset }) => presets.push(preset.clone()),
-                DocumentEdit::Preset(PresetEdit::Delete { preset }) => {
-                    presets.retain(|current| current.id != *preset)
-                }
-                _ => {}
-            }
-        }
-        presets.sort_by_key(|preset| preset.id);
-        if let Ok(candidate) = oib::graph::with_seed_source(seed, &definitions, &presets)
-            && oib::instances::expanded_seed(&candidate, allocations).is_ok()
-        {
-            let batch = EditBatch {
-                generation,
-                operations,
-            };
-            if flexbuffers::to_vec(&batch)
-                .map_err(|e| e.to_string())?
-                .len()
-                <= MAX_BATCH_BYTES
-            {
-                result.push((label, batch));
-            }
+        if let Some(batch) = admitted_operation(state, seed, allocations, operations)? {
+            result.push((label, batch));
         }
         if result.len() == MAX_TOOLS {
             break;
@@ -358,6 +420,10 @@ pub(super) fn tools(
     }
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/support/oib_library_fixture.rs"]
+mod imported_fixture;
 
 #[cfg(test)]
 use super::tests::designer_fixture as fixture;
@@ -467,33 +533,20 @@ mod tests {
                 labels.push(label);
             }
         }
-        for label in [
-            "New component",
-            "New preset",
-            "Add shape",
-            "Add text",
-            "Delete object",
-        ] {
+        for label in ["New preset", "Add shape", "Add text", "Delete object"] {
             assert!(labels.iter().any(|entry| entry == label), "missing {label}");
         }
         assert!(labels.iter().any(|label| label.starts_with("Link ")));
+        assert!(labels.iter().all(|label| label != "New component"));
     }
     #[test]
     fn a_created_component_can_gain_a_preset_and_be_deleted_through_generated_tools() {
         let (state, mut document, mut session) = setup(63);
         let definition = DefinitionId(state.oib_next_identity().unwrap());
         let seed = state.oib_authoring_seed().unwrap();
-        let operation = tools(
-            &state,
-            &seed,
-            &Selection::Document(seed.graph.as_ref().unwrap().id),
-            &document.oib_allocations().unwrap(),
-        )
-        .unwrap()
-        .into_iter()
-        .find(|(label, _)| label == "New component")
-        .unwrap()
-        .1;
+        let operation = new_component(&state, &seed, &document.oib_allocations().unwrap())
+            .unwrap()
+            .unwrap();
         accept(&mut document, &mut session, 1, operation);
         let ui = fixture::ui(&[]);
         let (state, _) = connect(&ui, &mut document, 64);
@@ -537,6 +590,177 @@ mod tests {
                 .definitions
                 .iter()
                 .any(|current| current.id == definition)
+        );
+    }
+    #[test]
+    fn labelled_slider_links_admitted_export_without_copying_immutable_library_source() {
+        let ui = imported_fixture::admit(&imported_fixture::imported());
+        let mut authority = Document::new(ui.state_schema.clone(), "d2:visible-tools").unwrap();
+        authority.configure_oib(&ui).unwrap();
+        let (state, mut session) = connect(&ui, &mut authority, 81);
+        let initial = state.oib_authoring_seed().unwrap();
+        let libraries = imported_fixture::seed(&ui).resolved_libraries.clone();
+        let imports = initial.graph.as_ref().unwrap().imports.clone();
+        let definition = DefinitionId(state.oib_next_identity().unwrap());
+        let mut create = new_component(&state, &initial, &authority.oib_allocations().unwrap())
+            .unwrap()
+            .unwrap();
+        for operation in &mut create.operations {
+            match operation {
+                DocumentEdit::Definition(DefinitionEdit::CreateDefinition { name, .. }) => {
+                    *name = "LabelledSlider".into()
+                }
+                DocumentEdit::Preset(PresetEdit::Create { preset }) => {
+                    preset.name = "LabelledSlider".into()
+                }
+                _ => {}
+            }
+        }
+        accept(&mut authority, &mut session, 1, create);
+        let (state, mut session) = connect(&ui, &mut authority, 82);
+        let source = state.oib_authoring_seed().unwrap();
+        let choices = tools(
+            &state,
+            &source,
+            &Selection::Definition(definition),
+            &authority.oib_allocations().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            choices
+                .iter()
+                .all(|(label, _)| label != "New component" && label != "Link LabelledSlider")
+        );
+        assert!(choices.iter().any(|(label, _)| label == "Link Slider"));
+        assert!(choices.iter().any(|(label, _)| label == "Link Toggle"));
+        assert!(
+            choices
+                .iter()
+                .filter(|(label, _)| label.starts_with("Link "))
+                .count()
+                > 2
+        );
+        assert!(choices.len() <= MAX_TOOLS);
+        let add_text = choices
+            .into_iter()
+            .find(|(label, _)| label == "Add text")
+            .unwrap()
+            .1;
+        accept(&mut authority, &mut session, 1, add_text);
+        let (state, mut session) = connect(&ui, &mut authority, 83);
+        let source = state.oib_authoring_seed().unwrap();
+        let link = tools(
+            &state,
+            &source,
+            &Selection::Definition(definition),
+            &authority.oib_allocations().unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .find(|(label, _)| label == "Link Slider")
+        .unwrap()
+        .1;
+        assert!(flexbuffers::to_vec(&link).unwrap().len() <= MAX_BATCH_BYTES);
+        accept(&mut authority, &mut session, 1, link);
+        let (state, _) = connect(&ui, &mut authority, 84);
+        let source = state.oib_authoring_seed().unwrap();
+        assert_eq!(source.resolved_libraries, libraries);
+        let graph = source.graph.as_ref().unwrap();
+        assert_eq!(graph.imports, imports);
+        assert!(
+            graph
+                .definitions
+                .iter()
+                .all(|d| ![DefinitionId(12), DefinitionId(13)].contains(&d.id))
+        );
+        let component = graph
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap();
+        let slider = component
+            .nodes
+            .iter()
+            .find(|n| {
+                n.reference
+                    .as_ref()
+                    .is_some_and(|r| r.definition == DefinitionId(12))
+            })
+            .unwrap();
+        assert_eq!(slider.owner, Some(component.root));
+        assert!(
+            component
+                .nodes
+                .iter()
+                .find(|n| n.id == component.root)
+                .unwrap()
+                .visual_children
+                .contains(&slider.id)
+        );
+        assert!(component.nodes.iter().any(|n| n.name == "Add text"));
+        let text = component
+            .nodes
+            .iter()
+            .find(|n| n.name == "Add text")
+            .unwrap();
+        assert!(
+            tools(
+                &state,
+                &source,
+                &Selection::DefinitionNode {
+                    definition,
+                    node: text.id
+                },
+                &authority.oib_allocations().unwrap()
+            )
+            .unwrap()
+            .iter()
+            .all(|(label, _)| !label.starts_with("Link "))
+        );
+
+        let (compiled, _) = state.oib_compiled(None).unwrap();
+        let preview = oib::graph::definition_preview(&compiled, definition, [320., 240.]).unwrap();
+        assert_eq!(preview.definition, definition);
+        assert!(preview.objects.len() <= MAX_AUTHORED_OBJECTS);
+    }
+    #[test]
+    fn imported_definitions_never_offer_mutation_tools_and_invalid_pins_reject() {
+        let ui = imported_fixture::admit(&imported_fixture::update(
+            &imported_fixture::imported(),
+            |_| {},
+        ));
+        let mut authority = Document::new(ui.state_schema.clone(), "d2:visible-tools").unwrap();
+        authority.configure_oib(&ui).unwrap();
+        let (state, _) = connect(&ui, &mut authority, 85);
+        let source = state.oib_authoring_seed().unwrap();
+        assert!(
+            tools(
+                &state,
+                &source,
+                &Selection::Definition(DefinitionId(12)),
+                &authority.oib_allocations().unwrap()
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let mut invalid = source.clone();
+        invalid
+            .graph
+            .as_mut()
+            .unwrap()
+            .imports
+            .as_mut()
+            .unwrap()
+            .locks[0]
+            .revision[0] ^= 1;
+        assert!(
+            tools(
+                &state,
+                &invalid,
+                &Selection::Definition(DefinitionId(10)),
+                &authority.oib_allocations().unwrap()
+            )
+            .is_err()
         );
     }
 }

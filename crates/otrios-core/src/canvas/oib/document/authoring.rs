@@ -70,6 +70,7 @@ pub fn transform(seed: &Seed, operations: &[DefinitionEdit]) -> Result<Vec<Compo
             | DefinitionEdit::SetVisual { definition, .. }
             | DefinitionEdit::SetSlots { definition, .. }
             | DefinitionEdit::SetDefault { definition, .. }
+            | DefinitionEdit::ClearDefault { definition, .. }
             | DefinitionEdit::RenameDefinition { definition, .. }
             | DefinitionEdit::RenameNode { definition, .. }
             | DefinitionEdit::MoveNode { definition, .. }
@@ -262,6 +263,33 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 });
                 current.defaults.sort_by_key(|default| default.property);
             }
+        }
+        DefinitionEdit::ClearDefault {
+            definition,
+            node,
+            property,
+        } => {
+            let document = seed.designer.as_ref().ok_or("Missing OIB document")?;
+            let current = document
+                .definitions
+                .iter()
+                .find(|d| d.id == *definition)
+                .and_then(|d| d.nodes.iter().find(|n| n.id == *node))
+                .ok_or("Unknown definition node")?;
+            let descriptor = super::descriptors(document, current.class)?
+                .into_iter()
+                .find(|d| d.id == *property)
+                .ok_or("Unknown definition property")?;
+            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+                return Err("OIB property is read-only".into());
+            }
+            definition_mut(seed, *definition)?
+                .nodes
+                .iter_mut()
+                .find(|n| n.id == *node)
+                .ok_or("Unknown definition node")?
+                .defaults
+                .retain(|d| d.property != *property);
         }
         DefinitionEdit::SetSlots { definition, slots } => {
             if slots.len() > 16 || slots.windows(2).any(|pair| pair[0].id >= pair[1].id) {

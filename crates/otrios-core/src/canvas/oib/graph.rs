@@ -1407,7 +1407,7 @@ fn materialize_prepared(prepared: PreparedUi) -> Result<PreparedUi> {
     fn has_auto(node: &TemplateNode) -> bool {
         node.layout.is_some() || node.children.iter().any(has_auto)
     }
-    if blueprint.templates.iter().any(|t| has_auto(&t.root)) {
+    if blueprint.viewport.is_fit() && blueprint.templates.iter().any(|t| has_auto(&t.root)) {
         blueprint.schema = otrios_interfaces::layout::AUTO_LAYOUT_FORMAT.into();
     }
 

@@ -22,6 +22,7 @@ mod lifecycle;
 mod reset;
 mod source;
 mod structure;
+pub(super) use structure::IdentityPlan;
 
 /// One disposable compiled structural revision, shared by document clones and
 /// keyed by signed admission identity and validated structural-source digest.
@@ -1592,6 +1593,7 @@ impl Document {
             }
         }
         self.tree = candidate.tree;
+        self.oib_identity_plan = candidate.oib_identity_plan;
         Ok(())
     }
 }

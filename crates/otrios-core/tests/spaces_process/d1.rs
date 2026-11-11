@@ -548,6 +548,17 @@ fn b5_atomic_apply_mixed_publication_lost_reply_restart_replay_and_admin_gate() 
     recovered.settle();
     let receipt = recovered.state.oib_apply_result().unwrap().unwrap();
     assert_eq!(receipt.digest, digest);
+    assert_eq!(
+        receipt.property_versions,
+        vec![
+            recovered
+                .state
+                .oib_property_register(&property)
+                .unwrap()
+                .version
+                .to_vec()
+        ]
+    );
     assert!(
         matches!(receipt.result, ApplyResult::Accepted { generation, structural_generation } if generation == before_ui + 1 && structural_generation == before_structure + 1)
     );
@@ -563,6 +574,40 @@ fn b5_atomic_apply_mixed_publication_lost_reply_restart_replay_and_admin_gate() 
     );
     assert_eq!(recovered.state.oib_apply_result().unwrap(), Some(receipt));
     assert_eq!(recovered.state.value(1).unwrap(), 482);
+    let mut clear = recovered.state.oib_apply_base().unwrap();
+    clear
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::ClearDefault {
+            definition: DefinitionId(12),
+            node: NodeId(1),
+            property: PropertyId(3),
+        }));
+    recovered.state.apply_oib(clear).unwrap();
+    recovered.settle();
+    assert_eq!(
+        recovered.state.oib_active().unwrap()[&cell],
+        Some(Value::Text("Atomic process text".into()))
+    );
+    let durable = fixture.durable(&collection);
+    let compiled = durable.oib_compiled(2).unwrap().0;
+    assert!(
+        !oib::seed(&compiled)
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .definitions
+            .iter()
+            .find(|d| d.id == DefinitionId(12))
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|n| n.id == NodeId(1))
+            .unwrap()
+            .defaults
+            .iter()
+            .any(|d| d.property == PropertyId(3))
+    );
     fixture.counter_unchanged();
 }
 fn seed(ui: &Ui) -> &otrios_interfaces::oib::Seed {

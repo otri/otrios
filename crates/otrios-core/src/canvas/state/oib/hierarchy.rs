@@ -66,7 +66,7 @@ impl Document {
                     before,
                     frame,
                 } => {
-                    let id = InstanceId(self.oib_next_id()?);
+                    let id = InstanceId(self.oib_allocating_id()?);
                     self.oib_instance_stage(&InstanceStage::Insert {
                         prototype: prototype.0,
                         name: name.clone(),
@@ -167,7 +167,7 @@ impl Document {
                     }
                     let mut remap = BTreeMap::new();
                     for source in sources {
-                        let fresh = InstanceId(self.oib_next_id()?);
+                        let fresh = InstanceId(self.oib_allocating_id()?);
                         self.oib_instance_stage(&InstanceStage::Duplicate {
                             instance: source.0,
                             name: if source == *instance {

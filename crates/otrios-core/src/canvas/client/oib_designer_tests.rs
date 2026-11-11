@@ -1373,6 +1373,7 @@ fn nonzero_selector_evaluates_numeric_state_and_rejects_other_types() {
         children: vec![],
     };
     let layout = crate::dashboard::layout::Layout::encode(&Blueprint {
+        viewport: Default::default(),
         schema: "otrios-layout-v1".into(),
         composition: None,
         templates: vec![Template {
@@ -3122,6 +3123,11 @@ fn responsive_workspace_chrome_has_no_retired_profile_or_divider_controls() {
 }
 
 fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
+    if label == "New component" {
+        let id = super::super::oib_workspace::NEW_COMPONENT;
+        assert!(client.activate(client.epoch(), id).unwrap());
+        return id;
+    }
     client
         .designer_activate(super::super::oib_workspace::TAB_LIBRARY)
         .unwrap();
@@ -5396,6 +5402,15 @@ fn compatible_library_activation_waits_for_held_slider_and_final_receipt_without
 #[test]
 fn working_copy_new_component_preview_undo_discard_never_reaches_authority() {
     let (mut client, authority, _) = mounted_fixture_session_with_count(true, 0);
+    let original_selection = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+        .clone();
     let before = client.active.as_ref().unwrap().doc.oib_root();
     let before_generation = authority.oib_status().unwrap().structural_generation;
     assert!(client.designer_new_component().unwrap());
@@ -5427,6 +5442,17 @@ fn working_copy_new_component_preview_undo_discard_never_reaches_authority() {
         before_generation
     );
     assert!(client.designer_history(false).unwrap());
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        original_selection
+    );
     assert!(
         !client
             .active
@@ -5438,6 +5464,29 @@ fn working_copy_new_component_preview_undo_discard_never_reaches_authority() {
             .dirty()
     );
     assert!(client.designer_history(true).unwrap());
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        Selection::Definition(id)
+    );
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .definition_presentation
+            .as_ref()
+            .unwrap()
+            .preview
+            .definition,
+        id
+    );
     assert!(
         client
             .active
@@ -5671,4 +5720,124 @@ fn working_copy_toolbar_pointer_routes_all_commands_and_keeps_cancelled_taps_loc
             .unwrap()
             .dirty()
     );
+}
+
+#[test]
+fn working_copy_history_restores_origin_task_and_reopens_created_component() {
+    let (mut client, _, _) = mounted_fixture_session_with_count(true, 0);
+    client
+        .designer_action(LocalAction::Workspace(Task::Library))
+        .unwrap();
+    let original = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+        .clone();
+    client.designer_new_component().unwrap();
+    let created = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+        .clone();
+    client.designer_history(false).unwrap();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(d.selection, original);
+    assert_eq!(d.workspace_task, Task::Library);
+    client.designer_history(true).unwrap();
+    let m = client.active.as_mut().unwrap();
+    let d = m.designer.as_ref().unwrap();
+    assert_eq!(d.selection, created);
+    assert_eq!(d.workspace_task, Task::Inspect);
+    assert!(m.definition_presentation.is_some());
+    assert!(m.doc.generate().unwrap().is_none());
+}
+
+#[test]
+fn working_copy_labelled_slider_links_verified_export_then_applies_one_composition() {
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let original_libraries = super::super::super::oib::seed(&ui)
+        .unwrap()
+        .resolved_libraries
+        .clone();
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_ui(true, 0, ui);
+    client.set_viewport([1280., 800.]).unwrap();
+    let generation = authority.oib_status().unwrap().structural_generation;
+    let instances = authority.oib_allocations().unwrap();
+    client.designer_new_component().unwrap();
+    let Selection::Definition(id) = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+    else {
+        panic!("New component must select its definition")
+    };
+    activate_studio_tool(&mut client, "Add text");
+    activate_studio_tool(&mut client, "Link Slider");
+    let m = client.active.as_mut().unwrap();
+    let source = m.design_doc().oib_authoring_seed().unwrap();
+    let component = source
+        .graph
+        .as_ref()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == id)
+        .unwrap();
+    assert_eq!(component.nodes.len(), 3);
+    assert!(component.nodes.iter().any(|n| {
+        n.reference
+            .as_ref()
+            .is_some_and(|r| r.definition == DefinitionId(12))
+    }));
+    assert_eq!(source.resolved_libraries, original_libraries);
+    assert!(
+        !source
+            .graph
+            .as_ref()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|d| d.id == DefinitionId(12)),
+        "imported implementation remains outside authored source"
+    );
+    assert!(
+        m.doc.generate().unwrap().is_none(),
+        "composition remains private until global Apply"
+    );
+    assert!(m.definition_presentation.is_some());
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        generation + 1
+    );
+    assert_eq!(
+        authority.oib_allocations().unwrap(),
+        instances,
+        "unused component does not need an app insertion"
+    );
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_authoring_seed()
+            .unwrap()
+            .resolved_libraries,
+        original_libraries
+    );
+    assert!(client.scene().unwrap().controls().len() <= 128);
 }

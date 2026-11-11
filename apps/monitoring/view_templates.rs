@@ -127,6 +127,7 @@ pub fn blueprint() -> Blueprint {
         ],
     );
     Blueprint {
+        viewport: Default::default(),
         composition: None,
         schema: "otrios-layout-v2".into(),
         templates: vec![root, label, panel],

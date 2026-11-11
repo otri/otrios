@@ -7,6 +7,24 @@ pub use auto_layout::{
 };
 pub const AUTO_LAYOUT_FORMAT: &str = "otrios-layout-v6";
 pub const AUTO_LAYOUT_FEATURE: &str = "otrios-auto-layout-v1";
+pub const RESPONSIVE_VIEWPORT_FORMAT: &str = "otrios-layout-v7";
+pub const RESPONSIVE_VIEWPORT_FEATURE: &str = "otrios-responsive-viewport-v1";
+/// Signed host sizing policy. Fit preserves the legacy design extent; Responsive
+/// preserves the available aspect ratio while enforcing readable logical minima.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ViewportPolicy {
+    #[default]
+    Fit,
+    Responsive {
+        minimum: [f32; 2],
+    },
+}
+impl ViewportPolicy {
+    pub fn is_fit(&self) -> bool {
+        matches!(self, Self::Fit)
+    }
+}
 /// Sparse u8 responder identities; 255 remains reserved for the host.
 /// Control/scene counts retain their existing admission bounds.
 pub const SPARSE_EVENTS_FORMAT: &str = "otrios-layout-v5";
@@ -178,6 +196,8 @@ pub struct Instance {
 #[serde(deny_unknown_fields)]
 pub struct Blueprint {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "ViewportPolicy::is_fit")]
+    pub viewport: ViewportPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Composition>,
     pub templates: Vec<Template>,

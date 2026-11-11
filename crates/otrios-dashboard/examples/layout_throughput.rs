@@ -56,6 +56,7 @@ fn blueprint(nodes: usize, clipped: bool, kind: &str) -> Blueprint {
         })
         .collect();
     Blueprint {
+        viewport: Default::default(),
         schema: "otrios-layout-v2".into(),
         composition: None,
         templates: vec![Template {

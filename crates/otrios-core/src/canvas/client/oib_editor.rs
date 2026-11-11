@@ -50,6 +50,7 @@ impl Mount {
     }
     pub(super) fn stage_structure(&mut self, operation: EditBatch) -> Result<bool> {
         self.sync_working_copy()?;
+        self.remember_edit_location();
         let changed = self
             .working_copy
             .as_mut()
@@ -66,6 +67,7 @@ impl Mount {
         value: Option<Value>,
     ) -> Result<bool> {
         self.sync_working_copy()?;
+        self.remember_edit_location();
         let changed = self
             .working_copy
             .as_mut()
@@ -75,6 +77,13 @@ impl Mount {
             self.working_changed()?;
         }
         Ok(changed)
+    }
+    pub(super) fn remember_edit_location(&mut self) {
+        if let Some(d) = &self.designer
+            && let Some(w) = &mut self.working_copy
+        {
+            w.remember_location(d.selection.clone(), d.workspace_task());
+        }
     }
     pub(super) fn working_changed(&mut self) -> Result<()> {
         if let Some(d) = &mut self.designer {
@@ -114,7 +123,7 @@ impl Mount {
                 && !fields_invalid
                 && self.doc.confirmed()
                 && working.is_some_and(|w| w.error.is_none() && (w.dirty() || fields_dirty)),
-            modal: self.leave_modal(),
+            modal: self.leave_modal().or_else(|| self.history_review_modal()),
         }
     }
     pub(super) fn selected_definition(&self) -> Option<DefinitionId> {

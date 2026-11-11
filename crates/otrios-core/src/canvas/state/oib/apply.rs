@@ -6,6 +6,25 @@ use otrios_interfaces::oib::authoring::{
 };
 
 impl Document {
+    pub(in crate::canvas::state) fn oib_apply_property_versions(
+        &self,
+        apply: &Apply,
+    ) -> Result<Vec<Vec<u8>>> {
+        let seed = self.oib_resolved_shared()?;
+        let allocations = self.oib_allocations()?;
+        apply
+            .changes
+            .iter()
+            .map(|change| {
+                let id = super::super::super::oib::document::cell_for_address(
+                    &seed,
+                    &allocations,
+                    &change.address,
+                )?;
+                Ok(self.oib_property_leaf(1, id)?.hash().to_vec())
+            })
+            .collect()
+    }
     pub(in crate::canvas::state) fn oib_apply_candidate(
         &self,
         writer: Actor,
@@ -156,6 +175,12 @@ impl Document {
 }
 
 impl StateAdapter {
+    /// Canonical authoring source only, excluding app values and live adapters.
+    pub(in crate::canvas) fn oib_history_source(
+        &self,
+    ) -> Result<otrios_interfaces::oib::authoring::DocumentSource> {
+        self.doc.oib_source()
+    }
     /// Produce a private placement command without queuing an authority write.
     pub(in crate::canvas) fn oib_placement_operation(
         &self,

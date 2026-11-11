@@ -218,6 +218,14 @@ impl Client {
             return Ok(false);
         }
         if !self.host_active
+            && let Some(changed) = self.history_review_scroll(position, delta)?
+        {
+            return Ok(changed);
+        }
+        if self.active.as_ref().is_some_and(|m| m.leave.is_some()) {
+            return Ok(false);
+        }
+        if !self.host_active
             && let Some(changed) = self.designer_scroll_at(delta, position)?
         {
             return Ok(changed);

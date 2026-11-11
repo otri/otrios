@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {layoutViewport,chatViewport,pointerPosition,semanticBounds} from '../web/shared/viewport.mjs';
+import {layoutViewport,chatViewport,pointerPosition,semanticBounds,viewportRequestNeeded} from '../web/shared/viewport.mjs';
 test('available orientation selects a supported logical viewport independently of DPR',()=>{
   assert.deepEqual(layoutViewport(1440,900),[1280,800]);
   assert.deepEqual(layoutViewport(768,1024),[800,1280]);
@@ -27,4 +27,31 @@ test('chat preserves full width and UI scale as the visual keyboard changes heig
   assert.deepEqual(chatViewport(1280,800),[1280,800]);
   assert.deepEqual(chatViewport(800,1280),[800,1280]);
   assert.throws(()=>chatViewport(NaN,420));
+});
+
+const responsive={kind:'responsive',minimum:[800,480]};
+test('signed responsive viewport preserves actual desktop size, aspect and readable minima',()=>{
+  assert.deepEqual(layoutViewport(1920,1080,responsive),[1920,1080]);
+  assert.deepEqual(layoutViewport(1600,900,responsive),[1600,900]);
+  assert.deepEqual(layoutViewport(1280,800,responsive),[1280,800]);
+  assert.deepEqual(layoutViewport(640,480,responsive),[800,600]);
+  assert.deepEqual(layoutViewport(800,400,responsive),[960,480]);
+  const wide=layoutViewport(10000,2000,responsive);
+  assert(Math.abs(wide[0]/wide[1]-5)<1e-9);assert(wide.every(n=>n<=8192));assert(wide[1]>=480);
+  assert.throws(()=>layoutViewport(10000,1,responsive));
+  assert.throws(()=>layoutViewport(1920,1080,{kind:'responsive',minimum:[0,480]}));
+  assert.throws(()=>layoutViewport(1920,1080,{kind:'unknown'}));
+  assert.deepEqual(layoutViewport(1920,1080),[1280,800],'unannotated applications preserve their original Fit policy');
+});
+test('responsive pointer and semantic bounds use the same published logical dimensions',()=>{
+  const extent=layoutViewport(1920,1080,responsive),bounds={left:10,top:20,width:1920,height:1080};
+  assert.deepEqual(pointerPosition(970,560,bounds,extent),[960,540]);
+  assert.deepEqual(semanticBounds([480,270,960,540],extent),{left:'25%',top:'25%',width:'50%',height:'50%'});
+});
+test('policy and mount entry trigger sizing even at identical current dimensions',()=>{
+  const extent=[1280,800];
+  assert(viewportRequestNeeded(extent,extent,'fit:epoch1','responsive:epoch2'));
+  assert(viewportRequestNeeded(extent,extent,'responsive:epoch2','responsive:epoch3'));
+  assert(!viewportRequestNeeded(extent,extent,'responsive:epoch3','responsive:epoch3'));
+  assert(viewportRequestNeeded(extent,[1920,1080],'responsive:epoch3','responsive:epoch3'));
 });

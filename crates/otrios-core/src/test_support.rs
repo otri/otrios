@@ -9,6 +9,7 @@ pub(crate) mod oib_designer;
 
 pub(crate) fn empty_layout() -> Vec<u8> {
     Layout::encode(&Blueprint {
+        viewport: ViewportPolicy::Fit,
         schema: "otrios-layout-v2".into(),
         composition: None,
         templates: vec![Template {

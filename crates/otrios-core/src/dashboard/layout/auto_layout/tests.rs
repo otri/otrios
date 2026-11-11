@@ -33,6 +33,7 @@ fn policy(width: Sizing, height: Sizing, flow: Option<AutoLayout>) -> NodeLayout
 }
 fn blueprint(child: TemplateNode) -> Blueprint {
     Blueprint {
+        viewport: ViewportPolicy::Fit,
         schema: "otrios-layout-v6".into(),
         composition: None,
         templates: vec![Template {

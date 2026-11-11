@@ -62,7 +62,7 @@ impl Document {
                     .all(|allocation| allocation.slot != *slot)
             })
             .ok_or("OIB resident instance capacity exhausted")?;
-        let id = self.oib_next_id()?;
+        let id = self.oib_allocating_id()?;
         if !(self.oib_binding()?.identity_floor..MAX_ID).contains(&id) {
             return Err("OIB identity counter exhausted".into());
         }
@@ -72,9 +72,12 @@ impl Document {
                 "Instance names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
             );
         }
+        self.oib_claim_implicit(id)?;
         self.change(
             &[],
-            vec![self.oib_source_edit(|source| source.next_identity = id + 1)?],
+            vec![self.oib_source_edit(|source| {
+                source.next_identity = source.next_identity.max(id + 1)
+            })?],
         )?;
         Ok(Allocation {
             id,

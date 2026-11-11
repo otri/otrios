@@ -205,11 +205,15 @@ impl Signs {
 fn signs(blueprint: &Blueprint) -> Vec<usize> {
     let Blueprint {
         schema: _,
+        viewport,
         composition,
         templates,
         root,
     } = blueprint;
     let mut signs = Signs::default();
+    if let ViewportPolicy::Responsive { minimum } = viewport {
+        signs.numbers(minimum);
+    }
     if let Some(Composition {
         wide_min_width,
         wide,

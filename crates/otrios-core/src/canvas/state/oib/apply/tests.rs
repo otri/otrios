@@ -2,9 +2,14 @@
 use super::*;
 use crate::test_support::oib_designer as app;
 use otrios_interfaces::oib::authoring::*;
+#[allow(dead_code)]
+#[path = "../../../../../tests/support/oib_library_fixture.rs"]
+mod imported_fixture;
 
 fn fixture() -> (Document, StateAdapter, Session) {
-    let ui = app::ui(&[]);
+    fixture_ui(app::ui(&[]))
+}
+fn fixture_ui(ui: Ui) -> (Document, StateAdapter, Session) {
     let mut authority = Document::new(ui.state_schema.clone(), "oib:atomic-apply").unwrap();
     authority.configure_oib(&ui).unwrap();
     let writer = [81; 16];
@@ -28,6 +33,241 @@ fn fixture() -> (Document, StateAdapter, Session) {
     }
     assert!(replica.confirmed());
     (authority, replica, session)
+}
+
+fn interleaved_creation(replica: &StateAdapter, implicit: bool) -> Apply {
+    use otrios_interfaces::{
+        layout::{Expr, Shape},
+        oib::{designer::*, graph},
+    };
+    let source = replica.oib_history_source().unwrap();
+    let next = source.next_identity;
+    let resolved = replica.doc.oib_resolved_seed().unwrap();
+    let metadata = resolved.designer.as_ref().unwrap();
+    let (class, property) = metadata
+        .classes
+        .iter()
+        .find_map(|class| {
+            class
+                .properties
+                .iter()
+                .find(|p| p.policy.live_literal && matches!(p.default, Value::Text(_)))
+                .map(|p| (class.id, p.id))
+        })
+        .unwrap();
+    let text = DefinitionNode {
+        id: NodeId(next + if implicit { 4 } else { 3 }),
+        name: "Caption".into(),
+        class,
+        owner: Some(NodeId(next + 1)),
+        visual_children: vec![],
+        defaults: vec![PropertyDefault {
+            property,
+            value: Value::Text("Caption".into()),
+        }],
+        reference: None,
+        visual: Some(graph::Visual {
+            layout: None,
+            frame: [0., 0., 160., 32.].map(|v| Expr::Literal(Value::Number(v))),
+            resize: None,
+            visible: Expr::Literal(Value::Boolean(true)),
+            shape: Shape::Text {
+                value: Expr::Literal(Value::Text("Caption".into())),
+                scale: Expr::Literal(Value::Number(1.)),
+                color: Expr::Literal(Value::Color([255; 4])),
+            },
+            semantics: None,
+            action: None,
+            parameters: vec![],
+        }),
+    };
+    let mut link = source
+        .definitions
+        .iter()
+        .flat_map(|d| &d.nodes)
+        .find(|n| {
+            n.reference
+                .as_ref()
+                .is_some_and(|r| r.definition == DefinitionId(12))
+        })
+        .unwrap()
+        .clone();
+    link.id = NodeId(next + if implicit { 5 } else { 4 });
+    link.owner = Some(NodeId(next + 1));
+    link.name = "Slider".into();
+    link.visual_children.clear();
+    link.reference.as_mut().unwrap().assignments.clear();
+    let root = DefinitionNode {
+        id: NodeId(next + 1),
+        name: "LabelledSlider".into(),
+        class: ClassId(4),
+        owner: None,
+        visual_children: vec![],
+        defaults: vec![],
+        reference: None,
+        visual: Some(graph::Visual {
+            layout: None,
+            frame: [0., 0., 320., 96.].map(|v| Expr::Literal(Value::Number(v))),
+            resize: None,
+            visible: Expr::Literal(Value::Boolean(true)),
+            shape: Shape::Canvas { clip: true },
+            semantics: None,
+            action: None,
+            parameters: vec![],
+        }),
+    };
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply.operations = vec![
+        DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
+            definition: DefinitionId(next),
+            name: "LabelledSlider".into(),
+            root,
+        }),
+        DocumentEdit::Definition(DefinitionEdit::CreateNode {
+            definition: DefinitionId(next),
+            node: text,
+            visual_parent: Some(NodeId(next + 1)),
+            before: None,
+        }),
+        DocumentEdit::Definition(DefinitionEdit::CreateNode {
+            definition: DefinitionId(next),
+            node: link,
+            visual_parent: Some(NodeId(next + 1)),
+            before: None,
+        }),
+        DocumentEdit::Preset(PresetEdit::Create {
+            preset: graph::Preset {
+                id: next + 2,
+                name: "LabelledSlider".into(),
+                definition: DefinitionId(next),
+                assignments: vec![],
+                frame: None,
+                palette: true,
+            },
+        }),
+    ];
+    if implicit {
+        apply.operations.extend(
+            EditBatch::insert(
+                apply.generation,
+                source
+                    .instances
+                    .iter()
+                    .find(|i| i.id == 20)
+                    .unwrap()
+                    .prototype,
+                None,
+                Some("inserted-panel".into()),
+            )
+            .operations,
+        );
+    }
+    apply
+}
+
+#[test]
+fn atomic_apply_interleaved_new_text_import_link_and_new_property_claim_once() {
+    use otrios_interfaces::oib::designer::{DefinitionId, NodeId, PropertyAddress};
+    let ui = imported_fixture::admit(&imported_fixture::imported());
+    let (mut authority, mut replica, mut session) = fixture_ui(ui);
+    let next = replica.oib_history_source().unwrap().next_identity;
+    let mut apply = interleaved_creation(&replica, false);
+    let preview = replica.preview_oib_apply(&apply).unwrap();
+    let seed = preview.doc.oib_resolved_seed().unwrap();
+    let address=seed.cells.iter().filter(|c|matches!(c.default,Value::Text(_))).find_map(|c|{
+        let address=super::super::super::super::oib::document::address_for_cell(&seed,c.id).ok()?;
+        matches!(address,PropertyAddress::Definition{definition:DefinitionId(d),node:NodeId(n),..} if d==next&&n==next+3).then_some(address)
+    }).unwrap();
+    apply.changes.push(
+        preview
+            .oib_capture_change(&address, Some(Value::Text("Volume level".into())))
+            .unwrap(),
+    );
+    assert_eq!(replica.oib_history_source().unwrap().next_identity, next);
+    replica.apply_oib(apply).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Accepted { .. }
+    ));
+    let source = replica.oib_history_source().unwrap();
+    assert_eq!(source.next_identity, next + 5);
+    assert!(source.presets.iter().any(|p| p.id == next + 2));
+    let root = source
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(next))
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.id == NodeId(next + 1))
+        .unwrap();
+    assert_eq!(
+        root.visual_children,
+        vec![NodeId(next + 3), NodeId(next + 4)]
+    );
+    let cell = replica.oib_property_register(&address).unwrap().cell;
+    assert_eq!(
+        replica.oib_active().unwrap()[&cell],
+        Some(Value::Text("Volume level".into()))
+    );
+    assert!(authority.oib_identity_plan.is_none());
+}
+
+#[test]
+fn atomic_apply_reservations_fill_implicit_holes_and_reject_future_or_duplicate_ids() {
+    let (mut authority, mut replica, mut session) = fixture();
+    let next = replica.oib_history_source().unwrap().next_identity;
+    let valid = interleaved_creation(&replica, true);
+    let preview = replica.preview_oib_apply(&valid).unwrap();
+    assert_eq!(
+        preview.oib_history_source().unwrap().next_identity,
+        next + 6
+    );
+    assert!(
+        preview
+            .oib_allocations()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == next + 3)
+    );
+    let mut hole = valid.clone();
+    hole.operations.pop();
+    assert!(
+        replica
+            .preview_oib_apply(&hole)
+            .err()
+            .unwrap()
+            .contains("contiguous")
+    );
+    let mut duplicate = valid.clone();
+    if let DocumentEdit::Preset(PresetEdit::Create { preset }) = &mut duplicate.operations[3] {
+        preset.id = next + 4;
+    }
+    assert!(
+        replica
+            .preview_oib_apply(&duplicate)
+            .err()
+            .unwrap()
+            .contains("duplicate")
+    );
+    replica.apply_oib(valid).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Accepted { .. }
+    ));
+    assert!(
+        replica
+            .oib_allocations()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == next + 3)
+    );
+    assert_eq!(
+        replica.oib_history_source().unwrap().next_identity,
+        next + 6
+    );
 }
 fn settle(authority: &mut Document, replica: &mut StateAdapter, session: &mut Session) {
     for _ in 0..40 {
@@ -108,6 +348,463 @@ fn atomic_apply_mixed_source_and_property_activates_once_and_preview_has_no_tran
         replica.oib_apply_result().unwrap().unwrap().result,
         ApplyResult::Accepted { .. }
     ));
+    let address = color_change(&replica, [240, 20, 30, 255]).address;
+    assert_eq!(
+        replica
+            .oib_apply_result()
+            .unwrap()
+            .unwrap()
+            .property_versions,
+        vec![
+            replica
+                .oib_property_register(&address)
+                .unwrap()
+                .version
+                .to_vec()
+        ]
+    );
+}
+
+#[test]
+fn history_conditional_inverse_keeps_unrelated_source_and_rejects_equal_value_aba() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let before = replica.oib_history_source().unwrap();
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply.operations.push(rename(&replica));
+    apply
+        .changes
+        .push(color_change(&replica, [240, 20, 30, 255]));
+    replica.apply_oib(apply.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let receipt = replica.oib_apply_result().unwrap().unwrap();
+    let entry = Entry::capture(
+        &before,
+        &replica.oib_history_source().unwrap(),
+        &apply,
+        &receipt,
+    )
+    .unwrap();
+    assert!(entry.encoded_bytes().unwrap() <= crate::canvas::oib::history::MAX_HISTORY_BYTES);
+    let other = before
+        .definitions
+        .iter()
+        .find(|d| d.name != "SettingsPanel")
+        .unwrap()
+        .id;
+    let mut remote = replica.oib_apply_base().unwrap();
+    remote
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::RenameDefinition {
+            definition: other,
+            name: "Other author name".into(),
+        }));
+    replica.apply_oib(remote).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let changes: Vec<_> = entry
+        .property_values()
+        .into_iter()
+        .map(|(a, v)| replica.oib_capture_change(&a, v).unwrap())
+        .collect();
+    let inverse = entry
+        .plan(
+            &replica.oib_history_source().unwrap(),
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &changes,
+        )
+        .unwrap();
+    replica.apply_oib(inverse).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let restored = replica.oib_history_source().unwrap();
+    assert!(
+        restored
+            .definitions
+            .iter()
+            .any(|d| d.name == "SettingsPanel")
+    );
+    assert!(
+        restored
+            .definitions
+            .iter()
+            .any(|d| d.id == other && d.name == "Other author name")
+    );
+    // Another author writes exactly the history's expected visible property.
+    // The actual accepted receipt proof must still detect the newer context.
+    let mut second = replica.oib_apply_base().unwrap();
+    second
+        .changes
+        .push(color_change(&replica, [22, 33, 44, 255]));
+    let second_before = replica.oib_history_source().unwrap();
+    replica.apply_oib(second.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let receipt = replica.oib_apply_result().unwrap().unwrap();
+    let entry = Entry::capture(
+        &second_before,
+        &replica.oib_history_source().unwrap(),
+        &second,
+        &receipt,
+    )
+    .unwrap();
+    replica
+        .edit_oib_property(&second.changes[0].address, second.changes[0].value.clone())
+        .unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let changes: Vec<_> = entry
+        .property_values()
+        .into_iter()
+        .map(|(a, v)| replica.oib_capture_change(&a, v).unwrap())
+        .collect();
+    assert!(
+        !entry
+            .review(
+                &replica.oib_history_source().unwrap(),
+                replica.oib_generation().unwrap(),
+                &changes
+            )
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        entry
+            .plan(
+                &replica.oib_history_source().unwrap(),
+                replica.oib_generation().unwrap(),
+                replica.oib_apply_base().unwrap(),
+                &changes
+            )
+            .is_err()
+    );
+    assert_eq!(replica.oib_apply_result().unwrap(), Some(receipt));
+}
+
+#[test]
+fn history_default_inverse_restores_absence_without_changing_override_registers() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let source = replica.oib_history_source().unwrap();
+    let (definition, node, property) = source
+        .definitions
+        .iter()
+        .find_map(|d| {
+            d.nodes.iter().find_map(|n| {
+                n.defaults
+                    .iter()
+                    .find(|v| matches!(v.value, Value::Text(_)))
+                    .map(|v| (d.id, n.id, v.property))
+            })
+        })
+        .unwrap();
+    let mut clear = replica.oib_apply_base().unwrap();
+    clear
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::ClearDefault {
+            definition,
+            node,
+            property,
+        }));
+    replica.apply_oib(clear).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let before = replica.oib_history_source().unwrap();
+    assert!(
+        !before
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|n| n.id == node)
+            .unwrap()
+            .defaults
+            .iter()
+            .any(|v| v.property == property)
+    );
+    let address = otrios_interfaces::oib::designer::PropertyAddress::Definition {
+        definition,
+        node,
+        property,
+    };
+    let version = replica.oib_property_register(&address).unwrap().version;
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::SetDefault {
+            definition,
+            node,
+            property,
+            value: Value::Text("Authored value".into()),
+        }));
+    replica.apply_oib(apply.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let entry = Entry::capture(
+        &before,
+        &replica.oib_history_source().unwrap(),
+        &apply,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    let inverse = entry
+        .plan(
+            &replica.oib_history_source().unwrap(),
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &[],
+        )
+        .unwrap();
+    assert!(matches!(
+        inverse.operations.as_slice(),
+        [DocumentEdit::Definition(
+            DefinitionEdit::ClearDefault { .. }
+        )]
+    ));
+    replica.apply_oib(inverse).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    assert_eq!(
+        replica.oib_history_source().unwrap().definitions,
+        before.definitions
+    );
+    assert_eq!(
+        replica.oib_property_register(&address).unwrap().version,
+        version
+    );
+}
+
+#[test]
+fn history_legacy_receipt_has_no_inferred_property_proof() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let before = replica.oib_history_source().unwrap();
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply
+        .changes
+        .push(color_change(&replica, [12, 34, 56, 255]));
+    replica.apply_oib(apply.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let mut receipt = replica.oib_apply_result().unwrap().unwrap();
+    receipt.property_versions.clear();
+    let decoded: ApplyReceipt =
+        flexbuffers::from_slice(&flexbuffers::to_vec(&receipt).unwrap()).unwrap();
+    assert!(decoded.property_versions.is_empty());
+    assert!(
+        Entry::capture(
+            &before,
+            &replica.oib_history_source().unwrap(),
+            &apply,
+            &decoded
+        )
+        .unwrap_err()
+        .contains("proof is unavailable")
+    );
+}
+
+#[test]
+fn history_reanchors_only_the_acknowledged_local_undo_chain() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let mut entries = vec![];
+    for color in [[10, 20, 30, 255], [40, 50, 60, 255]] {
+        let before = replica.oib_history_source().unwrap();
+        let mut apply = replica.oib_apply_base().unwrap();
+        apply.changes.push(color_change(&replica, color));
+        replica.apply_oib(apply.clone()).unwrap();
+        settle(&mut authority, &mut replica, &mut session);
+        entries.push(
+            Entry::capture(
+                &before,
+                &replica.oib_history_source().unwrap(),
+                &apply,
+                &replica.oib_apply_result().unwrap().unwrap(),
+            )
+            .unwrap(),
+        );
+    }
+    let newer = entries.pop().unwrap();
+    let mut older = entries.pop().unwrap();
+    let changes: Vec<_> = newer
+        .property_values()
+        .into_iter()
+        .map(|(a, v)| replica.oib_capture_change(&a, v).unwrap())
+        .collect();
+    let source = replica.oib_history_source().unwrap();
+    let inverse = newer
+        .plan(
+            &source,
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &changes,
+        )
+        .unwrap();
+    replica.apply_oib(inverse.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let acknowledged = Entry::capture(
+        &source,
+        &replica.oib_history_source().unwrap(),
+        &inverse,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    let changes: Vec<_> = older
+        .property_values()
+        .into_iter()
+        .map(|(a, v)| replica.oib_capture_change(&a, v).unwrap())
+        .collect();
+    assert!(
+        older
+            .plan(
+                &replica.oib_history_source().unwrap(),
+                replica.oib_generation().unwrap(),
+                replica.oib_apply_base().unwrap(),
+                &changes
+            )
+            .is_err()
+    );
+    assert_eq!(older.reanchor_after_undo(&newer, &acknowledged), 1);
+    assert!(
+        older
+            .plan(
+                &replica.oib_history_source().unwrap(),
+                replica.oib_generation().unwrap(),
+                replica.oib_apply_base().unwrap(),
+                &changes
+            )
+            .is_ok()
+    );
+}
+
+#[test]
+fn history_reorder_restores_original_anchor_dependencies() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let before = replica.oib_history_source().unwrap();
+    let definition = before
+        .definitions
+        .iter()
+        .find(|d| d.name == "SettingsPanel")
+        .unwrap();
+    let root = definition
+        .nodes
+        .iter()
+        .find(|n| n.id == definition.root)
+        .unwrap();
+    assert!(root.visual_children.len() >= 3);
+    let mut apply = replica.oib_apply_base().unwrap();
+    for n in root.visual_children.iter().take(2) {
+        apply
+            .operations
+            .push(DocumentEdit::Definition(DefinitionEdit::MoveNode {
+                definition: definition.id,
+                node: *n,
+                owner: definition.root,
+                visual_parent: Some(definition.root),
+                before: None,
+            }));
+    }
+    replica.apply_oib(apply.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let entry = Entry::capture(
+        &before,
+        &replica.oib_history_source().unwrap(),
+        &apply,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    let inverse = entry
+        .plan(
+            &replica.oib_history_source().unwrap(),
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &[],
+        )
+        .unwrap();
+    replica.apply_oib(inverse).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    assert_eq!(
+        replica.oib_history_source().unwrap().definitions,
+        before.definitions
+    );
+}
+
+#[test]
+fn history_visual_node_name_preset_inverse_and_human_review_preserve_fields() {
+    use crate::canvas::oib::history::Entry;
+    let (mut authority, mut replica, mut session) = fixture();
+    let before = replica.oib_history_source().unwrap();
+    let definition = before
+        .definitions
+        .iter()
+        .find(|d| d.name == "SettingsPanel")
+        .unwrap();
+    let node = definition
+        .nodes
+        .iter()
+        .find(|n| n.id == definition.root)
+        .unwrap();
+    let mut visual = node.visual.clone().unwrap();
+    visual.visible = otrios_interfaces::layout::Expr::Literal(Value::Boolean(false));
+    let mut preset = before
+        .presets
+        .iter()
+        .find(|p| p.definition == definition.id)
+        .unwrap()
+        .clone();
+    preset.name = "History preset".into();
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply.operations = vec![
+        DocumentEdit::Definition(DefinitionEdit::SetVisual {
+            definition: definition.id,
+            node: node.id,
+            visual: Some(visual),
+        }),
+        DocumentEdit::Definition(DefinitionEdit::RenameNode {
+            definition: definition.id,
+            node: node.id,
+            name: "History root".into(),
+        }),
+        DocumentEdit::Preset(PresetEdit::Update { preset }),
+    ];
+    replica.apply_oib(apply.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let after = replica.oib_history_source().unwrap();
+    let entry = Entry::capture(
+        &before,
+        &after,
+        &apply,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    let mut changed = after.clone();
+    changed
+        .definitions
+        .iter_mut()
+        .find(|d| d.id == definition.id)
+        .unwrap()
+        .nodes
+        .iter_mut()
+        .find(|n| n.id == node.id)
+        .unwrap()
+        .name = "Another author".into();
+    let review = entry
+        .review(&changed, replica.oib_generation().unwrap(), &[])
+        .unwrap();
+    assert_eq!(review.len(), 1);
+    assert!(review[0].target.contains("SettingsPanel"));
+    assert_eq!(review[0].before_text, node.name);
+    assert_eq!(review[0].applied_text, "History root");
+    assert_eq!(review[0].current_text, "Another author");
+    let inverse = entry
+        .plan(
+            &after,
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &[],
+        )
+        .unwrap();
+    replica.apply_oib(inverse).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let restored = replica.oib_history_source().unwrap();
+    assert_eq!(restored.definitions, before.definitions);
+    assert_eq!(restored.presets, before.presets);
 }
 
 #[test]
@@ -269,6 +966,7 @@ fn atomic_apply_keeps_original_snapshot_isolated_and_denies_non_admin() {
 
 #[test]
 fn atomic_apply_creation_allocates_only_on_commit_and_replay_never_duplicates() {
+    use crate::canvas::oib::history::Entry;
     use otrios_interfaces::{
         layout::{Expr, Shape},
         oib::{
@@ -319,7 +1017,7 @@ fn atomic_apply_creation_allocates_only_on_commit_and_replay_never_duplicates() 
     assert_eq!(preview.doc.oib_source().unwrap().next_identity, next + 3);
     assert_eq!(authority.oib_source().unwrap(), original);
     assert_eq!(replica.doc.oib_source().unwrap(), original);
-    replica.apply_oib(apply).unwrap();
+    replica.apply_oib(apply.clone()).unwrap();
     let request = replica.generate().unwrap().unwrap();
     authority.receive(&mut session, &request).unwrap();
     let committed = authority.save().unwrap();
@@ -339,6 +1037,47 @@ fn atomic_apply_creation_allocates_only_on_commit_and_replay_never_duplicates() 
     assert_eq!(
         source.presets.iter().filter(|p| p.id == next + 2).count(),
         1
+    );
+    let entry = Entry::capture(
+        &original,
+        &source,
+        &apply,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    assert!(
+        entry
+            .plan(
+                &source,
+                replica.oib_generation().unwrap() + 1,
+                replica.oib_apply_base().unwrap(),
+                &[]
+            )
+            .is_err()
+    );
+    let inverse = entry
+        .plan(
+            &source,
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &[],
+        )
+        .unwrap();
+    replica.apply_oib(inverse.clone()).unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    let removed = replica.oib_history_source().unwrap();
+    assert_eq!(removed.definitions, original.definitions);
+    assert_eq!(removed.presets, original.presets);
+    assert_eq!(removed.next_identity, next + 3);
+    assert!(
+        Entry::capture(
+            &source,
+            &removed,
+            &inverse,
+            &replica.oib_apply_result().unwrap().unwrap()
+        )
+        .unwrap_err()
+        .contains("fresh")
     );
 }
 
