@@ -243,9 +243,16 @@ pub(super) fn inspector(
             nodes.push(label(
                 b,
                 y,
-                &p.value
-                    .as_ref()
-                    .map_or_else(|| "Unavailable".into(), value_label),
+                &p.value.as_ref().map_or_else(
+                    || {
+                        if p.source == "bound" {
+                            "App value".into()
+                        } else {
+                            "Unavailable".into()
+                        }
+                    },
+                    value_label,
+                ),
                 MUTED,
             )?);
             y += 36.;
@@ -439,6 +446,8 @@ fn property_context(
                 "Placement - structural batch"
             } else if matches!(trace.address, PropertyAddress::Structural { .. }) {
                 "Shared design - structural batch"
+            } else if trace.binding.is_some() {
+                "App binding"
             } else if trace.overridden {
                 "Live override at occurrence"
             } else {

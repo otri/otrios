@@ -270,6 +270,36 @@ fn bound_endpoint_can_be_inserted_and_connected_at_outer_occurrence_with_signed_
     assert_eq!(connection.property, property);
     assert_eq!(connection.source.field, 1);
     assert_eq!(client.resource_usage().component_behavior_errors, 0);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(instance),
+            references: vec![],
+            node: root,
+        }))
+        .unwrap();
+    fn contains_text(node: &SceneNode, expected: &str) -> bool {
+        matches!(&node.primitive, Primitive::Text { value, .. } if value == expected)
+            || node
+                .children
+                .iter()
+                .any(|child| contains_text(child, expected))
+    }
+    let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert!(
+        designer
+            .panels
+            .iter()
+            .flat_map(|panel| &panel.nodes)
+            .any(|node| contains_text(node, "App value")),
+        "a resolved app binding is not an unavailable property"
+    );
+    assert!(
+        !designer
+            .panels
+            .iter()
+            .flat_map(|panel| &panel.nodes)
+            .any(|node| contains_text(node, "Unavailable"))
+    );
 }
 
 #[test]

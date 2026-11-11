@@ -1268,3 +1268,20 @@ Stopped at this focused checkpoint following the user's scope restraint. The
 outer-instance app binding has focused local coverage but its live UI journey
 was not performed. No new preset/instance, navigation control, action/slot UI or
 broad qualification campaign was added. The larger Designer goal remains open.
+
+
+## T22 outer binding follow-through — 2026-11-11
+
+The live UI renamed definition 88's preset 90 to Bound slider (revision 53),
+inserted occurrence 92, and connected its exposed Value through Bind to volume.
+Its preview immediately changed from 0% to the existing Volume 51%, before Apply;
+Apply confirmed revision 54 with four instances and zero component errors.
+Audio remained 51%, Display 57%. No new effect, grant, resource limit or
+navigation control was introduced.
+
+This found a misleading inspector fallback: bound values intentionally have no
+authored literal, but the read-only row rendered Unavailable. It now renders
+App value, and expanded source details identify App binding. The focused
+`bound_endpoint_can_be_inserted` runtime test passes (one test), including
+inspector text assertions after admission and publication. Deployment of this
+wording correction and fresh live reload verification follow below.
