@@ -80,9 +80,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `983a3a0`, release
-`ccf6dc54a50fafa9b2cceb30cb1479ccd3a9947d47217c563f26a4671636688a`,
-including exposed Slider Value sample interaction and persistence, earlier
+Last verified live: code `0460435`, release
+`b5babb5484f969f79ef4113f17c2212af1398c4bad439293f0cf05ffde3db3d1`,
+including exposed Slider Value sample interaction, persisted outer app binding
+and accurate bound inspector labels, earlier
 reviewed endpoint removal/Undo/Redo, contextual Layers, natural link
 sizing, named literal endpoints, definition deletion/restoration and earlier B5 slices. Focused Frame/Web
 evidence and remaining UX findings are recorded at
@@ -1285,3 +1286,28 @@ App value, and expanded source details identify App binding. The focused
 `bound_endpoint_can_be_inserted` runtime test passes (one test), including
 inspector text assertions after admission and publication. Deployment of this
 wording correction and fresh live reload verification follow below.
+
+
+### T22 binding live acceptance
+
+Published code `0460435` using `python3 /tmp/otrios-designer-live-build.py`
+(exit 0): native, Wasm and ARM builds completed; existing Frame/Web publisher
+applied release `b5babb5484f969f79ef4113f17c2212af1398c4bad439293f0cf05ffde3db3d1`.
+The automatic builder was restored pinned to that source.
+
+A fresh browser reload retained occurrence 92 and its outer Volume binding.
+The slider rendered 51%; its inspector showed App value and expanded details
+showed App binding. All changes applied, active/presented generation 54/54,
+zero component errors and zero pending/issued app fields. Audio Volume stayed
+51% and Display Brightness 57%. The owned browser tab was closed.
+
+The pinned native readiness helper returned exit 0: same new release, confirmed
+generation 54/presented 54, four instances, three component behavior instances,
+zero component errors and no pending commands. This verifies native synchronization;
+no new native touch gesture was performed. Local focused insertion/binding test,
+`cargo fmt --all --check` and diff check passed; broad suites were not repeated
+for this inspector wording fix.
+
+The previously pending T22 outer-instance binding UI journey is now verified.
+Broader actions/slots, B6 styles and Q01–Q16/F01–F06 remain open; this acceptance
+does not complete the responsive Designer goal.
