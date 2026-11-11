@@ -80,10 +80,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `ca22fc2`, release
-`be1364759c4223fc1a8df747562106581ef3fd998148c89147896b2f7f0187f6`,
-including contextual Layers, natural link sizing, named literal endpoints,
-definition deletion/restoration and the earlier B5 slices. Focused Frame/Web
+Last verified live: code `ac2734a`, release
+`72101f19ef7e0360e284673648f638f6e743d8ebd1ae8a216c26d9922900399b`,
+including reviewed endpoint removal/Undo/Redo, contextual Layers, natural link
+sizing, named literal endpoints, definition deletion/restoration and earlier B5 slices. Focused Frame/Web
 evidence and remaining UX findings are recorded at
 the end of this file. Full B4–B7 gates remain open.
 Retired the host profile selector, divider
@@ -1179,3 +1179,43 @@ Workspace all-target compilation with the canvas feature, runtime-library Clippy
 with signed-bundles and `-D warnings`, and diff checks also pass. ARM/Wasm build
 and focused Frame/Web acceptance still require the publication below; no Linux
 IPC or full repository preflight result is implied by these checks.
+
+## Live T21 acceptance — 2026-11-11
+
+The existing publisher built Mac/Wasm/ARM and activated `ac2734a` as release
+`72101f19ef7e0360e284673648f638f6e743d8ebd1ae8a216c26d9922900399b`.
+The signed-in browser and native client upgraded automatically. The public
+manifest reports `sync_protocol=otrios-canvas-sync-v36`, `host_session=1`.
+The automatic builder resumed on the completed source pin; publication exited 0.
+
+The live browser selected existing definition 88, `Layout acceptance slider`,
+edited its `caption` value to `Restored caption` through real typing/Enter and
+applied at generation 47. Remove property displayed its local dependency report,
+owned outgoing route and component-preservation consequence. Background Undo
+could not escape the modal. Keep property canceled without changing generation.
+
+Confirmation removed the endpoint only in the private preview: its linked slider
+returned to `Level`, definition 88 remained selected, and shared generation stayed
+47. Apply published removal at 48. Undo restored the caption, route and confirmed
+value privately, then Apply published 49. Redo/Apply removed them again at 50;
+Undo/Apply restored them at 51. Each publication finished with All changes applied;
+no page or component error was reported by the changed runtime. Fresh semantic
+property identity and late-write behavior are established by the authority/history
+tests above; the live UI check directly proves the retained component and restored
+forwarded value through the real protocol.
+
+The native Frame observed removal at 48, restoration at 49 and final revision 51,
+on the same release with confirmed/stream/reload readiness, no pending commands,
+three app instances, two guest instances and zero component errors. It remained
+on Document; this is native synchronization acceptance, not a native touch journey
+through this new modal. Its diagnostic active generation 51/presented generation
+50 remains the previously observed unused-definition cache behavior. A fresh
+browser reload decoded revision 51 and reported presented generation 51, unchanged
+Audio Volume 51% and Display Brightness 57%, and no page error. No unconfirmed
+test edit remained. The owned browser tab was closed after acceptance.
+
+Next: complete typed behavior binding/action and slot editing UX, then B6 styles
+and Q01–Q16/F01–F06 qualification. Those gates remain open. The removal modal's
+shared-runtime barrier is tested; a full browser accessibility/focus audit remains
+part of final UI qualification (background semantic controls still appear in its
+browser snapshot). Do not claim the complete Designer goal is finished.
