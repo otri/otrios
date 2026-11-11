@@ -1005,3 +1005,79 @@ with its keyboard/error. Active input capture and modal barriers block the actio
 Returning publishes no source or sample value, and does not discard or auto-Apply.
 This one-level return does not implement a general breadcrumb/history stack or
 change the separate future action/slot authoring gates.
+
+
+## T24. B6 color-style foundation and activation gates
+
+The first B6 delivery is the RFC 0037 color-only data contract in
+`otrios-interfaces::oib::styles` and the covered runtime
+`canvas::oib::styles::Admitted`. It is not yet an advertised package capability.
+No compiler, guest, host, editor or library classifier may infer style support
+from the module's presence. Existing component colors and state protocol remain
+unchanged until the integration gate below lands.
+
+### B6a: concrete v1 schema and resolution
+
+`otrios-oib-color-styles-v1` contains ordered systems, variables, contracts and
+styles. A SystemRef is exact Owner + nonzero SystemId; Owner is DocumentId or
+LibraryId + exact revision. VariableRef and StyleRef append their own stable ID.
+Names never participate in lookup. Callers supply the independently admitted owner
+set; constructing an Admitted catalog does not authenticate a library or grant
+any edit/action authority.
+
+A Color variable has both explicit RGBA8 straight-sRGB Light and Dark values and
+Active/Retired metadata. A contract declares applicable class IDs and 1–32 named
+Color fields with stable IDs and Body/Focus domains. V1 has no geometry/typography
+field variant. Every style supplies all contract defaults; optional patches are
+Selected, Hover, Pressed, Disabled, Focus. There is no style inheritance, alias
+expression, name search or automatic color inversion.
+
+Collections are canonical ascending vectors: systems by SystemRef (Document before
+Library; owner fields and IDs in derived order), records/fields/classes by ID,
+patches in Selected/Hover/Pressed/Disabled/Focus order. Overrides sort by field ID
+then All/Selected/Hover/Pressed/Disabled/Focus. Duplicate or out-of-order records
+reject. Names are 1–64 bytes of ASCII A–Z, a–z, 0–9, underscore, period, slash or
+hyphen, unique within variable/contract/style/field record kind and system/contract.
+Unknown fields/variants, missing modes/defaults, unknown exact references and
+cross-domain patches reject. Retirement excludes picker choices while retaining
+resolution of existing uses.
+
+Canonical bytes are the ASCII/zero header `OTriOS\0oib-color-styles-v1\0` followed
+by the pinned FlexBuffers serialization of the typed, ordered Catalog. Decoding
+checks the 256 KiB byte limit, validates the complete catalog, re-encodes and
+requires byte equality. SHA-256 covers those exact bytes; it supplies content
+identity only. Golden bytes/digest pin the format. No alternate JSON package input
+is admitted by this API.
+
+Catalog admission enforces 8 systems, 256 variables, 128 styles and 128 contracts,
+32 fields/contract, 8192 default/patch entries and 8192 variable uses, with checked
+counts. Root System resolves host preference or Dark; descendants use Inherit or
+explicit Light/Dark. Resolution chooses default → selected → enabled hover →
+enabled pressed → disabled, then document and instance overrides. Within each
+override layer, applicable named states replace All in that same priority. Focus
+is a separate map, including on disabled controls. Focus overrides must explicitly
+target Focus. Dormant overrides are still validated. Resolution returns concrete
+colors and each winning expression, layer, scope and mode. The immutable admitted
+catalog retains a reverse variable → style/field/patch index.
+
+### Remaining B6 integration sequence
+
+- **B6b canonical use mapping/admission:** map each style field to an existing
+  typed terminal PropertyAddress; resolve explicit assignments/occurrence overrides
+  above style and never replace app bindings. Integrate source/library bytes and
+  owner mapping; include style contracts in compatibility fingerprints. Aggregate
+  the RFC's 4096 override limit over all admitted occurrences before allocation
+  (B6a bounds one resolution request only). Reject unsupported capabilities before
+  activation; bump synchronized state encoding if shared source wire changes.
+- **B6c presentation:** propagate receiving effective mode across actual component
+  boundaries; extend retained-paint dependency proof with exact styles, variables,
+  modes and state. Keep unknown dependencies on full compilation. Qualify captured
+  input and geometry identity before claiming paint-only behavior.
+- **B6d authoring/catalog:** implement Styles/Variables lifecycle and source-aware
+  fields through the existing working-copy transaction, affected-use review and
+  explicit replacement on deletion. Bind descriptive background/text/stroke/etc.
+  fields in representative controls. Add actual foreground/backdrop contrast
+  metadata/diagnostics, then Light/Dark/state/override/reset live journeys.
+
+These are ordered parts of B6, not substitutes for the remaining B5 action/slot
+authoring and B7/B8 qualification. No shell theme constant is replaced in B6a.

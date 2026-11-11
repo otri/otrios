@@ -11,6 +11,8 @@ pub mod component_behavior;
 pub mod designer;
 pub mod graph;
 pub mod library;
+/// RFC 0037 color-style data contract. Package/editor activation is separately gated.
+pub mod styles;
 
 pub const FORMAT: &str = "otrios-oib-v2";
 pub const FEATURE: &str = "otrios-oib-v2";

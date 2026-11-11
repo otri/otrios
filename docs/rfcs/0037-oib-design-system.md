@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0037: OIB design systems, named styles and variable modes
 
-Date: 2026-11-11. Status: **proposed; no runtime implementation in this change**.
+Date: 2026-11-11. Status: **color-only schema/resolver foundation implemented;
+package/compiler/editor integration and runtime activation remain proposed**.
 Visual reference: [DESIGN.md](../../DESIGN.md). Builds on
 [RFC 0035](0035-oib-component-designer.md),
 [RFC 0036](0036-upgradable-oib-component-libraries.md) and the
@@ -9,7 +10,8 @@ Visual reference: [DESIGN.md](../../DESIGN.md). Builds on
 
 The [complete Designer design package](../oib-designer/README.md) expands the UX,
 layout and lifecycle around this style contract. It includes a qualification ledger
-and prototype evidence; production style/runtime implementation remains proposed.
+and prototype evidence. T24 records the first core schema/resolver implementation
+and the remaining activation gates; production component styling is not yet active.
 
 ## Intent and existing boundary
 
@@ -57,7 +59,7 @@ Renaming does not change a stable ID. Imported IDs cannot be shadowed by local
 names. A fork receives a new owner/identity, with explicit remapping of references.
 IDs cannot be reused for different field meaning or type in a compatible update.
 
-Proposed logical records (not a wire schema):
+Logical records (the first color-only wire contract is specified in Designer T24):
 
 | Record | Required information |
 | --- | --- |

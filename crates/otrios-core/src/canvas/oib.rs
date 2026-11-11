@@ -18,6 +18,7 @@ pub mod imports;
 pub(crate) mod instance_impact;
 pub mod instances;
 pub(crate) mod paint;
+pub mod styles;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Info {

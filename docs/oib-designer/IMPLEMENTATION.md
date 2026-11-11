@@ -1360,3 +1360,31 @@ from the focused shared-runtime tests, not a claimed full browser campaign.
 T23 closes the reload-only scope-return gap. General breadcrumbs/Escape parent
 navigation, action/slot authoring, B6 styles and representative full lifecycle
 qualification remain open under the original Designer goal.
+
+
+## T24 / B6a color-style foundation — 2026-11-11
+
+After T23 live acceptance, began the next major missing B6 behavior rather than
+adding more shell controls. Terra performed a read-only RFC contract inventory;
+the parent implemented the Apache public schema and LGPL core admission/resolver.
+T24 records exact serialization/order/limits and B6b–B6d activation requirements.
+No dependency, lockfile, state protocol or advertised package capability changed.
+
+Eight focused `color_style` tests pass, including 32 state masks × two modes,
+override precedence/reset, source traces, explicit nested mode boundaries, exact
+library revision ownership, retirement, dependency indexing, missing modes/unknown
+fields, duplicate/invalid references, limits and fixed canonical bytes/SHA-256.
+This is real core resolver coverage, not Designer or native/Web style acceptance.
+Existing live release remains T23; no unintegrated feature was deployed.
+Compilation/lint results follow below. The full Designer goal remains open.
+
+T24 validation completed:
+
+- `cargo test -p otrios-core --features canvas --lib color_style --locked --offline`: **8 passed**, including final exact-ceiling/overflow additions.
+- `cargo check --workspace --all-targets --features canvas --locked --offline`: passed.
+- `cargo clippy -p otrios-core --features signed-bundles --lib --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and diff check: passed.
+
+No browser/Frame style journey was run: styles are deliberately not admitted into
+existing app/library packages yet. Next is B6b's terminal-field mapping and
+canonical source/admission integration, followed by real mode/paint/editing tests.
