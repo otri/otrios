@@ -588,3 +588,47 @@ Apply, retain literals and exact imported owners, and show affected document use
 Chrome Dark/Light and the legacy Accent property do not satisfy that requirement.
 B7 still requires per-control/per-flow evidence in CONTROL_MATRIX. None of these
 remaining gates is closed by the publication above.
+
+## B5 fresh graph history — pending publication, 2026-11-11
+
+The next slice replaces the blanket unsupported reason for deleted definition,
+node, slot and preset reconstruction. It captures affected source fragments and
+explicit override alternatives before deletion, then prepares a conditional
+inverse using the current authority high-water mark. Removed identities receive
+new IDs; imported definitions and unaffected identities remain exact. It remaps
+ownership, visual order, exposed/forwarded paths, slots, presets, affected
+occurrence origins and local selection. Fresh override contexts come from a pure
+structural preview; the final structure and overrides still publish in one Apply.
+This uses existing wire operations: state v34/control v1 and layout v7 remain.
+
+Focused evidence before publication:
+
+- Actual working-copy creation → Apply → Undo → Apply → Redo → Apply, repeated
+  twice, preserves a color override at fresh addresses and selects the restored
+  definition. Original addresses remain retired; preparation emits no network write.
+- Actual Designer/imported Slider + text composition completes creation Undo/Redo
+  while retaining exact imported owners, instance allocations and control bounds.
+- Actual Designer deleted-node Undo restores edited authored text and a fresh
+  selected node; Redo removes that fresh node. Text is a structural source field
+  for this primitive, not an invented causal text descriptor.
+- The authority test for creation/duplicate wire replay now also publishes a
+  fresh-ID definition/root/preset restoration and verifies repeated identical
+  request delivery allocates nothing further.
+- Three planner cases cover reference/Forward/exposed/slot/preset remapping,
+  captured occurrence origin after replacement and prior-conflict rejection,
+  plus ownership order independent of visual sibling order. These are mapping
+  proofs; synthetic planner graphs are not claimed as admitted/live fixtures.
+- `test -p otrios-core --features canvas --lib history --locked --offline`:
+  32 passed, including the OIB history/manager/review cases and other matched
+  history regressions. The three actual lifecycle integration tests above also
+  passed individually. Final strict Clippy and publication are recorded below.
+
+Still open: complete removed occurrence/owned-slot-content capture and restoration,
+app-bound graph reconstruction through signed grants, and complete dependency
+impact/retire/replace and typed API/slots UI. Oversized inverses retain an explicit
+16-operation/8 KiB reason; prior conflicts are never flattened. Full styles/modes
+and representative catalog qualification remain B6/B7 gates. No new dependencies
+or limits were added. Known restart files: `oib/history/restore.rs`,
+`oib/history/restore_tests.rs`, `client/oib_applied_history.rs`,
+`client/oib_applied_history_tests.rs`, `client/oib_designer_tests.rs` and
+`state/oib/apply.rs` (authored register capture).

@@ -1069,16 +1069,53 @@ fn atomic_apply_creation_allocates_only_on_commit_and_replay_never_duplicates() 
     assert_eq!(removed.definitions, original.definitions);
     assert_eq!(removed.presets, original.presets);
     assert_eq!(removed.next_identity, next + 3);
-    assert!(
-        Entry::capture(
-            &source,
+    let redo_entry = Entry::capture(
+        &source,
+        &removed,
+        &inverse,
+        &replica.oib_apply_result().unwrap().unwrap(),
+    )
+    .unwrap();
+    let redo = redo_entry
+        .plan(
             &removed,
-            &inverse,
-            &replica.oib_apply_result().unwrap().unwrap()
+            replica.oib_generation().unwrap(),
+            replica.oib_apply_base().unwrap(),
+            &[],
         )
-        .unwrap_err()
-        .contains("fresh")
+        .unwrap();
+    let preview = replica.preview_oib_apply(&redo).unwrap();
+    assert_eq!(authority.oib_source().unwrap(), removed);
+    let restored = preview.oib_history_source().unwrap();
+    let definition = restored
+        .definitions
+        .iter()
+        .find(|d| d.name == "Created once")
+        .unwrap();
+    assert_eq!(definition.id, DefinitionId(next + 3));
+    assert_eq!(definition.root, NodeId(next + 4));
+    let preset = restored
+        .presets
+        .iter()
+        .find(|p| p.name == "Created once")
+        .unwrap();
+    assert_eq!(preset.id, next + 5);
+    assert_eq!(preset.definition, definition.id);
+    assert!(
+        !restored
+            .definitions
+            .iter()
+            .any(|d| d.id == DefinitionId(next))
     );
+    replica.apply_oib(redo).unwrap();
+    let request = replica.generate().unwrap().unwrap();
+    authority.receive(&mut session, &request).unwrap();
+    let committed = authority.save().unwrap();
+    assert!(!authority.receive(&mut session, &request).unwrap());
+    assert_eq!(authority.save().unwrap(), committed);
+    settle(&mut authority, &mut replica, &mut session);
+    assert_eq!(authority.oib_source().unwrap(), restored);
+    assert_eq!(restored.next_identity, next + 6);
 }
 
 #[test]

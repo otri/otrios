@@ -6,6 +6,8 @@ use otrios_interfaces::oib::{authoring::*, designer::*};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_HISTORY_BYTES: usize = 64 * 1024;
+pub(crate) type CapturedProperties = Vec<(PropertyAddress, Vec<Option<Value>>)>;
+mod restore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Entry {
@@ -16,6 +18,7 @@ pub(crate) struct Entry {
     guards: Vec<Guard>,
     operations: Vec<DocumentEdit>,
     properties: Vec<PropertyInverse>,
+    restoration: restore::Graph,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PropertyInverse {
@@ -199,11 +202,21 @@ fn observed_values(bytes: &[u8]) -> Result<Vec<Option<Value>>> {
 impl Entry {
     /// Capture only affected source fields and prior causal values from the
     /// original Change.observed leaves. Legacy receipts cannot prove properties.
+    #[cfg(test)]
     pub(crate) fn capture(
         before: &DocumentSource,
         after: &DocumentSource,
         apply: &Apply,
         receipt: &ApplyReceipt,
+    ) -> Result<Self> {
+        Self::capture_with_properties(before, after, apply, receipt, &[])
+    }
+    pub(crate) fn capture_with_properties(
+        before: &DocumentSource,
+        after: &DocumentSource,
+        apply: &Apply,
+        receipt: &ApplyReceipt,
+        properties: &[(PropertyAddress, Vec<Option<Value>>)],
     ) -> Result<Self> {
         let ApplyResult::Accepted { generation, .. } = receipt.result else {
             return Err("Rejected Apply has no applied history".into());
@@ -222,7 +235,11 @@ impl Entry {
             guards: vec![],
             operations: vec![],
             properties: vec![],
+            restoration: restore::Graph::capture(before, after, properties)?,
         };
+        for key in entry.restoration.guard_keys() {
+            entry.guard(before, after, key)?;
+        }
         for (change, version) in apply.changes.iter().zip(&receipt.property_versions) {
             let values = observed_values(&change.observed)?;
             if values.len() != 1 {
@@ -280,17 +297,16 @@ impl Entry {
             match op {
                 DocumentEdit::Definition(edit) => {
                     let d = match edit { DefinitionEdit::CreateDefinition{definition,..}|DefinitionEdit::DeleteDefinition{definition}|DefinitionEdit::CreateNode{definition,..}|DefinitionEdit::DeleteNode{definition,..}|DefinitionEdit::SetVisual{definition,..}|DefinitionEdit::SetSlots{definition,..}|DefinitionEdit::SetDefault{definition,..}|DefinitionEdit::ClearDefault{definition,..}|DefinitionEdit::RenameDefinition{definition,..}|DefinitionEdit::RenameNode{definition,..}|DefinitionEdit::MoveNode{definition,..}|DefinitionEdit::Expose{definition,..}|DefinitionEdit::ConnectReference{definition,..} => *definition };
-                    if created_definitions.contains(&d) { continue; }
+                    if created_definitions.contains(&d) || entry.restoration.recreates_definition(d) { continue; }
                     let target_node = match edit { DefinitionEdit::SetVisual{node,..}|DefinitionEdit::SetDefault{node,..}|DefinitionEdit::ClearDefault{node,..}|DefinitionEdit::RenameNode{node,..}|DefinitionEdit::MoveNode{node,..}=>Some(*node), DefinitionEdit::ConnectReference{reference,..}=>Some(*reference), _=>None };
-                    if target_node.is_some_and(|n| created_nodes.contains(&(d,n))) { continue; }
+                    if target_node.is_some_and(|n| created_nodes.contains(&(d,n)) || entry.restoration.recreates_node(d,n)) { continue; }
                     let (key, inverse) = match edit {
                         DefinitionEdit::RenameDefinition{..} => (Key::DefinitionName(d),DefinitionEdit::RenameDefinition{definition:d,name:definition(before,d)?.name.clone()}),
                         DefinitionEdit::RenameNode{node:n,..} => (Key::NodeName(d,*n),DefinitionEdit::RenameNode{definition:d,node:*n,name:node(before,d,*n)?.name.clone()}),
                         DefinitionEdit::SetVisual{node:n,..} => (Key::Visual(d,*n),DefinitionEdit::SetVisual{definition:d,node:*n,visual:node(before,d,*n)?.visual.clone()}),
                         DefinitionEdit::SetDefault{node:n,property:p,..}|DefinitionEdit::ClearDefault{node:n,property:p,..} => (Key::Default(d,*n,*p), match node(before,d,*n)?.defaults.iter().find(|v|v.property==*p) { Some(value)=>DefinitionEdit::SetDefault{definition:d,node:*n,property:*p,value:value.value.clone()}, None=>DefinitionEdit::ClearDefault{definition:d,node:*n,property:*p} }),
                         DefinitionEdit::SetSlots{..} => {
-                            let old=&definition(before,d)?.slots; let new=&definition(after,d)?.slots;
-                            if old.iter().any(|s| !new.iter().any(|n| n.id==s.id)) { return Err("Undo of removed slots requires fresh identities and destination repair".into()); }
+                            let old=&definition(before,d)?.slots;
                             (Key::Slots(d),DefinitionEdit::SetSlots{definition:d,slots:old.clone()})
                         },
                         DefinitionEdit::Expose{property:p,..} => (Key::Exposed(d,*p),DefinitionEdit::Expose{definition:d,property:*p,targets:definition(before,d)?.exposed.iter().find(|e|e.property==*p).ok_or("Undo cannot recreate an exposed descriptor")?.targets.clone()}),
@@ -306,14 +322,14 @@ impl Entry {
                             (Key::NodeOwner(d,*n),DefinitionEdit::MoveNode{definition:d,node:*n,owner:node(before,d,*n)?.owner.ok_or("Cannot move a history root")?,visual_parent:parent,before:anchor})
                         },
                         DefinitionEdit::CreateNode{..}=>continue,
-                        DefinitionEdit::DeleteDefinition{..}|DefinitionEdit::DeleteNode{..}=>return Err("Undo of deleted definitions or nodes requires fresh graph identities and reference repair".into()),
+                        DefinitionEdit::DeleteDefinition{..}|DefinitionEdit::DeleteNode{..}=>continue,
                         DefinitionEdit::CreateDefinition{..}=>return Err("Missing created history definition".into()),
                     };
                     if entry.guard(before,after,key)? { entry.operations.push(DocumentEdit::Definition(inverse)); }
                 },
-                DocumentEdit::Preset(PresetEdit::Update{preset}) if !created_presets.contains(&preset.id) => { if entry.guard(before,after,Key::Preset(preset.id))? {entry.operations.push(DocumentEdit::Preset(PresetEdit::Update{preset:before.presets.iter().find(|p|p.id==preset.id).ok_or("Missing previous preset")?.clone()}));} },
+                DocumentEdit::Preset(PresetEdit::Update{preset}) if !created_presets.contains(&preset.id) && !entry.restoration.recreates_preset(preset.id) => { if entry.guard(before,after,Key::Preset(preset.id))? {entry.operations.push(DocumentEdit::Preset(PresetEdit::Update{preset:before.presets.iter().find(|p|p.id==preset.id).ok_or("Missing previous preset")?.clone()}));} },
                 DocumentEdit::Preset(PresetEdit::Create{..}|PresetEdit::Update{..})=>{},
-                DocumentEdit::Preset(PresetEdit::Delete{..})=>return Err("Undo of a deleted preset requires a fresh preset identity".into()),
+                DocumentEdit::Preset(PresetEdit::Delete{..})=>{},
                 DocumentEdit::Hierarchy(edit)=>match edit {
                     HierarchyEdit::Connect{object,property,..} if !created_instances.contains(&object.instance) => {if entry.guard(before,after,Key::Connection(object.clone(),*property))? {entry.operations.push(DocumentEdit::Hierarchy(HierarchyEdit::Connect{object:object.clone(),property:*property,source:before.connections.iter().find(|c|c.object==*object&&c.property==*property).map(|c|c.source.clone())}));}},
                     HierarchyEdit::Rename{instance,..} if !created_instances.contains(instance) => {if entry.guard(before,after,Key::InstanceName(*instance))? {entry.operations.push(DocumentEdit::Hierarchy(HierarchyEdit::Rename{instance:*instance,name:before.instances.iter().find(|i|i.id==instance.0).ok_or("Missing previous instance")?.name.clone()}));}},
@@ -471,6 +487,19 @@ impl Entry {
         }
         changed
     }
+    pub(crate) fn restored_property_values(
+        &self,
+        current: &DocumentSource,
+    ) -> Result<Vec<(PropertyAddress, Option<Value>)>> {
+        self.restoration.values(current)
+    }
+    pub(crate) fn restored_selection(
+        &self,
+        current: &DocumentSource,
+        selection: &Selection,
+    ) -> Result<Selection> {
+        self.restoration.selection(current, selection)
+    }
     pub(crate) fn property_values(&self) -> Vec<(PropertyAddress, Option<Value>)> {
         self.properties
             .iter()
@@ -576,7 +605,7 @@ impl Entry {
                 return Err("History inverse value changed".into());
             }
         }
-        base.operations = self.operations.clone();
+        base.operations = self.restoration.operations(current, &self.operations)?;
         base.changes = changes.to_vec();
         if base.operations.len() + base.changes.len() > MAX_OPERATIONS
             || encoded(&base)?.len() > MAX_BATCH_BYTES

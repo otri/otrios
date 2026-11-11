@@ -5840,4 +5840,175 @@ fn working_copy_labelled_slider_links_verified_export_then_applies_one_compositi
         original_libraries
     );
     assert!(client.scene().unwrap().controls().len() <= 128);
+
+    // Published creation Undo removes this graph; Redo must rebuild it with
+    // fresh identities while keeping the imported component's exact owner.
+    assert!(client.designer_history(false).unwrap());
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|definition| definition.id == id)
+    );
+    let next = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_next_identity()
+        .unwrap();
+    assert!(client.designer_history(true).unwrap());
+    let m = client.active.as_ref().unwrap();
+    let Selection::Definition(restored) = m.designer.as_ref().unwrap().selection else {
+        panic!("Redo creation must select the restored definition")
+    };
+    assert_eq!(restored.0, next);
+    assert!(restored.0 > id.0);
+    assert!(m.definition_presentation.is_some());
+    let source = m.design_doc().oib_history_source().unwrap();
+    let definition = source
+        .definitions
+        .iter()
+        .find(|d| d.id == restored)
+        .unwrap();
+    assert_eq!(definition.nodes.len(), 3);
+    assert!(definition.nodes.iter().any(|node| {
+        node.reference
+            .as_ref()
+            .is_some_and(|reference| reference.definition == DefinitionId(12))
+    }));
+    assert!(definition.nodes.iter().all(|node| node.id.0 >= next));
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        authority.oib_status().unwrap().structural_generation,
+        generation + 3
+    );
+    assert_eq!(authority.oib_allocations().unwrap(), instances);
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_authoring_seed()
+            .unwrap()
+            .resolved_libraries,
+        original_libraries
+    );
+    assert!(client.scene().unwrap().controls().len() <= 128);
+}
+
+#[test]
+fn working_copy_deleted_text_undo_restores_authored_text_and_fresh_selected_node() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.designer_new_component().unwrap();
+    activate_studio_tool(&mut client, "Add text");
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    let Selection::Definition(definition) = m.designer.as_ref().unwrap().selection else {
+        panic!("component selection")
+    };
+    let source = m.doc.oib_history_source().unwrap();
+    let component = source
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let text = component
+        .nodes
+        .iter()
+        .find(|n| n.id != component.root)
+        .unwrap()
+        .id;
+    let selection = Selection::DefinitionNode {
+        definition,
+        node: text,
+    };
+    client.inspect_oib_selection(selection.clone()).unwrap();
+    let m = client.active.as_mut().unwrap();
+    let address = PropertyAddress::Structural {
+        target: otrios_interfaces::oib::designer::StructuralTarget::Node {
+            definition,
+            node: text,
+        },
+        property: otrios_interfaces::oib::designer::StructuralProperty::Text,
+    };
+    m.stage_property(&address, Some(Value::Text("Preserved label".into())))
+        .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    activate_studio_tool(&mut client, "Delete object");
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    let removed = m.doc.oib_history_source().unwrap();
+    assert!(
+        !removed
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.id == text)
+    );
+    let next = removed.next_identity;
+    assert!(client.designer_history(false).unwrap());
+    let m = client.active.as_ref().unwrap();
+    let restored = NodeId(next);
+    assert!(
+        matches!(m.designer.as_ref().unwrap().selection, Selection::DefinitionNode { definition: d, node: n } if d == definition && n == restored)
+    );
+    let assert_label = |doc: &StateAdapter| {
+        let source = doc.oib_history_source().unwrap();
+        let node = source
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|n| n.id == restored)
+            .unwrap();
+        assert!(
+            matches!(&node.visual.as_ref().unwrap().shape, otrios_interfaces::layout::Shape::Text { value: otrios_interfaces::layout::Expr::Literal(Value::Text(value)), .. } if value == "Preserved label")
+        );
+    };
+    assert_label(m.design_doc());
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    assert_label(&m.doc);
+    assert!(client.designer_history(true).unwrap());
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    let source = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_history_source()
+        .unwrap();
+    assert!(
+        !source
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.id == restored)
+    );
+    assert!(client.scene().unwrap().controls().len() <= 128);
 }

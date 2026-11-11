@@ -651,3 +651,35 @@ both composed and compositionless responsive roots. UI entry/policy changes forc
 reconciliation even when cached desired dimensions match. Held gestures retain
 their original input revision until scene extent commits. Existing Fit/Chat/Map
 behavior remains; no application-name lookup or host profile controls are added.
+
+## T16. Fresh identity restoration for conditional history
+
+The next B5 slice reconstructs removed definition fragments through the existing
+CreateDefinition/CreateNode/SetSlots/Expose/Preset commands. It does not restore
+an old document root or re-admit imported implementation bodies. Retain only the
+affected pre-edit graph fragments and explicit causal override values, charged
+to the existing shared 64 KiB history budget. Keep structural comparisons against
+the accepted post-edit source, and preserve the exact receipt boundary.
+
+When preparing Undo/Redo, allocate one deterministic interval beginning at the
+current authority high-water mark. Remap removed definition/node/slot/preset IDs,
+ownership, visual child order, forwarding targets, slot hosts, reference paths,
+and affected preset assignments. Surviving and imported identities remain exact.
+Restore ownership before visual links, then presets and existing instance repairs.
+The signed class/property and action/binding grants still govern the candidate.
+
+Capture property alternatives before deletion, never resolved inherited colors or
+app field values. A single explicit override on removed content is written to its
+new semantic address. Obtain that address's initial causal context by staging the
+structural inverse privately, then submit structure and overrides together in one
+Apply. Prior conflicts require explicit review; they cannot be flattened into a
+chosen value. Neither original retired addresses nor their causal registers are
+resurrected. Remap local selection to the restored object before presenting it.
+
+Validate the final inverse, including restored property changes, against the same
+16-operation/8 KiB Apply envelope and source/scene/control limits. An oversized
+inverse remains unavailable with a visible reason; splitting one history unit
+into several publications is not permitted. Removed owned occurrence closures,
+app-bound reconstruction and dependent repair remain separate explicit gates
+until complete source/property capture and safe fresh mapping are implemented.
+See IMPLEMENTATION.md for actual implementation and acceptance status.

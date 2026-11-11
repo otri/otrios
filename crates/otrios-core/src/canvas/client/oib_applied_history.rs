@@ -6,7 +6,10 @@ use super::*;
 use crate::canvas::oib::history::{Entry, ReviewConflict};
 use otrios_interfaces::oib::{
     Change,
-    authoring::{Apply, ApplyReceipt, ApplyResult},
+    authoring::{
+        Apply, ApplyReceipt, ApplyResult, DefinitionEdit, DocumentEdit, HierarchyEdit,
+        MAX_BATCH_BYTES, MAX_OPERATIONS,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,8 +224,41 @@ impl AppliedHistory {
             );
             return Ok(None);
         }
-        let plan = match inverse.plan(&source, generation, current.oib_apply_base()?, &changes) {
-            Ok(plan) => plan,
+        let planned = (|| {
+            let mut plan =
+                inverse.plan(&source, generation, current.oib_apply_base()?, &changes)?;
+            let restored = inverse.restored_property_values(&source)?;
+            if !restored.is_empty() {
+                // Fresh addresses have no old causal context. Seed them through
+                // the exact structural candidate, then capture that candidate's
+                // initial register context for the single final Apply.
+                let seeded = current.preview_oib_apply(&plan)?;
+                for (address, value) in restored {
+                    plan.changes
+                        .push(seeded.oib_capture_change(&address, value)?);
+                }
+            }
+            if plan.operations.len() + plan.changes.len() > MAX_OPERATIONS
+                || flexbuffers::to_vec(&plan).map_err(err)?.len() > MAX_BATCH_BYTES
+            {
+                return Err(
+                    "Restored content exceeds the 16-operation / 8 KiB Apply budget".into(),
+                );
+            }
+            let location = record
+                .before
+                .as_ref()
+                .map(|location| -> Result<EditLocation> {
+                    Ok(EditLocation {
+                        selection: inverse.restored_selection(&source, &location.selection)?,
+                        task: location.task,
+                    })
+                })
+                .transpose()?;
+            Ok((plan, location))
+        })();
+        let (plan, location) = match planned {
+            Ok(result) => result,
             Err(reason) => {
                 self.unavailable(direction, reason, vec![]);
                 return Ok(None);
@@ -235,7 +271,7 @@ impl AppliedHistory {
         };
         Ok(Some(Prepared {
             apply: plan,
-            location: record.before.clone(),
+            location,
             intent,
         }))
     }
@@ -253,12 +289,28 @@ impl AppliedHistory {
         {
             return Err("History requires the matching accepted Apply receipt".into());
         };
-        let captured = Entry::capture(
-            &before.oib_history_source()?,
-            &after.oib_history_source()?,
-            apply,
-            receipt,
-        );
+        let removed = apply.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                DocumentEdit::Definition(
+                    DefinitionEdit::DeleteDefinition { .. } | DefinitionEdit::DeleteNode { .. }
+                ) | DocumentEdit::Hierarchy(HierarchyEdit::Remove { .. })
+            )
+        });
+        let captured = (|| {
+            let properties = if removed {
+                before.oib_history_properties()?
+            } else {
+                vec![]
+            };
+            Entry::capture_with_properties(
+                &before.oib_history_source()?,
+                &after.oib_history_source()?,
+                apply,
+                receipt,
+                &properties,
+            )
+        })();
         self.next = self
             .next
             .checked_add(1)

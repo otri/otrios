@@ -230,10 +230,10 @@ fn normal_edit_after_prepared_inverse_is_a_new_apply_not_a_history_move() {
 }
 
 #[test]
-fn accepted_creation_undo_retains_explicit_unsupported_redo_without_resurrection() {
-    use otrios_interfaces::layout::{Expr, Shape};
+fn accepted_creation_undo_redo_restores_fresh_identity_properties_and_selection() {
+    use otrios_interfaces::layout::{Expr, Shape, ValueType};
     use otrios_interfaces::oib::{
-        designer::{ClassKind, DefinitionId, DefinitionNode},
+        designer::{ClassKind, DefinitionId, DefinitionNode, Selection},
         graph::Visual,
     };
     let (mut live, mut authority, mut session, mut copy) = setup();
@@ -248,6 +248,10 @@ fn accepted_creation_undo_retains_explicit_unsupported_redo_without_resurrection
         .unwrap()
         .id;
     let definition = DefinitionId(copy.candidate.oib_next_identity().unwrap());
+    copy.remember_location(
+        Selection::Document(source.designer.as_ref().unwrap().id),
+        oib_workspace::Task::Library,
+    );
     let n = |v| Expr::Literal(Value::Number(v));
     let root = DefinitionNode {
         id: NodeId(definition.0 + 1),
@@ -279,23 +283,78 @@ fn accepted_creation_undo_retains_explicit_unsupported_redo_without_resurrection
         })
         .unwrap()
     );
+    let selected = Selection::Definition(definition);
+    copy.remember_location(selected.clone(), oib_workspace::Task::Inspect);
+    let property = crate::canvas::oib::document::properties(
+        &copy.candidate.oib_authoring_seed().unwrap(),
+        &copy.candidate.oib_allocations().unwrap(),
+        &selected,
+        &copy.candidate.oib_active().unwrap(),
+    )
+    .unwrap()
+    .into_iter()
+    .find(|p| p.descriptor.value_type == ValueType::Color)
+    .unwrap();
+    let color = Value::Color([17, 34, 51, 255]);
+    copy.stage_property(property.address.as_ref().unwrap(), Some(color.clone()))
+        .unwrap();
     publish(&mut copy, &mut live, &mut authority, &mut session);
-    assert!(copy.undo().unwrap());
-    assert!(copy.history_review().is_none());
-    publish(&mut copy, &mut live, &mut authority, &mut session);
-    assert_eq!(copy.published.counts(), (0, 1));
-    assert!(copy.redo().unwrap());
-    assert!(!copy.dirty());
-    assert!(copy.history_review().unwrap().reason.contains("fresh"));
-    assert!(
-        !live
+    let mut previous = definition;
+    for _ in 0..2 {
+        assert!(copy.undo().unwrap());
+        assert!(copy.history_review().is_none());
+        publish(&mut copy, &mut live, &mut authority, &mut session);
+        assert_eq!(copy.published.counts(), (0, 1));
+        assert!(
+            !live
+                .oib_history_source()
+                .unwrap()
+                .definitions
+                .iter()
+                .any(|d| d.id == previous)
+        );
+        let next = live.oib_history_source().unwrap().next_identity;
+        assert!(copy.redo().unwrap());
+        assert!(copy.dirty());
+        assert!(copy.history_review().is_none());
+        let restored = copy
+            .candidate
             .oib_history_source()
             .unwrap()
             .definitions
-            .iter()
-            .any(|d| d.id == definition)
-    );
-    assert!(live.generate().unwrap().is_none());
+            .into_iter()
+            .find(|d| d.name == "Created")
+            .unwrap();
+        assert_eq!(restored.id.0, next);
+        assert!(restored.id.0 > previous.0);
+        assert!(restored.root.0 > previous.0);
+        let address = PropertyAddress::Definition {
+            definition: restored.id,
+            node: restored.root,
+            property: property.descriptor.id,
+        };
+        assert_eq!(
+            copy.candidate
+                .oib_property_register(&address)
+                .unwrap()
+                .alternatives,
+            vec![Some(color.clone())]
+        );
+        assert!(
+            matches!(copy.location().unwrap().selection, Selection::Definition(id) if id == restored.id)
+        );
+        assert!(
+            live.generate().unwrap().is_none(),
+            "restoration is private before Apply"
+        );
+        publish(&mut copy, &mut live, &mut authority, &mut session);
+        assert_eq!(copy.published.counts(), (1, 0));
+        assert_eq!(
+            live.oib_property_register(&address).unwrap().alternatives,
+            vec![Some(color.clone())]
+        );
+        previous = restored.id;
+    }
 }
 #[test]
 fn local_and_applied_history_share_one_memory_budget() {

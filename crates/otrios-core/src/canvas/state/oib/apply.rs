@@ -181,6 +181,34 @@ impl StateAdapter {
     ) -> Result<otrios_interfaces::oib::authoring::DocumentSource> {
         self.doc.oib_source()
     }
+    /// Capture authored register alternatives for conditional deletion history.
+    /// App fields and resolved inherited values are deliberately absent. A
+    /// freshly recreated target already has no causal override, so empty values
+    /// need no retained entry; conflicts remain explicit for the planner.
+    pub(in crate::canvas) fn oib_history_properties(
+        &self,
+    ) -> Result<super::super::super::oib::history::CapturedProperties> {
+        let seed = self.doc.oib_resolved_shared()?;
+        let mut captured = vec![];
+        for cell in &seed.cells {
+            let leaf = self.doc.oib_property_leaf(1, cell.id)?;
+            let register = leaf.register().ok_or("Missing history property register")?;
+            let mut alternatives = vec![];
+            for (_, _, bytes) in register.values() {
+                let value = bytes.map(decode::<Value>).transpose()?;
+                if !alternatives.contains(&value) {
+                    alternatives.push(value);
+                }
+            }
+            if alternatives.iter().any(Option::is_some) {
+                captured.push((
+                    super::super::super::oib::document::address_for_cell(&seed, cell.id)?,
+                    alternatives,
+                ));
+            }
+        }
+        Ok(captured)
+    }
     /// Produce a private placement command without queuing an authority write.
     pub(in crate::canvas) fn oib_placement_operation(
         &self,
