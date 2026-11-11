@@ -63,7 +63,8 @@ optional UI history excludes imported library bodies.
 
 Current app features are `otrios-oib-v2` and `otrios-oib-designer-v2`; imported
 libraries additionally require `otrios-oib-library-v1`; executable libraries add
-`otrios-component-behavior-v1`. Business schemas remain
+`otrios-component-behavior-v1`. Auto Layout requires `otrios-auto-layout-v1`
+and renderer layout v6. Business schemas remain
 `live-ui-state-v2` and `oib-designer-state-v2`. State protocol is **v32** and the
 shared WebSocket retains the release-control **v1** opening envelope. Release
 discovery remains available independently of state recovery.

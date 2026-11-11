@@ -3,12 +3,15 @@
 
 Date: 2026-11-11. Status: **runtime interface build-out in progress**. Read
 [IMPLEMENTATION.md](IMPLEMENTATION.md) first for the active goal and slice ledger. This package is the proposed complete editing experience, not an
-announcement that its features are deployed. It extends the existing D2/L1/L2
+announcement that all features are deployed. The shared responsive workspace and
+initial Auto Layout are live; working-copy lifecycle, named styles and full
+representative-control qualification remain open. It extends the existing D2/L1/L2
 foundation without rewriting those qualification records.
 
 ## Restart here after context compaction
 
-1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V09, and
+1. Read [IMPLEMENTATION.md](IMPLEMENTATION.md) for current runtime/live evidence,
+   then [VALIDATION.md](VALIDATION.md) for the earlier prototype work, and
    [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md) for actual progress and gaps.
 2. Read [DESIGN.md](../../DESIGN.md) for visual direction and
    [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization, and

@@ -134,8 +134,9 @@ B4 restart map: canonical source `otrios-interfaces/src/oib/graph.rs::Visual` an
 `canvas/oib/document/authoring.rs`, `canvas/state/oib.rs` and the Designer helpers.
 Shared renderer layout records need actual retained layout support, not a second
 editor-only solver. Inspect `dashboard/layout/composition.rs` and `resizing.rs` for
-checked arithmetic patterns. Change state protocol v31 in both session.rs and
-web/shared/session.mjs when source wire shape changes, preserving control v1.
+checked arithmetic patterns. B4 changed state v31 to v32 in session.rs and
+web/shared/session.mjs. Future source wire changes must bump both again, preserving
+control v1.
 
 ## Initial B4 implementation — 2026-11-11
 
@@ -175,7 +176,8 @@ Local evidence before live publication:
   Free, fractional geometry, clipping/hits, exact font measurement, independent H,
   cache classification and signed-zero encoding, bundle/library capability gates.
 - Shared layout regression: **42 passed**, one timing diagnostic ignored before
-  the final Free-without-flow case; final rerun remains part of integration.
+  the final Free-without-flow case; the subsequent Auto Layout filter passed 24
+  cases including that final regression.
 - Actual immutable imported Slider in local LabelledSlider wrapper: passes at
   design widths 320 and 520, with allocated reference/root/track widths 288 and 488.
 - Optimized Mac diagnostic: 500 full layout+Scene resolutions × 202 nodes = 101,000
@@ -213,7 +215,7 @@ revealed the actual compact alignment, Gap, Padding and Distribution controls.
 Visual inspection caught undersized captions, a long padding-toggle label and an
 unadmitted checkmark glyph. The focused correction uses 16-unit capital-height
 captions, a shorter toggle label and a drawn input-pass-through checkbox with real
-checked semantics. Focused layout editor tests pass4/4; full Designer tests pass
+checked semantics. Focused layout editor tests pass 4/4; full Designer tests pass
 63 with one existing timing diagnostic ignored. Added read-only device-local
 workspace/task/mode/selection/authoring diagnostics to distinguish actual native
 editor selection during input acceptance. This is diagnostic metadata, not a new
@@ -223,3 +225,71 @@ A first synthetic evdev navigation check captured/released both touches, but its
 inspector scroll-limit assertion failed; it did not prove the intended definition
 selection. Do not record that as native authoring acceptance. Use the new workspace
 report to resolve the exact pane/selection/role before further targeted taps.
+
+
+### Final B4 polish acceptance
+
+Polish code `75f1b95b622e1bccd3af509a9eea3466058d3a7b` activated release
+`c876fca2ce57e59287b6457a41bd36763b7f5dd1ceb93799536fc16cdd4cd5a2` on both hosts.
+The builder resumed on that completed code pin. Existing browser source edits
+confirmed after the update: Padding 40, independent Fixed/Hug H, and insertion of
+the new preset. Volume 50.7% and Brightness 56.7% stayed unchanged. Added a real
+96×48 shape to the new component through Library; the live scrolled preview
+rendered it at x56/y464, matching outer x16 plus padding 40 and the confirmed
+preview offset 480. The source's Hug extent grows with that admitted child.
+Caption/readability and drawn-checkbox fixes were inspected visually on the live
+browser; the checkbox has no fallback glyph or overlapping padding label.
+
+The first native selection assertion was a harness error: the native client had
+that definition collapsed, while the creating browser had it expanded. The new
+read-only diagnostics identified the actual pane and selection. Synthetic evdev
+contacts through the existing calibrated reader then proved:
+
+- Library selection opens the intended definition 63 in Inspect, authoring enabled,
+  with inspector scroll limit 1504; each pointer captures and releases normally.
+- Native Height Fixed commits generation 28; the separate browser receives H48
+  alongside W320. Native Height Hug commits generation 29; the browser removes the
+  fixed H input, retaining W320 and the business values.
+- After the browser adds the child (generation 30), native preview scrolling reaches
+  offset 480. A native tap selects the visible shape at y464 as instance 66/node 67,
+  with the actual Inspect selection reported. The Frame remains on this live view.
+
+These are software-injected contacts through the real native input/renderer path,
+not human touch/color acceptance. Calibration files were unchanged. The failed
+initial selection check is resolved; no product input bug or role change was needed.
+Final targeted tests: layout editor 4/4; Designer 63 passed plus one pre-existing
+ignored timing diagnostic; strict core Clippy passed. No further folder inventory
+or broad source scan is needed; the user explicitly requested targeted files only.
+
+## Next B5 restart map and decisions
+
+Use already-identified files; do not repeat repository-wide inventories.
+`canvas/state/oib/structure.rs::{oib_validate_structure,oib_structure_write}` stages
+an expected-structural-generation candidate and compiles before swapping once.
+`canvas/state/oib.rs::{oib_write,activate_oib}` owns causal property writes and the
+separate UI generation. Public `oib::Change` contains semantic address, value and
+observed leaf Snapshot. `canvas.rs::StateRequest::{OibInstance,OibWrite}` and
+state.rs receive/Flight/receipts currently send these independently.
+
+T06 requires one bounded OIB-only Apply with base epoch, structural generation,
+property contexts and exact import closure. Refactor shared staging on one private
+candidate; validate every context before publication, activate once, reuse the
+existing sequence/digest receipt/replay boundary. Do not compose two publications
+or introduce general transactions. Explicit rejection/result after a lost reply
+must survive later status changes; current global status.error is insufficient.
+New local identities stay preview-only until Apply; expected-generation admission
+must prevent collisions while assigning their final identities coherently.
+
+Preview needs the same compiler over a private source/preset/occurrence for the
+selected definition, including unused definitions, without persistent app Insert.
+Test's transportless `preview_clone` is only a sample overlay, not this structural
+working copy. Reuse `graph::{with_source_prepared,expand_prepared}` with bounded
+preview-only identity/slots and last-valid scene feedback. Keep dirty source,
+field drafts and source conflict review explicit; no Apply-on-blur in the final UX.
+
+Live findings to resolve in that lifecycle slice: New component should immediately
+open the blank editor; Library's Link tools currently list local definitions but
+need admitted imported exports for the real LabelledSlider journey; deleting a
+component in use is filtered out today and needs visible impact/reason feedback.
+Full row qualification remains pending alongside named styles/modes, independent
+scroll owners and the previously listed overflow/wrapping/zero-extent gates.

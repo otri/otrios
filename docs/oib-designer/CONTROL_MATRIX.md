@@ -48,6 +48,12 @@ Progress sample advance is a fixture tool, not the eventual display-only control
 Menu/select, list and tabs are intentionally simplified prototype substitutes;
 none demonstrates production popover, collection virtualization or slot routing.
 
+Initial runtime foundation evidence (B1–B4) is recorded in
+[IMPLEMENTATION.md](IMPLEMENTATION.md): admitted single-line Hug metrics for Q01,
+real imported Slider Fill and sample/capture isolation for Q04, typed bounded
+layout fields for Q06, and real segmented sizing interaction for Q08. These are
+partial proofs. They do not complete a row's working-copy, styling or full journey.
+
 ## C03. Every-row qualification checklist
 
 For each Q row, create a separate fixture/evidence entry and record source revision,
