@@ -51,7 +51,10 @@ layout controls or claim the final Designer is complete. B4–B6 can introduce a
 breaking PoC state version with fresh source/data. Each slice must leave a
 reviewable tested source, not a partial multi-write approximation of Apply.
 
-## Inventory findings that constrain implementation
+## Initial inventory findings that constrain implementation
+
+These describe the starting implementation; later implementation and acceptance
+records supersede them.
 
 - Current runtime Test forwards into real app state. The final Test promise needs
   B2; relabeling existing dispatch as sample-only would be incorrect.
@@ -70,12 +73,18 @@ reviewable tested source, not a partial multi-write approximation of Apply.
 
 ## Working roles and current ledger
 
-Parent owns technical plan, Designer state/actions/Builder/inspector integration,
-final cross-contract choices and validation. The geometry role owns a new
-`oib_workspace.rs`; the sample-adapter role owns client.rs and its narrowly scoped
-state clone API. They share the working tree with disjoint file ownership.
+Parent owns technical plan, integration, cross-contract decisions and final
+validation. Runtime/history and UI/dialog roles work in explicitly assigned
+disjoint files; read-only information gathering uses Terra. Initial geometry and
+sample-adapter roles are complete, not presumed active after resuming context.
+Builds sharing the target cache run sequentially. Read known restart paths below
+and compiler-reported files rather than performing folder inventories.
 
-Current: B1–B4 initial runtime/UI slices and the initial B5 working-copy/Apply/leave slice are live; see the most recent acceptance record below. Full B4–B7 gates remain open. Retired the host profile selector, divider
+Last verified live: B1–B4 initial runtime/UI slices and B5 working-copy/Apply/leave,
+responsive viewport, conditional history and composition at code `2f95205`.
+Later B5 commits are locally validated and awaiting Frame connectivity and live
+acceptance; the last entries below are authoritative. Full B4–B7 gates remain open.
+Retired the host profile selector, divider
 resize state and old projection module. Test uses a transportless sample fork and
 waits for captured input before adopting changed source. One shared status waits
 for confirmation; the inspector no longer repeats a Saved row.
@@ -738,3 +747,63 @@ Restart paths: `canvas/oib/impact.rs`, `impact_tests.rs`,
 `client/oib_delete.rs`, `oib_delete_tests.rs`, `oib_dialog.rs`,
 `oib_dialog_tests.rs`, `oib_workspace.rs`; the Library affordance is in
 `client/oib_designer.rs` and scoped pending-value pruning in `oib_working_copy.rs`.
+
+## B5 removed instance history — local implementation, pending publication
+
+The blanket unsupported reason for occurrence removal is replaced by a bounded
+captured closure: removed records, placement/frame/owner, connections, sibling
+groups, semantic origins and explicit authored values. Restore uses existing
+Insert/Move/Connect operations with fresh implicit identities after graph IDs.
+Parent-first allocation does not assume old IDs or source order encode ownership.
+Slot owners, paths, sibling anchors, selection and connections are remapped.
+Existing preset/grant/source/admission and history/operation budgets remain.
+
+Focused evidence:
+
+- A real same-process authority/session test adds an admitted empty slot host,
+  inserts two Panel children under Audio, edits parent/child labels and connects
+  a child slider to the granted brightness field. One removal Apply removes both
+  children and the parent. Private Undo reconstructs fresh IDs, exact prototype,
+  child frames/order, owner, connection, authored values and mapped child selection.
+  A later app-field update and surviving Display label remain current through
+  restoration Apply and Redo. Old addresses remain retired and no preparation
+  emits transport writes. This is not Linux IPC acceptance.
+- A second authority test inserts a later sibling after deletion. Undo reports
+  the changed sibling group including the named later use and publishes nothing.
+- A third authority test performs equal-value ABA before deletion/recreation.
+  The older command is not reanchored from value equality and the restored value
+  remains unchanged. Exact cross-identity causal reanchoring is still a gate.
+- The actual Designer management Delete control is exercised with pointer Down/Up,
+  then Apply/Undo/Apply/Redo/Apply. Undo selects the fresh root, preserves its
+  authored nested label and stays private until Apply; allocation/control bounds
+  hold. This qualifies the simple instance path, not an owned-subtree review UI.
+- Five planner tests cover parent-first mapping with older children, remapped
+  slots/frames/connections/values, combined graph+instance restoration, existing
+  conflict/cycle gates and obsolete advisory selection. Mapping fixtures are
+  distinguished from the admitted authority fixture above.
+- The `history` name filter passed 39 tests, including relevant OIB manager,
+  planner and review cases plus other matched history regressions. The final
+  additional equal-value ABA test passed separately. Final Designer/lint results
+  and publication status follow below.
+
+Final checks: the focused Designer module passed 60 tests with one existing
+ignored diagnostic. Strict core library Clippy (`--features canvas --lib --locked
+--offline -- -D warnings`) and `git diff --check` passed. No full repository
+preflight, cross-platform artifact publication or Linux IPC acceptance was run.
+Both pinned Frame SSH probes during this slice timed out. No new publisher was
+started, and there is no active publication process to resume. Recheck the
+current remote release after reachability returns, publish the completed branch
+commit, then qualify the combined lifecycle changes on native and Web.
+
+Remaining B5 work: owned-subtree impact/confirmation, exact causal reanchoring of
+earlier commands across recreated IDs, mixed replacement staging capacity, typed
+API/slots, app-bound graph reconstruction grants and replacement/retirement UI.
+No unavailable capability is presented as successful. Full B6 styles/modes and
+B7 representative controls/flows remain open. No wire versions, dependencies or
+resource limits changed.
+
+Restart files: `canvas/oib/history/restore.rs`, `history/occurrence_tests.rs`,
+`history.rs`, `client/oib_applied_history_tests.rs`,
+`client/oib_designer_tests.rs`; property/receipt capture still uses the existing
+manager and state adapter paths recorded above. Frame reachability and live
+acceptance must be rechecked before claiming this batch deployed.

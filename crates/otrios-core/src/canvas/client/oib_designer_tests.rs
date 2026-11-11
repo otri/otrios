@@ -6036,3 +6036,98 @@ fn working_copy_deleted_text_undo_restores_authored_text_and_fresh_selected_node
     assert!(client.scene().unwrap().controls().len() <= 128);
     assert_eq!(authority.oib_allocations().unwrap(), allocations);
 }
+
+#[test]
+fn working_copy_instance_delete_undo_redo_reopens_fresh_root_and_keeps_label() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    let label = editor_address(3);
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .stage_property(&label, Some(Value::Text("Instance history label".into())))
+        .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    activate_studio_root(&mut client, 20);
+    let (_, point) = studio_scene_control(&client, "Delete component");
+    for phase in [PointerPhase::Down, PointerPhase::Up] {
+        assert!(
+            client
+                .pointer_at(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 82,
+                        phase,
+                        position: point
+                    },
+                    1
+                )
+                .unwrap()
+        );
+    }
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .dirty()
+    );
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let next = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_next_identity()
+        .unwrap();
+    assert!(client.designer_history(false).unwrap());
+    let m = client.active.as_ref().unwrap();
+    let Selection::Object(selected) = &m.designer.as_ref().unwrap().selection else {
+        panic!("restored root selection")
+    };
+    assert_eq!(selected.instance, InstanceId(next));
+    assert!(selected.references.is_empty());
+    let address = match label {
+        PropertyAddress::Occurrence { path, .. } => PropertyAddress::Occurrence {
+            instance: InstanceId(next),
+            path,
+        },
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        m.design_doc()
+            .oib_property_register(&address)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Instance history label".into()))]
+    );
+    assert_eq!(
+        m.doc.oib_allocations().unwrap().len(),
+        1,
+        "Undo remains private"
+    );
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_allocations().unwrap().len(), 2);
+    assert!(client.designer_history(true).unwrap());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .history_review()
+            .is_none()
+    );
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_allocations().unwrap().len(), 1);
+    assert!(client.scene().unwrap().controls().len() <= 128);
+}

@@ -687,9 +687,9 @@ equal-value causal publications, and adds no wire fields or implicit overwrite.
 Validate the final inverse, including restored property changes, against the same
 16-operation/8 KiB Apply envelope and source/scene/control limits. An oversized
 inverse remains unavailable with a visible reason; splitting one history unit
-into several publications is not permitted. Removed owned occurrence closures,
-app-bound reconstruction and dependent repair remain separate explicit gates
-until complete source/property capture and safe fresh mapping are implemented.
+into several publications is not permitted. T18 extends this contract to removed
+owned occurrences. App-bound graph reconstruction and dependent repair retain
+their explicit grant/admission gates.
 See IMPLEMENTATION.md for actual implementation and acceptance status.
 
 ## T17. Component deletion impact and confirmation
@@ -733,3 +733,39 @@ use bounded pages, preserving every reported row with bounded navigation IDs. Ex
 512-node/128-control scene ceilings and the 96-byte semantic label ceiling remain;
 long visible labels retain their full text, with an explicitly abbreviated
 semantic label. No limit increase or new wire contract is implied.
+
+## T18. Removed occurrences and owned slot contents
+
+History retains only removed instance records, their placements, explicit app
+connections, affected sibling groups, occurrence origins and authored override
+values. The app field store is never copied into an inverse. Removed instances
+must have a captured palette preset matching their component; that preset and
+the relevant source relationships remain conditional guards.
+
+Recreate instances through ordinary admitted Insert operations after any fresh
+definition/node/slot/preset declarations. Assign implicit IDs in the actual
+parent-before-child insertion order, even when an old child's numeric ID predates
+its old owner. Remap slot destinations and object paths to the fresh owner, then
+restore sibling ordering and explicit connections through existing signed grants.
+Seed fresh override contexts privately and include the allowed restored values in
+the same final Apply. Later edits to surviving app fields/properties are preserved.
+
+A changed sibling group, missing/rebound prototype, unavailable slot, conflicting
+old override or failed final admission blocks the inverse with review/reason;
+there is no partial restoration or silent fallback to another container. Existing
+16-operation/8 KiB Apply, 64 KiB history and resident/source/scene ceilings remain.
+Mixed replacement batches can still hit the existing private staging capacity
+before removed residents are reclaimed; no final or transient capacity is raised.
+
+Selection is advisory local state. Map known recreated targets to fresh semantic
+addresses; an unrelated obsolete selection does not invalidate a guarded data
+inverse. The normal Designer selection validation supplies its valid fallback.
+This never weakens property/source guards. Earlier history entries still naming
+retired identities require an exact causal-version remapping before they can be
+reanchored. Equal restored values alone cannot establish that proof.
+
+The existing simple instance Delete command is qualified through private removal,
+Apply, fresh-ID Undo and Redo. A complete owned-subtree impact/confirmation UI and
+the broader replacement/retirement journey remain separate work; implementing the
+inverse planner is not evidence of those controls. See the latest implementation
+record for actual tests and Frame/Web publication status.

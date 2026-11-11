@@ -296,51 +296,275 @@ impl Entry {
         for op in apply.operations.iter().rev() {
             match op {
                 DocumentEdit::Definition(edit) => {
-                    let d = match edit { DefinitionEdit::CreateDefinition{definition,..}|DefinitionEdit::DeleteDefinition{definition}|DefinitionEdit::CreateNode{definition,..}|DefinitionEdit::DeleteNode{definition,..}|DefinitionEdit::SetVisual{definition,..}|DefinitionEdit::SetSlots{definition,..}|DefinitionEdit::SetDefault{definition,..}|DefinitionEdit::ClearDefault{definition,..}|DefinitionEdit::RenameDefinition{definition,..}|DefinitionEdit::RenameNode{definition,..}|DefinitionEdit::MoveNode{definition,..}|DefinitionEdit::Expose{definition,..}|DefinitionEdit::ConnectReference{definition,..} => *definition };
-                    if created_definitions.contains(&d) || entry.restoration.recreates_definition(d) { continue; }
-                    let target_node = match edit { DefinitionEdit::SetVisual{node,..}|DefinitionEdit::SetDefault{node,..}|DefinitionEdit::ClearDefault{node,..}|DefinitionEdit::RenameNode{node,..}|DefinitionEdit::MoveNode{node,..}=>Some(*node), DefinitionEdit::ConnectReference{reference,..}=>Some(*reference), _=>None };
-                    if target_node.is_some_and(|n| created_nodes.contains(&(d,n)) || entry.restoration.recreates_node(d,n)) { continue; }
-                    let (key, inverse) = match edit {
-                        DefinitionEdit::RenameDefinition{..} => (Key::DefinitionName(d),DefinitionEdit::RenameDefinition{definition:d,name:definition(before,d)?.name.clone()}),
-                        DefinitionEdit::RenameNode{node:n,..} => (Key::NodeName(d,*n),DefinitionEdit::RenameNode{definition:d,node:*n,name:node(before,d,*n)?.name.clone()}),
-                        DefinitionEdit::SetVisual{node:n,..} => (Key::Visual(d,*n),DefinitionEdit::SetVisual{definition:d,node:*n,visual:node(before,d,*n)?.visual.clone()}),
-                        DefinitionEdit::SetDefault{node:n,property:p,..}|DefinitionEdit::ClearDefault{node:n,property:p,..} => (Key::Default(d,*n,*p), match node(before,d,*n)?.defaults.iter().find(|v|v.property==*p) { Some(value)=>DefinitionEdit::SetDefault{definition:d,node:*n,property:*p,value:value.value.clone()}, None=>DefinitionEdit::ClearDefault{definition:d,node:*n,property:*p} }),
-                        DefinitionEdit::SetSlots{..} => {
-                            let old=&definition(before,d)?.slots;
-                            (Key::Slots(d),DefinitionEdit::SetSlots{definition:d,slots:old.clone()})
-                        },
-                        DefinitionEdit::Expose{property:p,..} => (Key::Exposed(d,*p),DefinitionEdit::Expose{definition:d,property:*p,targets:definition(before,d)?.exposed.iter().find(|e|e.property==*p).ok_or("Undo cannot recreate an exposed descriptor")?.targets.clone()}),
-                        DefinitionEdit::ConnectReference{reference,target,..} => {
-                            let previous=node(before,d,*reference)?.reference.as_ref().ok_or("Missing previous reference")?.assignments.iter().find(|v|v.target==*target);
-                            let source=previous.map(|v|match &v.source { AssignmentSource::Literal(v)=>Ok(LiteralSource::Literal(v.clone())), AssignmentSource::Forward(p)=>Ok(LiteralSource::Forward(p.clone())), _=>Err("History cannot recreate an app reference binding".to_string()) }).transpose()?;
-                            (Key::Reference(d,*reference,target.clone()),DefinitionEdit::ConnectReference{definition:d,reference:*reference,target:target.clone(),source})
-                        },
-                        DefinitionEdit::MoveNode{node:n,..} => {
-                            for source in [before,after] { if let Some(parent)=visual_parent(source,d,*n) { entry.guard(before,after,Key::Children(d,parent))?; } }
-                            let parent=visual_parent(before,d,*n);
-                            let anchor=parent.and_then(|p| {let children=&node(before,d,p).ok()?.visual_children;children.iter().position(|id|id==n).and_then(|i|children.get(i+1)).copied()});
-                            (Key::NodeOwner(d,*n),DefinitionEdit::MoveNode{definition:d,node:*n,owner:node(before,d,*n)?.owner.ok_or("Cannot move a history root")?,visual_parent:parent,before:anchor})
-                        },
-                        DefinitionEdit::CreateNode{..}=>continue,
-                        DefinitionEdit::DeleteDefinition{..}|DefinitionEdit::DeleteNode{..}=>continue,
-                        DefinitionEdit::CreateDefinition{..}=>return Err("Missing created history definition".into()),
+                    let d = match edit {
+                        DefinitionEdit::CreateDefinition { definition, .. }
+                        | DefinitionEdit::DeleteDefinition { definition }
+                        | DefinitionEdit::CreateNode { definition, .. }
+                        | DefinitionEdit::DeleteNode { definition, .. }
+                        | DefinitionEdit::SetVisual { definition, .. }
+                        | DefinitionEdit::SetSlots { definition, .. }
+                        | DefinitionEdit::SetDefault { definition, .. }
+                        | DefinitionEdit::ClearDefault { definition, .. }
+                        | DefinitionEdit::RenameDefinition { definition, .. }
+                        | DefinitionEdit::RenameNode { definition, .. }
+                        | DefinitionEdit::MoveNode { definition, .. }
+                        | DefinitionEdit::Expose { definition, .. }
+                        | DefinitionEdit::ConnectReference { definition, .. } => *definition,
                     };
-                    if entry.guard(before,after,key)? { entry.operations.push(DocumentEdit::Definition(inverse)); }
+                    if created_definitions.contains(&d) || entry.restoration.recreates_definition(d)
+                    {
+                        continue;
+                    }
+                    let target_node = match edit {
+                        DefinitionEdit::SetVisual { node, .. }
+                        | DefinitionEdit::SetDefault { node, .. }
+                        | DefinitionEdit::ClearDefault { node, .. }
+                        | DefinitionEdit::RenameNode { node, .. }
+                        | DefinitionEdit::MoveNode { node, .. } => Some(*node),
+                        DefinitionEdit::ConnectReference { reference, .. } => Some(*reference),
+                        _ => None,
+                    };
+                    if target_node.is_some_and(|n| {
+                        created_nodes.contains(&(d, n)) || entry.restoration.recreates_node(d, n)
+                    }) {
+                        continue;
+                    }
+                    let (key, inverse) = match edit {
+                        DefinitionEdit::RenameDefinition { .. } => (
+                            Key::DefinitionName(d),
+                            DefinitionEdit::RenameDefinition {
+                                definition: d,
+                                name: definition(before, d)?.name.clone(),
+                            },
+                        ),
+                        DefinitionEdit::RenameNode { node: n, .. } => (
+                            Key::NodeName(d, *n),
+                            DefinitionEdit::RenameNode {
+                                definition: d,
+                                node: *n,
+                                name: node(before, d, *n)?.name.clone(),
+                            },
+                        ),
+                        DefinitionEdit::SetVisual { node: n, .. } => (
+                            Key::Visual(d, *n),
+                            DefinitionEdit::SetVisual {
+                                definition: d,
+                                node: *n,
+                                visual: node(before, d, *n)?.visual.clone(),
+                            },
+                        ),
+                        DefinitionEdit::SetDefault {
+                            node: n,
+                            property: p,
+                            ..
+                        }
+                        | DefinitionEdit::ClearDefault {
+                            node: n,
+                            property: p,
+                            ..
+                        } => (
+                            Key::Default(d, *n, *p),
+                            match node(before, d, *n)?
+                                .defaults
+                                .iter()
+                                .find(|v| v.property == *p)
+                            {
+                                Some(value) => DefinitionEdit::SetDefault {
+                                    definition: d,
+                                    node: *n,
+                                    property: *p,
+                                    value: value.value.clone(),
+                                },
+                                None => DefinitionEdit::ClearDefault {
+                                    definition: d,
+                                    node: *n,
+                                    property: *p,
+                                },
+                            },
+                        ),
+                        DefinitionEdit::SetSlots { .. } => {
+                            let old = &definition(before, d)?.slots;
+                            (
+                                Key::Slots(d),
+                                DefinitionEdit::SetSlots {
+                                    definition: d,
+                                    slots: old.clone(),
+                                },
+                            )
+                        }
+                        DefinitionEdit::Expose { property: p, .. } => (
+                            Key::Exposed(d, *p),
+                            DefinitionEdit::Expose {
+                                definition: d,
+                                property: *p,
+                                targets: definition(before, d)?
+                                    .exposed
+                                    .iter()
+                                    .find(|e| e.property == *p)
+                                    .ok_or("Undo cannot recreate an exposed descriptor")?
+                                    .targets
+                                    .clone(),
+                            },
+                        ),
+                        DefinitionEdit::ConnectReference {
+                            reference, target, ..
+                        } => {
+                            let previous = node(before, d, *reference)?
+                                .reference
+                                .as_ref()
+                                .ok_or("Missing previous reference")?
+                                .assignments
+                                .iter()
+                                .find(|v| v.target == *target);
+                            let source = previous
+                                .map(|v| match &v.source {
+                                    AssignmentSource::Literal(v) => {
+                                        Ok(LiteralSource::Literal(v.clone()))
+                                    }
+                                    AssignmentSource::Forward(p) => {
+                                        Ok(LiteralSource::Forward(p.clone()))
+                                    }
+                                    _ => Err("History cannot recreate an app reference binding"
+                                        .to_string()),
+                                })
+                                .transpose()?;
+                            (
+                                Key::Reference(d, *reference, target.clone()),
+                                DefinitionEdit::ConnectReference {
+                                    definition: d,
+                                    reference: *reference,
+                                    target: target.clone(),
+                                    source,
+                                },
+                            )
+                        }
+                        DefinitionEdit::MoveNode { node: n, .. } => {
+                            for source in [before, after] {
+                                if let Some(parent) = visual_parent(source, d, *n) {
+                                    entry.guard(before, after, Key::Children(d, parent))?;
+                                }
+                            }
+                            let parent = visual_parent(before, d, *n);
+                            let anchor = parent.and_then(|p| {
+                                let children = &node(before, d, p).ok()?.visual_children;
+                                children
+                                    .iter()
+                                    .position(|id| id == n)
+                                    .and_then(|i| children.get(i + 1))
+                                    .copied()
+                            });
+                            (
+                                Key::NodeOwner(d, *n),
+                                DefinitionEdit::MoveNode {
+                                    definition: d,
+                                    node: *n,
+                                    owner: node(before, d, *n)?
+                                        .owner
+                                        .ok_or("Cannot move a history root")?,
+                                    visual_parent: parent,
+                                    before: anchor,
+                                },
+                            )
+                        }
+                        DefinitionEdit::CreateNode { .. } => continue,
+                        DefinitionEdit::DeleteDefinition { .. }
+                        | DefinitionEdit::DeleteNode { .. } => continue,
+                        DefinitionEdit::CreateDefinition { .. } => {
+                            return Err("Missing created history definition".into());
+                        }
+                    };
+                    if entry.guard(before, after, key)? {
+                        entry.operations.push(DocumentEdit::Definition(inverse));
+                    }
+                }
+                DocumentEdit::Preset(PresetEdit::Update { preset })
+                    if !created_presets.contains(&preset.id)
+                        && !entry.restoration.recreates_preset(preset.id) =>
+                {
+                    if entry.guard(before, after, Key::Preset(preset.id))? {
+                        entry
+                            .operations
+                            .push(DocumentEdit::Preset(PresetEdit::Update {
+                                preset: before
+                                    .presets
+                                    .iter()
+                                    .find(|p| p.id == preset.id)
+                                    .ok_or("Missing previous preset")?
+                                    .clone(),
+                            }));
+                    }
+                }
+                DocumentEdit::Preset(PresetEdit::Create { .. } | PresetEdit::Update { .. }) => {}
+                DocumentEdit::Preset(PresetEdit::Delete { .. }) => {}
+                DocumentEdit::Hierarchy(edit) => match edit {
+                    HierarchyEdit::Connect {
+                        object, property, ..
+                    } if !created_instances.contains(&object.instance)
+                        && !entry.restoration.recreates_instance(object.instance) =>
+                    {
+                        if entry.guard(before, after, Key::Connection(object.clone(), *property))? {
+                            entry.operations.push(DocumentEdit::Hierarchy(
+                                HierarchyEdit::Connect {
+                                    object: object.clone(),
+                                    property: *property,
+                                    source: before
+                                        .connections
+                                        .iter()
+                                        .find(|c| c.object == *object && c.property == *property)
+                                        .map(|c| c.source.clone()),
+                                },
+                            ));
+                        }
+                    }
+                    HierarchyEdit::Rename { instance, .. }
+                        if !created_instances.contains(instance)
+                            && !entry.restoration.recreates_instance(*instance) =>
+                    {
+                        if entry.guard(before, after, Key::InstanceName(*instance))? {
+                            entry
+                                .operations
+                                .push(DocumentEdit::Hierarchy(HierarchyEdit::Rename {
+                                    instance: *instance,
+                                    name: before
+                                        .instances
+                                        .iter()
+                                        .find(|i| i.id == instance.0)
+                                        .ok_or("Missing previous instance")?
+                                        .name
+                                        .clone(),
+                                }));
+                        }
+                    }
+                    HierarchyEdit::Move { instance, .. }
+                    | HierarchyEdit::Place { instance, .. }
+                    | HierarchyEdit::Reorder { instance, .. }
+                        if !created_instances.contains(instance)
+                            && !entry.restoration.recreates_instance(*instance) =>
+                    {
+                        for source in [before, after] {
+                            entry.guard(
+                                before,
+                                after,
+                                Key::Siblings(destination(source, *instance)),
+                            )?;
+                        }
+                        if entry.guard(before, after, Key::Placement(*instance))? {
+                            entry
+                                .operations
+                                .push(DocumentEdit::Hierarchy(HierarchyEdit::Move {
+                                    instance: *instance,
+                                    destination: destination(before, *instance),
+                                    before: next_sibling(before, *instance),
+                                    frame: frame(before, *instance),
+                                }));
+                        }
+                    }
+                    HierarchyEdit::Remove { .. } => {}
+                    _ => {}
                 },
-                DocumentEdit::Preset(PresetEdit::Update{preset}) if !created_presets.contains(&preset.id) && !entry.restoration.recreates_preset(preset.id) => { if entry.guard(before,after,Key::Preset(preset.id))? {entry.operations.push(DocumentEdit::Preset(PresetEdit::Update{preset:before.presets.iter().find(|p|p.id==preset.id).ok_or("Missing previous preset")?.clone()}));} },
-                DocumentEdit::Preset(PresetEdit::Create{..}|PresetEdit::Update{..})=>{},
-                DocumentEdit::Preset(PresetEdit::Delete{..})=>{},
-                DocumentEdit::Hierarchy(edit)=>match edit {
-                    HierarchyEdit::Connect{object,property,..} if !created_instances.contains(&object.instance) => {if entry.guard(before,after,Key::Connection(object.clone(),*property))? {entry.operations.push(DocumentEdit::Hierarchy(HierarchyEdit::Connect{object:object.clone(),property:*property,source:before.connections.iter().find(|c|c.object==*object&&c.property==*property).map(|c|c.source.clone())}));}},
-                    HierarchyEdit::Rename{instance,..} if !created_instances.contains(instance) => {if entry.guard(before,after,Key::InstanceName(*instance))? {entry.operations.push(DocumentEdit::Hierarchy(HierarchyEdit::Rename{instance:*instance,name:before.instances.iter().find(|i|i.id==instance.0).ok_or("Missing previous instance")?.name.clone()}));}},
-                    HierarchyEdit::Move{instance,..}|HierarchyEdit::Place{instance,..}|HierarchyEdit::Reorder{instance,..} if !created_instances.contains(instance) => {
-                        for source in [before,after] {entry.guard(before,after,Key::Siblings(destination(source,*instance)))?;}
-                        if entry.guard(before,after,Key::Placement(*instance))? {entry.operations.push(DocumentEdit::Hierarchy(HierarchyEdit::Move{instance:*instance,destination:destination(before,*instance),before:next_sibling(before,*instance),frame:frame(before,*instance)}));}
-                    },
-                    HierarchyEdit::Remove{..}=>return Err("Undo of a removed occurrence requires its complete override and owned-content closure".into()),
-                    _=>{},
-                },
-                DocumentEdit::Restore{..}=>return Err("Reset has no bounded conditional inverse".into()),
+                DocumentEdit::Restore { .. } => {
+                    return Err("Reset has no bounded conditional inverse".into());
+                }
             }
         }
         // Creation inverses require the accepted revision to remain coherent

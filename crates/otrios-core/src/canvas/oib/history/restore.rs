@@ -11,6 +11,10 @@ pub(super) struct Graph {
     deleted_nodes: BTreeSet<(DefinitionId, NodeId)>,
     deleted_slots: BTreeSet<(DefinitionId, SlotId)>,
     presets: Vec<Preset>,
+    instances: Vec<InstanceRecord>,
+    placements: Vec<Placement>,
+    connections: Vec<AppConnection>,
+    siblings: Vec<(Destination, Vec<InstanceId>)>,
     values: Vec<(PropertyAddress, Option<Value>)>,
     origins: Vec<(InstanceId, DefinitionId)>,
 }
@@ -20,6 +24,7 @@ struct Mapping {
     nodes: BTreeMap<(DefinitionId, NodeId), NodeId>,
     slots: BTreeMap<(DefinitionId, SlotId), SlotId>,
     presets: BTreeMap<u64, u64>,
+    instances: BTreeMap<InstanceId, InstanceId>,
 }
 impl Graph {
     pub(super) fn capture(
@@ -56,9 +61,54 @@ impl Graph {
             .filter(|p| !after.presets.iter().any(|a| a.id == p.id))
             .cloned()
             .collect();
+        result.instances = before
+            .instances
+            .iter()
+            .filter(|instance| !after.instances.iter().any(|next| next.id == instance.id))
+            .cloned()
+            .collect();
+        for instance in &result.instances {
+            let preset = before
+                .presets
+                .iter()
+                .find(|preset| preset.id == instance.prototype)
+                .ok_or("Removed occurrence has no captured insertion preset")?;
+            if !preset.palette || preset.definition.0 != instance.component {
+                return Err(
+                    "Removed occurrence cannot be recreated through its admitted insertion preset"
+                        .into(),
+                );
+            }
+        }
+        result.placements = before
+            .placements
+            .iter()
+            .filter(|placement| result.recreates_instance(placement.instance))
+            .cloned()
+            .collect();
+        result.connections = before
+            .connections
+            .iter()
+            .filter(|connection| result.recreates_instance(connection.object.instance))
+            .cloned()
+            .collect();
+        for instance in &result.instances {
+            let destination = destination(before, InstanceId(instance.id));
+            if !result
+                .siblings
+                .iter()
+                .any(|(existing, _)| *existing == destination)
+            {
+                result
+                    .siblings
+                    .push((destination.clone(), sibling_ids(before, &destination)));
+            }
+        }
         for instance in &before.instances {
             let origin = DefinitionId(instance.component);
-            if result.reaches_fragment(before, origin, &mut BTreeSet::new()) {
+            if result.recreates_instance(InstanceId(instance.id))
+                || result.reaches_fragment(before, origin, &mut BTreeSet::new())
+            {
                 result.origins.push((InstanceId(instance.id), origin));
             }
         }
@@ -120,12 +170,31 @@ impl Graph {
     pub(super) fn recreates_preset(&self, id: u64) -> bool {
         self.presets.iter().any(|p| p.id == id)
     }
+    pub(super) fn recreates_instance(&self, id: InstanceId) -> bool {
+        self.instances.iter().any(|instance| instance.id == id.0)
+    }
     pub(super) fn guard_keys(&self) -> Vec<Key> {
         self.definitions
             .iter()
             .map(|d| Key::Definition(d.id))
             .chain(self.presets.iter().map(|p| Key::Preset(p.id)))
             .chain(self.origins.iter().map(|(id, _)| Key::Instance(*id)))
+            .chain(self.instances.iter().flat_map(|instance| {
+                [
+                    Key::Placement(InstanceId(instance.id)),
+                    Key::Preset(instance.prototype),
+                ]
+            }))
+            .chain(
+                self.connections.iter().map(|connection| {
+                    Key::Connection(connection.object.clone(), connection.property)
+                }),
+            )
+            .chain(
+                self.siblings
+                    .iter()
+                    .map(|(destination, _)| Key::Siblings(destination.clone())),
+            )
             .collect()
     }
     fn removed_address(&self, source: &DocumentSource, address: &PropertyAddress) -> Result<bool> {
@@ -134,6 +203,9 @@ impl Graph {
                 definition, node, ..
             } => Ok(self.deleted_nodes.contains(&(*definition, *node))),
             PropertyAddress::Occurrence { instance, path } => {
+                if self.recreates_instance(*instance) {
+                    return Ok(true);
+                }
                 let Some(i) = source.instances.iter().find(|i| i.id == instance.0) else {
                     return Ok(false);
                 };
@@ -181,7 +253,43 @@ impl Graph {
         for p in &self.presets {
             map.presets.insert(p.id, fresh()?);
         }
+        for instance in self.occurrence_order()? {
+            map.instances
+                .insert(InstanceId(instance.id), InstanceId(fresh()?));
+        }
         Ok(map)
+    }
+    fn occurrence_destination(&self, id: InstanceId) -> Destination {
+        self.placements
+            .iter()
+            .find(|placement| placement.instance == id)
+            .map_or(Destination::Canvas, |placement| {
+                placement.destination.clone()
+            })
+    }
+    fn occurrence_order(&self) -> Result<Vec<&InstanceRecord>> {
+        let mut remaining: Vec<_> = self.instances.iter().collect();
+        let mut ordered = vec![];
+        let mut created = BTreeSet::new();
+        while !remaining.is_empty() {
+            let Some(index) = remaining.iter().position(|instance| {
+                match self.occurrence_destination(InstanceId(instance.id)) {
+                    Destination::Canvas => true,
+                    Destination::Slot { component, .. } => {
+                        !self.recreates_instance(component.instance)
+                            || created.contains(&component.instance)
+                    }
+                }
+            }) else {
+                return Err(
+                    "Removed owned content has a cyclic or unavailable parent closure".into(),
+                );
+            };
+            let instance = remaining.remove(index);
+            created.insert(InstanceId(instance.id));
+            ordered.push(instance);
+        }
+        Ok(ordered)
     }
     fn old_definition<'a>(
         &'a self,
@@ -377,7 +485,9 @@ impl Graph {
         // Keep existing inverse source repairs, then combine their moves with
         // restored nodes and sort all sibling repairs right-to-left below.
         for op in inverse {
-            result.push(self.operation(current, &map, op)?);
+            if !matches!(op, DocumentEdit::Hierarchy(_)) {
+                result.push(self.operation(current, &map, op)?);
+            }
         }
         for d in &self.definitions {
             for n in &d.nodes {
@@ -428,6 +538,54 @@ impl Graph {
                 preset: self.preset(current, &map, p)?,
             }));
         }
+        for instance in self.occurrence_order()? {
+            let old = InstanceId(instance.id);
+            result.push(DocumentEdit::Hierarchy(HierarchyEdit::Insert {
+                prototype: InstanceId(
+                    map.presets
+                        .get(&instance.prototype)
+                        .copied()
+                        .unwrap_or(instance.prototype),
+                ),
+                name: Some(instance.name.clone()),
+                destination: self.destination(current, &map, &self.occurrence_destination(old))?,
+                before: None,
+                frame: self
+                    .placements
+                    .iter()
+                    .find(|p| p.instance == old)
+                    .and_then(|p| p.frame),
+            }));
+        }
+        for op in inverse {
+            if matches!(op, DocumentEdit::Hierarchy(_)) {
+                result.push(self.operation(current, &map, op)?);
+            }
+        }
+        for (destination, siblings) in &self.siblings {
+            for (index, old) in siblings.iter().enumerate().rev() {
+                if !self.recreates_instance(*old) {
+                    continue;
+                }
+                result.push(DocumentEdit::Hierarchy(HierarchyEdit::Move {
+                    instance: map.instance(*old),
+                    destination: self.destination(current, &map, destination)?,
+                    before: siblings.get(index + 1).map(|id| map.instance(*id)),
+                    frame: self
+                        .placements
+                        .iter()
+                        .find(|p| p.instance == *old)
+                        .and_then(|p| p.frame),
+                }));
+            }
+        }
+        for connection in &self.connections {
+            result.push(DocumentEdit::Hierarchy(HierarchyEdit::Connect {
+                object: self.object(current, &map, &connection.object)?,
+                property: connection.property,
+                source: Some(connection.source.clone()),
+            }));
+        }
         // Preserve non-move definition order (Create roots, then owned nodes),
         // restore sibling moves in before order, then presets and hierarchy.
         result.sort_by_key(|op| match op {
@@ -462,7 +620,30 @@ impl Graph {
             }
             DocumentEdit::Definition(_) => (0, 0, 0, 0, 0),
             DocumentEdit::Preset(_) => (1, 0, 0, 0, 0),
-            _ => (2, 0, 0, 0, 0),
+            DocumentEdit::Hierarchy(HierarchyEdit::Insert { .. }) => (2, 0, 0, 0, 0),
+            DocumentEdit::Hierarchy(HierarchyEdit::Move { instance, .. }) => {
+                let old = map
+                    .instances
+                    .iter()
+                    .find_map(|(old, new)| (*new == *instance).then_some(*old))
+                    .unwrap_or(*instance);
+                let location =
+                    self.siblings
+                        .iter()
+                        .enumerate()
+                        .find_map(|(group, (_, siblings))| {
+                            siblings
+                                .iter()
+                                .position(|id| *id == old)
+                                .map(|index| (group, index))
+                        });
+                match location {
+                    Some((group, index)) => (2, 1, 0, group as u64, usize::MAX - index),
+                    None => (2, 1, 1, 0, 0),
+                }
+            }
+            DocumentEdit::Hierarchy(HierarchyEdit::Connect { .. }) => (2, 2, 0, 0, 0),
+            _ => (2, 3, 0, 0, 0),
         });
         Ok(result)
     }
@@ -576,6 +757,7 @@ impl Graph {
                 HierarchyEdit::Insert {
                     prototype,
                     destination,
+                    before,
                     ..
                 } => {
                     prototype.0 = map
@@ -584,12 +766,35 @@ impl Graph {
                         .copied()
                         .unwrap_or(prototype.0);
                     *destination = self.destination(current, map, destination)?;
+                    *before = before.map(|id| map.instance(id));
                 }
-                HierarchyEdit::Move { destination, .. }
-                | HierarchyEdit::Duplicate { destination, .. } => {
-                    *destination = self.destination(current, map, destination)?
+                HierarchyEdit::Move {
+                    instance,
+                    destination,
+                    before,
+                    ..
+                } => {
+                    *instance = map.instance(*instance);
+                    *destination = self.destination(current, map, destination)?;
+                    *before = before.map(|id| map.instance(id));
                 }
-                _ => {}
+                HierarchyEdit::Duplicate {
+                    instance,
+                    destination,
+                    before,
+                    ..
+                } => {
+                    *instance = map.instance(*instance);
+                    *destination = self.destination(current, map, destination)?;
+                    *before = before.map(|id| map.instance(id));
+                }
+                HierarchyEdit::Reorder { instance, before } => {
+                    *instance = map.instance(*instance);
+                    *before = before.map(|id| map.instance(id));
+                }
+                HierarchyEdit::Rename { instance, .. }
+                | HierarchyEdit::Place { instance, .. }
+                | HierarchyEdit::Remove { instance } => *instance = map.instance(*instance),
             },
             DocumentEdit::Restore { .. } => {}
         }
@@ -613,7 +818,7 @@ impl Graph {
             },
         )?;
         Ok(ObjectAddress {
-            instance: object.instance,
+            instance: map.instance(object.instance),
             references: p.references,
             node: p.node,
         })
@@ -629,9 +834,18 @@ impl Graph {
             Destination::Slot { component, slot } => {
                 let mut d = self.origin(current, component.instance)?;
                 for n in &component.references {
-                    d = self
-                        .old_definition(current, d)
-                        .and_then(|d| d.nodes.iter().find(|v| v.id == *n))
+                    let Some(definition) = self.old_definition(current, d) else {
+                        // Imported closure identities are immutable under the
+                        // captured baseline and cannot contain local slots.
+                        return Ok(Destination::Slot {
+                            component: self.object(current, map, component)?,
+                            slot: *slot,
+                        });
+                    };
+                    d = definition
+                        .nodes
+                        .iter()
+                        .find(|v| v.id == *n)
                         .and_then(|n| n.reference.as_ref())
                         .ok_or("History slot owner path changed")?
                         .definition;
@@ -662,7 +876,7 @@ impl Graph {
             PropertyAddress::Occurrence { instance, path } => {
                 let d = self.origin(current, *instance)?;
                 Ok(PropertyAddress::Occurrence {
-                    instance: *instance,
+                    instance: map.instance(*instance),
                     path: self.path(current, map, d, path)?,
                 })
             }
@@ -692,8 +906,13 @@ impl Graph {
                 node: map.node(*definition, *node),
             },
             Selection::Object(object) => {
-                let origin = self.origin(current, object.instance)?;
-                let path = self.path(
+                // Selection is advisory local UI state. An unrelated retired
+                // selection must not veto an otherwise guarded data inverse;
+                // Designer refresh will choose its normal valid fallback.
+                let Ok(origin) = self.origin(current, object.instance) else {
+                    return Ok(selection.clone());
+                };
+                let Ok(path) = self.path(
                     current,
                     &map,
                     origin,
@@ -702,9 +921,11 @@ impl Graph {
                         node: object.node,
                         property: PropertyId(0),
                     },
-                )?;
+                ) else {
+                    return Ok(selection.clone());
+                };
                 Selection::Object(ObjectAddress {
-                    instance: object.instance,
+                    instance: map.instance(object.instance),
                     references: path.references,
                     node: path.node,
                 })
@@ -720,8 +941,15 @@ impl Mapping {
     fn node(&self, d: DefinitionId, n: NodeId) -> NodeId {
         self.nodes.get(&(d, n)).copied().unwrap_or(n)
     }
+    fn instance(&self, instance: InstanceId) -> InstanceId {
+        self.instances.get(&instance).copied().unwrap_or(instance)
+    }
 }
 
 #[cfg(test)]
 #[path = "restore_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "occurrence_tests.rs"]
+mod occurrence_tests;
