@@ -12,6 +12,8 @@ pub struct Contribution {
     pub style: StyleRef,
     pub field: FieldId,
     pub source: ResolvedField,
+    /// Document use replaces a signed library's baseline color, not its body.
+    pub(crate) library_default: bool,
 }
 pub struct Occurrence<'a> {
     pub component: &'a ComponentStyle,

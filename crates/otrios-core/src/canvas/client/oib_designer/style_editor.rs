@@ -74,12 +74,7 @@ pub(super) fn component(
         }
         _ => return None,
     };
-    seed.graph
-        .as_ref()?
-        .definitions
-        .iter()
-        .any(|d| d.id == id)
-        .then_some(id)
+    Some(id)
 }
 fn source(seed: &otrios_interfaces::oib::Seed) -> Option<&s::DocumentStyles> {
     seed.graph.as_ref()?.styles.as_ref()
@@ -127,7 +122,7 @@ pub(super) fn library(
         Section::Styles => {
             if editable {
                 for def in seed
-                    .graph
+                    .designer
                     .as_ref()
                     .into_iter()
                     .flat_map(|g| &g.definitions)
@@ -348,7 +343,7 @@ pub(super) fn inspector(
         if editable
             && let Some(definition) = component_context
             && let Some(def) = seed
-                .graph
+                .designer
                 .as_ref()
                 .and_then(|g| g.definitions.iter().find(|d| d.id == definition))
         {
@@ -525,29 +520,26 @@ impl Client {
                         .iter()
                         .find(|c| c.id == style.contract)
                         .ok_or("Unknown style contract")?;
-                    let def = graph
-                        .definitions
-                        .iter()
-                        .find(|def| def.id == *definition)
-                        .ok_or("Cannot change an imported definition")?;
-                    let root = def
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == def.root)
-                        .ok_or("Missing component root")?;
-                    for default in &root.defaults {
-                        if contract
-                            .fields
+                    if let Some(def) = graph.definitions.iter().find(|def| def.id == *definition) {
+                        let root = def
+                            .nodes
                             .iter()
-                            .any(|field| field.id.0 == default.property.0)
-                        {
-                            operations.push(DocumentEdit::Definition(
-                                DefinitionEdit::ClearDefault {
-                                    definition: *definition,
-                                    node: root.id,
-                                    property: default.property,
-                                },
-                            ));
+                            .find(|node| node.id == def.root)
+                            .ok_or("Missing component root")?;
+                        for default in &root.defaults {
+                            if contract
+                                .fields
+                                .iter()
+                                .any(|field| field.id.0 == default.property.0)
+                            {
+                                operations.push(DocumentEdit::Definition(
+                                    DefinitionEdit::ClearDefault {
+                                        definition: *definition,
+                                        node: root.id,
+                                        property: default.property,
+                                    },
+                                ));
+                            }
                         }
                     }
                 }

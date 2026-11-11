@@ -7,7 +7,8 @@ use otrios_interfaces::{
     oib::{
         authoring::DocumentSource,
         designer::{
-            DefinitionId, NodeId, PropertyDescriptor, PropertyEditor, PropertyId, PropertyPath,
+            ComponentDefinition, DefinitionId, NodeId, PropertyDescriptor, PropertyEditor,
+            PropertyId, PropertyPath,
         },
     },
 };
@@ -61,11 +62,48 @@ pub fn local_admitted(seed: &Seed) -> Result<Option<Admitted>> {
     let imported = crate::canvas::oib::imports::imported_definitions(seed);
     for component in &payload.components {
         if imported.contains(&component.definition) {
-            return Err("Imported style bindings are read-only".into());
+            let definition = properties::metadata(seed)?
+                .definitions
+                .iter()
+                .find(|definition| definition.id == component.definition)
+                .ok_or("Unknown imported style component")?;
+            if component
+                .fields
+                .iter()
+                .flat_map(|field| &field.targets)
+                .any(|target| !target.references.is_empty() || target.node != definition.root)
+            {
+                return Err(
+                    "An imported component style may target only its public root inputs".into(),
+                );
+            }
         }
         Mapped::new(&admitted, seed, component.clone())?;
     }
     Ok(Some(admitted))
+}
+/// Local records take precedence. Only admitted imported aliases may fall back
+/// to immutable metadata; a removed local definition is never resurrected.
+fn style_definition<'a>(
+    seed: &'a Seed,
+    source: &'a DocumentSource,
+    definition: DefinitionId,
+) -> Result<&'a ComponentDefinition> {
+    if let Some(definition) = source
+        .definitions
+        .iter()
+        .find(|record| record.id == definition)
+    {
+        return Ok(definition);
+    }
+    if crate::canvas::oib::imports::imported_definitions(seed).contains(&definition) {
+        return properties::metadata(seed)?
+            .definitions
+            .iter()
+            .find(|record| record.id == definition)
+            .ok_or_else(|| "Unknown imported style component".into());
+    }
+    Err("Unknown local styled component".into())
 }
 fn payload(
     source: &mut DocumentSource,
@@ -125,11 +163,7 @@ pub(crate) fn edit_local(seed: &Seed, source: &mut DocumentSource, edit: &StyleE
             definition,
         } => {
             name(label)?;
-            let def = source
-                .definitions
-                .iter()
-                .find(|d| d.id == *definition)
-                .ok_or("Unknown local style component")?;
+            let def = style_definition(seed, source, *definition)?;
             let root = def
                 .nodes
                 .iter()
@@ -237,11 +271,7 @@ pub(crate) fn edit_local(seed: &Seed, source: &mut DocumentSource, edit: &StyleE
             if source.styles.is_none() && style.is_none() {
                 return Ok(());
             }
-            let def = source
-                .definitions
-                .iter()
-                .find(|d| d.id == *definition)
-                .ok_or("Unknown local styled component")?;
+            let def = style_definition(seed, source, *definition)?;
             let root = def.root;
             let data = payload(source, graph.id)?;
             data.components

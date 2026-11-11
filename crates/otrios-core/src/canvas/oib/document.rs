@@ -556,19 +556,19 @@ impl Resolution<'_> {
                         .and_then(|value| value.clone());
                     let (_, node) =
                         path_node(doc, self.root.definition, &path.references, path.node)?;
-                    let authored = node
-                        .defaults
-                        .iter()
-                        .find(|default| default.property == path.property)
-                        .map(|default| default.value.clone());
                     let address = PropertyAddress::Occurrence {
                         instance: self.root.id,
                         path: path.clone(),
                     };
-                    let styled = self
-                        .styles
-                        .and_then(|styles| styles.color(&address))
-                        .map(|contribution| Value::Color(contribution.source.color));
+                    let contribution = self.styles.and_then(|styles| styles.color(&address));
+                    let authored = node
+                        .defaults
+                        .iter()
+                        .find(|default| default.property == path.property)
+                        .filter(|_| contribution.is_none_or(|style| !style.library_default))
+                        .map(|default| default.value.clone());
+                    let styled =
+                        contribution.map(|contribution| Value::Color(contribution.source.color));
                     shared
                         .or(authored)
                         .or(styled)
@@ -899,11 +899,25 @@ pub fn objects(seed: &Seed, allocations: &[Allocation]) -> Result<Vec<ObjectInfo
     let mut objects = object_rows(&metadata)?;
     if let Some(styles) = seed.graph.as_ref().and_then(|graph| graph.styles.as_ref()) {
         for system in &styles.catalog.systems {
-            objects.extend(system.styles.iter().map(|style| ObjectInfo { selection: Selection::Style(style.id), name: style.name.clone(), class: metadata.class, depth: 1, layout_node: None }));
-            objects.extend(system.variables.iter().map(|variable| ObjectInfo { selection: Selection::Variable(variable.id), name: variable.name.clone(), class: metadata.class, depth: 1, layout_node: None }));
+            objects.extend(system.styles.iter().map(|style| ObjectInfo {
+                selection: Selection::Style(style.id),
+                name: style.name.clone(),
+                class: metadata.class,
+                depth: 1,
+                layout_node: None,
+            }));
+            objects.extend(system.variables.iter().map(|variable| ObjectInfo {
+                selection: Selection::Variable(variable.id),
+                name: variable.name.clone(),
+                class: metadata.class,
+                depth: 1,
+                layout_node: None,
+            }));
         }
     }
-    if objects.len() > 512 { return Err("OIB hierarchy budget".into()); }
+    if objects.len() > 512 {
+        return Err("OIB hierarchy budget".into());
+    }
     Ok(objects)
 }
 pub fn properties(
@@ -912,7 +926,9 @@ pub fn properties(
     selection: &Selection,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Vec<PropertyInfo>> {
-    if matches!(selection, Selection::Style(_) | Selection::Variable(_)) { return Ok(vec![]); }
+    if matches!(selection, Selection::Style(_) | Selection::Variable(_)) {
+        return Ok(vec![]);
+    }
     let expanded = super::instances::expanded_seed(seed, allocations)?;
     let doc = metadata(&expanded)?;
     let (class_id, scope) = match selection {

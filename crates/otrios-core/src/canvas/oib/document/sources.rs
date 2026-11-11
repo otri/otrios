@@ -115,13 +115,14 @@ fn defaults(
         property: path.property,
     };
     let authored = node.defaults.iter().find(|d| d.property == path.property);
+    let library_default = style.is_some_and(|(_, style)| style.library_default);
     if let Some(default) = authored {
         hops.push(SourceHop {
             address: address.clone(),
             role: SourceRole::NodeDefault,
             cell: None,
             value: Some(default.value.clone()),
-            masked,
+            masked: masked || library_default,
         });
     }
     if let Some((at, style)) = style {
@@ -130,7 +131,7 @@ fn defaults(
             role: SourceRole::Style(Box::new(style.clone())),
             cell: None,
             value: Some(Value::Color(style.source.color)),
-            masked: masked || authored.is_some(),
+            masked: masked || (authored.is_some() && !library_default),
         });
     }
     hops.push(SourceHop {

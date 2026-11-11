@@ -134,12 +134,18 @@ impl<'a> SourceContext<'a> {
             .get(&mapping.field)
             .ok_or("Missing styled field")?;
         let value = Value::Color(color.color);
-        let authored = trace
-            .hops
-            .iter()
-            .any(|hop| matches!(hop.role, document::SourceRole::NodeDefault));
+        let library_default =
+            crate::canvas::oib::imports::imported_definitions(seed).contains(definition);
+        let authored = !library_default
+            && trace
+                .hops
+                .iter()
+                .any(|hop| matches!(hop.role, document::SourceRole::NodeDefault));
         let masked = authored || trace.overridden;
         for hop in &mut trace.hops {
+            if library_default && matches!(hop.role, document::SourceRole::NodeDefault) {
+                hop.masked = true;
+            }
             if matches!(
                 hop.role,
                 document::SourceRole::ClassDefault | document::SourceRole::DefinitionDefault
@@ -171,6 +177,7 @@ impl<'a> SourceContext<'a> {
                     style: binding.style.clone(),
                     field: mapping.field,
                     source: color.clone(),
+                    library_default,
                 })),
                 cell: None,
                 value: Some(value),

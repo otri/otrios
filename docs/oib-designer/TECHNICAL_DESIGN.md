@@ -1246,3 +1246,10 @@ Acceptance for this slice is one live journey: create/assign a local style, crea
 and bind a descriptive variable, edit both mode colors, Apply, compare local preview
 modes, reload and confirm persistence plus native synchronization. Routine broad
 suites are excluded following the user's testing restraint.
+
+T27 live-integration correction: document-owned styles may target admitted public
+root Color inputs of an imported control. This does not make its signed definition
+editable. Imported node colors are library baseline fallbacks below an explicit
+document style; local authored node colors and causal/shared/occurrence values
+retain priority. Forwarded outer inputs still win. Imported private hierarchy
+targets and library-owned style payloads remain gated.

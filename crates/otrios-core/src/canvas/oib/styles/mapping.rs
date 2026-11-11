@@ -160,6 +160,7 @@ impl<'a> Mapped<'a> {
             context.instance,
         )?;
         let mut colors = BTreeMap::new();
+        let imported = crate::canvas::oib::imports::imported_definitions(self.seed);
         for mapping in &self.binding.fields {
             let source = resolved
                 .body
@@ -173,12 +174,18 @@ impl<'a> Mapped<'a> {
                     instance: scope.instance,
                     path,
                 };
+                let PropertyAddress::Occurrence { path, .. } = &address else {
+                    unreachable!()
+                };
+                let (target, _) =
+                    document::path_node(&expanded, root.definition, &path.references, path.node)?;
                 colors.insert(
                     address,
                     Contribution {
                         style: self.binding.style.clone(),
                         field: mapping.field,
                         source: source.clone(),
+                        library_default: imported.contains(&target.id),
                     },
                 );
             }

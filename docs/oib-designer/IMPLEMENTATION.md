@@ -1513,3 +1513,12 @@ otrios-oib-document-styles-v1; synchronized state protocol is v38.
 No new automated suite was added or broad checks run. A necessary core compilation
 found one UI Option/Result error, corrected before the publisher build. The focused
 live authoring journey and deployment evidence will be recorded after execution.
+
+T27 first live build `b2c3c16`, release
+`8b315d8fd0bbb8ab2dc8d2e9c0df8e09e4371802db5c6f266ba08879ac99f5b9`,
+loaded successfully on Frame/Web at revision 55. Live discovery found standard
+SettingsPanel/Slider/Toggle were omitted because their definitions are imported.
+Corrected UI enumeration and document style binding admission to allow their public
+root color inputs, without copying or modifying signed bodies. Native precedence
+now distinguishes imported baseline node defaults from local authored defaults.
+This is a concrete live integration fix; no extra test campaign was added.
