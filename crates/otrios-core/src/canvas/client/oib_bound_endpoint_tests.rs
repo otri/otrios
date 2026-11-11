@@ -366,3 +366,127 @@ fn bound_endpoint_published_undo_keeps_owned_fallback_and_control_route() {
     );
     assert_eq!(client.resource_usage().component_behavior_errors, 0);
 }
+
+#[test]
+fn style_light_preview_before_apply_retains_live_command_and_receipt() {
+    use otrios_interfaces::oib::styles::{
+        ColorModes, FieldId, FieldValue, StyleEdit, StyleId, SystemId, SystemRef, VariableId,
+        VariableRef,
+    };
+    let ui = fixture::admit(&super::super::component_behavior_tests::library_ui(
+        super::super::component_behavior_tests::snapping_guest(100),
+    ));
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_ui(true, 0, ui);
+    let source = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_history_source()
+        .unwrap();
+    let style = source.next_identity;
+    let owner = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_authoring_seed()
+        .unwrap()
+        .graph
+        .unwrap()
+        .id;
+    let generation = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_structural_generation()
+        .unwrap();
+    client
+        .designer_stage_structure(EditBatch {
+            generation,
+            operations: vec![
+                DocumentEdit::Style(StyleEdit::CreateStyle {
+                    id: style,
+                    name: "panel.primary".into(),
+                    definition: DefinitionId(10),
+                }),
+                DocumentEdit::Style(StyleEdit::CreateVariable {
+                    id: style + 1,
+                    name: "surface".into(),
+                    values: ColorModes {
+                        light: [120, 150, 240, 255],
+                        dark: [220, 170, 40, 255],
+                    },
+                }),
+                DocumentEdit::Style(StyleEdit::SetField {
+                    style: StyleId(style),
+                    field: FieldId(1),
+                    value: FieldValue::Variable(VariableRef {
+                        system: SystemRef {
+                            owner: otrios_interfaces::oib::styles::Owner::Document(owner),
+                            system: SystemId(1),
+                        },
+                        variable: VariableId(style + 1),
+                    }),
+                }),
+            ],
+        })
+        .unwrap();
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle(&mut client, &mut authority, &mut session);
+    client
+        .inspect_oib_selection(Selection::Definition(DefinitionId(10)))
+        .unwrap();
+    let generation = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_structural_generation()
+        .unwrap();
+    client
+        .designer_stage_structure(EditBatch {
+            generation,
+            operations: vec![
+                DocumentEdit::Definition(DefinitionEdit::ClearDefault {
+                    definition: DefinitionId(10),
+                    node: NodeId(1),
+                    property: PropertyId(1),
+                }),
+                DocumentEdit::Style(StyleEdit::Assign {
+                    definition: DefinitionId(10),
+                    style: Some(StyleId(style)),
+                }),
+            ],
+        })
+        .unwrap();
+    assert!(
+        client
+            .designer_action(LocalAction::Appearance(Appearance::Light))
+            .unwrap()
+    );
+    assert!(client.designer_apply_working_copy().unwrap());
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.pending_count(),
+        1,
+        "submitted Apply must remain on live transport adapter"
+    );
+    settle(&mut client, &mut authority, &mut session);
+    let mount = client.active.as_ref().unwrap();
+    assert!(
+        !mount.working_copy.as_ref().unwrap().applying(),
+        "durable receipt releases Applying"
+    );
+    assert!(
+        mount
+            .doc
+            .oib_history_source()
+            .unwrap()
+            .styles
+            .unwrap()
+            .components
+            .iter()
+            .any(|binding| binding.definition == DefinitionId(10))
+    );
+}

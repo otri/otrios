@@ -89,10 +89,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Latest deployment: code `17f440f`, release
-`712ee6455f1d7b23477492ca9b52ce94c6467a42b1068ad3ab104030ce2ab03c`.
-Focused native readiness passed; style source/package/UI activation remains gated.
-Last changed-UX acceptance: code `2c1ad1c`, release
+Latest deployment and local-style UX acceptance: code `94b8d3c`, release
+`4f90053062c5da7ea91578a4a8e19c055a0af226668517b7a5afd7b15cd80051`.
+Local style/variable controls are enabled; library-owned styles remain gated.
+Earlier changed-UX acceptance: code `2c1ad1c`, release
 `59eca39cc6e06061a13bd78183e164e125c24143c1f2364a80212d31ab64acde`,
 including exposed Slider Value sample interaction, persisted outer app binding
 and accurate bound inspector labels, definition-to-document scope return, earlier
@@ -1522,3 +1522,50 @@ Corrected UI enumeration and document style binding admission to allow their pub
 root color inputs, without copying or modifying signed bodies. Native precedence
 now distinguishes imported baseline node defaults from local authored defaults.
 This is a concrete live integration fix; no extra test campaign was added.
+
+
+### T27 live authoring acceptance and deployment
+
+The corrected publisher build `94b8d3c` completed with exit 0 and activated
+`4f90053062c5da7ea91578a4a8e19c055a0af226668517b7a5afd7b15cd80051`
+on Frame/Web. Native, Wasm and ARM targets were built; broad preflight suites
+were not run. Builder configuration was restored pinned to that exact source.
+
+Live browser at 1536×960 used actual Designer controls to create style 93, rename
+it panel.primary, create/bind variable 94, rename it control_fill and edit its
+Light color to #2255AA and Dark color to #D4AF37. Apply confirmed revision 56.
+The document-owned style targeted imported SettingsPanel's public root fill input;
+its signed library body stayed immutable. Variable-backed source appeared by name.
+
+Assignment preview resolved Dark gold and Light blue in the ordinary color field,
+with no queued app writes or component errors. The first assignment Apply after a
+Light switch stalled at Applying with generation 56 and no observed receipt/error.
+Reconnect retained the saved style/variable and discarded only that unconfirmed
+assignment. Dark assignment saved57; removal saved58; an exact reassign-in-Dark →
+switch-Light → Apply replay saved59 successfully on the same client. No production
+fix was inferred for the unreproduced initial stall. This remains a recovered
+transient observation, not proof that all reconnect/receipt behavior is qualified.
+
+Two narrowly filtered debugging regressions were added/run for that concrete
+failure: `atomic_apply_imported_panel_style_assignment_has_durable_receipt` (fully
+imported Panel authority transport) and
+`style_light_preview_before_apply_retains_live_command_and_receipt` (mounted L2
+guest, two Applies, variable modes). Each passed one test; the mounted fixture
+retains a local Panel10, so it is not a substitute for the actual imported-panel
+browser journey. No broad suite was run.
+
+A fresh browser reload decoded revision59, retained panel.primary and its variable
+binding, and showed Dark #D4AF37 with All changes applied. Volume stayed51%,
+Brightness57%, zero pending/issued fields and zero component errors. The native
+readiness helper matched the active release, confirmed/stream/reload readiness,
+active generation59, presented diagnostic58, two instances, no pending commands
+and zero component errors. This is native synchronization evidence, not native
+touch or pixel/GPU qualification. Browser snapshot capture timed out; no screenshot
+qualification is claimed. The owned browser tab was closed with no pending edit.
+
+Enabled route: Library → Styles/Variables; compatible component inspector →
+Definition style. Initial scope is document-owned named color styles and Light/Dark
+variables. State protocol v38, release-control v1 and guest ABI1 remain as declared.
+Library-owned style packaging, state recipe/focus authoring, subtree mode boundaries,
+per-instance style references, contrast and full representative catalog qualification
+remain open. The full Designer goal is not complete.

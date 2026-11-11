@@ -2228,3 +2228,108 @@ fn atomic_apply_adapter_does_not_resolve_changed_payload_from_sequence_alone() {
     assert!(replica.flight.is_some());
     assert!(!replica.confirmed());
 }
+
+#[test]
+fn atomic_apply_imported_panel_style_assignment_has_durable_receipt() {
+    use otrios_interfaces::oib::{graph as g, library as l, styles::*};
+    let mut ui = app::ui(&[]);
+    let source = imported_fixture::seed_mut(&mut ui);
+    let graph = source.graph.as_mut().unwrap();
+    let library = crate::library::seal_graph(l::Graph {
+        format: l::FORMAT.into(),
+        required_classes: graph.classes.clone(),
+        definitions: graph
+            .definitions
+            .iter()
+            .filter(|definition| definition.id != DefinitionId(11))
+            .cloned()
+            .collect(),
+        exports: vec![l::Export {
+            id: l::ExportId(1),
+            name: "SettingsPanel".into(),
+            definition: DefinitionId(10),
+            contract: [0; 32],
+        }],
+        behaviors: vec![],
+    })
+    .unwrap();
+    let library_id = l::LibraryId(format!("{}:controls", "0".repeat(64)));
+    graph
+        .definitions
+        .retain(|definition| definition.id == DefinitionId(11));
+    graph.imports = Some(g::Imports {
+        format: g::IMPORTS_FORMAT.into(),
+        locks: vec![g::LibraryLock {
+            library: library_id.clone(),
+            revision: [1; 32],
+            exports: vec![g::LockedExport {
+                export: l::ExportId(1),
+                contract: library.exports[0].contract,
+            }],
+        }],
+        bindings: vec![g::ImportBinding {
+            id: 70,
+            library: library_id.clone(),
+            export: l::ExportId(1),
+            definitions: [10, 12, 13]
+                .map(|id| g::DefinitionBinding {
+                    source: DefinitionId(id),
+                    target: DefinitionId(id),
+                })
+                .to_vec(),
+        }],
+    });
+    source.resolved_libraries = vec![g::ResolvedLibrary {
+        library: library_id,
+        revision: [1; 32],
+        graph: library,
+        component: None,
+    }];
+    let (mut authority, mut replica, mut session) = fixture_ui(imported_fixture::admit(&ui));
+    let id = replica.oib_history_source().unwrap().next_identity;
+    let mut create = replica.oib_apply_base().unwrap();
+    create.operations = vec![
+        DocumentEdit::Style(StyleEdit::CreateStyle {
+            id,
+            name: "panel.primary".into(),
+            definition: DefinitionId(10),
+        }),
+        DocumentEdit::Style(StyleEdit::CreateVariable {
+            id: id + 1,
+            name: "control_fill".into(),
+            values: ColorModes {
+                light: [0x22, 0x55, 0xaa, 255],
+                dark: [0xd4, 0xaf, 0x37, 255],
+            },
+        }),
+        DocumentEdit::Style(StyleEdit::SetField {
+            style: StyleId(id),
+            field: FieldId(1),
+            value: FieldValue::Variable(VariableRef {
+                system: SystemRef {
+                    owner: Owner::Document(otrios_interfaces::oib::designer::DocumentId(1)),
+                    system: SystemId(1),
+                },
+                variable: VariableId(id + 1),
+            }),
+        }),
+    ];
+    assert!(replica.apply_oib(create).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    let mut assign = replica.oib_apply_base().unwrap();
+    assign.operations = vec![DocumentEdit::Style(StyleEdit::Assign {
+        definition: DefinitionId(10),
+        style: Some(StyleId(id)),
+    })];
+    replica.preview_oib_apply(&assign).unwrap();
+    assert!(replica.apply_oib(assign).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Accepted { .. }
+    ));
+    assert_eq!(
+        authority.oib_source().unwrap().styles.unwrap().components[0].definition,
+        DefinitionId(10)
+    );
+}

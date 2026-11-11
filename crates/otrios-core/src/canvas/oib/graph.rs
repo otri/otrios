@@ -12,7 +12,7 @@ use otrios_interfaces::{
 mod preview;
 pub(crate) use preview::{DefinitionPreview, definition_preview_with_values_mode};
 #[cfg(test)]
-pub(crate) use preview::{definition_preview, definition_preview_with_values};
+pub(crate) use preview::definition_preview;
 
 /// Admitted typed chrome plus disposable graph output. Internal transformations
 /// update `blueprint`; conversion to an artifact Ui serializes at the boundary.
