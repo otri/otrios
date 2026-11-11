@@ -15,6 +15,7 @@ fn fixture() -> (Seed, DocumentSource) {
 fn source(seed: &Seed) -> DocumentSource {
     let g = seed.graph.as_ref().unwrap();
     DocumentSource {
+        styles: None,
         definitions: g.definitions.clone(),
         presets: g.presets.clone(),
         instances: g

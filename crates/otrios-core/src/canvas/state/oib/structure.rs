@@ -55,6 +55,10 @@ impl IdentityPlan {
                     }
                 }
                 DocumentEdit::Preset(PresetEdit::Create { preset }) => reserve(preset.id)?,
+                DocumentEdit::Style(
+                    otrios_interfaces::oib::styles::StyleEdit::CreateStyle { id, .. }
+                    | otrios_interfaces::oib::styles::StyleEdit::CreateVariable { id, .. },
+                ) => reserve(*id)?,
                 _ => {}
             }
         }
@@ -115,7 +119,7 @@ impl Document {
         }
         Ok(())
     }
-    fn oib_claim_explicit(&mut self, next: &mut u64, id: u64) -> Result<()> {
+    pub(super) fn oib_claim_explicit(&mut self, next: &mut u64, id: u64) -> Result<()> {
         if let Some(plan) = &mut self.oib_identity_plan {
             plan.explicit(id)?;
             *next = (*next).max(id.checked_add(1).ok_or("OIB identity space exhausted")?);
@@ -139,6 +143,10 @@ impl Document {
                     return Err("Definition edits must precede preset and instance edits".into());
                 }
                 DocumentEdit::Definition(_) => {}
+                DocumentEdit::Style(_) if phase > 0 => {
+                    return Err("Style edits must precede preset and instance edits".into());
+                }
+                DocumentEdit::Style(_) => {}
                 DocumentEdit::Preset(_) if phase > 1 => {
                     return Err("Preset edits must precede instance edits".into());
                 }
@@ -257,6 +265,20 @@ impl Document {
             .collect();
         if !definitions.is_empty() {
             self.oib_stage_definitions(&definitions)?;
+        }
+        let styles: Vec<_> = batch
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                if let DocumentEdit::Style(operation) = operation {
+                    Some(operation.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !styles.is_empty() {
+            self.oib_stage_styles(&styles)?;
         }
         let presets: Vec<_> = batch
             .operations

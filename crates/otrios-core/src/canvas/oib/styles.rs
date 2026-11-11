@@ -10,6 +10,10 @@ mod mapping;
 pub use mapping::{Context, Mapped, Projection, PropertyPaint};
 mod frame;
 pub use frame::{Contribution, Frame, Occurrence};
+mod local;
+pub use local::{color_inputs, local_admitted};
+pub(crate) use local::edit_local;
+pub(crate) use frame::automatic;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableUse {

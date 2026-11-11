@@ -179,6 +179,13 @@ impl StateAdapter {
         &self,
         selected: &Selection,
     ) -> Result<Vec<PropertyInfo>> {
+        match selected {
+            Selection::Style(style) => return self.oib_style_properties(Some(*style), None),
+            Selection::Variable(variable) => {
+                return self.oib_style_properties(None, Some(*variable));
+            }
+            _ => {}
+        }
         let source = self.doc.oib_source_shared()?;
         let binding = self.doc.oib_binding()?;
         let imported = crate::canvas::oib::imports::imported_definitions(&binding.seed);
@@ -388,6 +395,11 @@ impl StateAdapter {
             return Err("Not a graph source field".into());
         };
         let selected = match target {
+            StructuralTarget::Style(style) | StructuralTarget::StyleField { style, .. } => {
+                Selection::Style(*style)
+            }
+            StructuralTarget::Variable(variable)
+            | StructuralTarget::VariableMode { variable, .. } => Selection::Variable(*variable),
             StructuralTarget::Definition(id)
             | StructuralTarget::Property { definition: id, .. } => Selection::Definition(*id),
             StructuralTarget::Node { definition, node } => Selection::DefinitionNode {
@@ -402,6 +414,9 @@ impl StateAdapter {
             .into_iter()
             .find(|p| p.address.as_ref() == Some(address))
             .ok_or("Graph source field unavailable")?;
+        if info.descriptor.editor == PropertyEditor::ReadOnly {
+            return Err("Choose a literal source before editing this style field".into());
+        }
         let candidate = supplied
             .or(info.inherited)
             .ok_or("No authored default for this field")?;
@@ -417,6 +432,42 @@ impl StateAdapter {
             }
         };
         let operation = match target {
+            StructuralTarget::Style(style) if *property == StructuralProperty::Name => {
+                DocumentEdit::Style(otrios_interfaces::oib::styles::StyleEdit::RenameStyle {
+                    style: *style,
+                    name: name()?,
+                })
+            }
+            StructuralTarget::Variable(variable) if *property == StructuralProperty::Name => {
+                DocumentEdit::Style(otrios_interfaces::oib::styles::StyleEdit::RenameVariable {
+                    variable: *variable,
+                    name: name()?,
+                })
+            }
+            StructuralTarget::VariableMode { variable, mode }
+                if *property == StructuralProperty::Color =>
+            {
+                let Value::Color(color) = candidate else {
+                    return Err("Variable value must be a color".into());
+                };
+                DocumentEdit::Style(otrios_interfaces::oib::styles::StyleEdit::SetVariable {
+                    variable: *variable,
+                    mode: *mode,
+                    color,
+                })
+            }
+            StructuralTarget::StyleField { style, field }
+                if *property == StructuralProperty::Color =>
+            {
+                let Value::Color(color) = candidate else {
+                    return Err("Style value must be a color".into());
+                };
+                DocumentEdit::Style(otrios_interfaces::oib::styles::StyleEdit::SetField {
+                    style: *style,
+                    field: *field,
+                    value: otrios_interfaces::oib::styles::FieldValue::Literal(color),
+                })
+            }
             StructuralTarget::Property {
                 definition,
                 property: endpoint,
@@ -620,5 +671,117 @@ impl StateAdapter {
             _ => return Err("Unsupported graph source field".into()),
         };
         Ok(operation)
+    }
+}
+
+impl StateAdapter {
+    pub(in crate::canvas) fn oib_style_properties(
+        &self,
+        style: Option<otrios_interfaces::oib::styles::StyleId>,
+        variable: Option<otrios_interfaces::oib::styles::VariableId>,
+    ) -> Result<Vec<PropertyInfo>> {
+        use otrios_interfaces::oib::styles::{FieldValue, Mode};
+        let source = self.doc.oib_source_shared()?;
+        let Some(system) = source
+            .styles
+            .as_ref()
+            .and_then(|styles| styles.catalog.systems.first())
+        else {
+            return Ok(vec![]);
+        };
+        let mut result = vec![];
+        if let Some(id) = style {
+            let style = system
+                .styles
+                .iter()
+                .find(|style| style.id == id)
+                .ok_or("Style was removed")?;
+            result.push(field(
+                StructuralTarget::Style(id),
+                StructuralProperty::Name,
+                "Style name",
+                Value::Text(style.name.clone()),
+                None,
+            ));
+            let contract = system
+                .contracts
+                .iter()
+                .find(|contract| contract.id == style.contract)
+                .ok_or("Missing style contract")?;
+            for entry in &style.defaults {
+                let label = contract
+                    .fields
+                    .iter()
+                    .find(|field| field.id == entry.field)
+                    .ok_or("Missing style field")?
+                    .name
+                    .as_str();
+                let mut info = match &entry.value {
+                    FieldValue::Literal(color) => field(
+                        StructuralTarget::StyleField {
+                            style: id,
+                            field: entry.field,
+                        },
+                        StructuralProperty::Color,
+                        label,
+                        Value::Color(*color),
+                        None,
+                    ),
+                    FieldValue::Variable(reference) => {
+                        let variable = system
+                            .variables
+                            .iter()
+                            .find(|variable| {
+                                variable.id == reference.variable
+                                    && reference.system == system.reference
+                            })
+                            .ok_or("Unknown style variable")?;
+                        let mut info = field(
+                            StructuralTarget::StyleField {
+                                style: id,
+                                field: entry.field,
+                            },
+                            StructuralProperty::Color,
+                            label,
+                            Value::Text(variable.name.clone()),
+                            None,
+                        );
+                        info.descriptor.editor = PropertyEditor::ReadOnly;
+                        info.descriptor.policy.live_literal = false;
+                        info.source = "variable".into();
+                        info
+                    }
+                };
+                info.origin = "style".into();
+                result.push(info);
+            }
+        }
+        if let Some(id) = variable {
+            let variable = system
+                .variables
+                .iter()
+                .find(|variable| variable.id == id)
+                .ok_or("Variable was removed")?;
+            result.push(field(
+                StructuralTarget::Variable(id),
+                StructuralProperty::Name,
+                "Variable name",
+                Value::Text(variable.name.clone()),
+                None,
+            ));
+            for (mode, label, color) in [
+                (Mode::Light, "Light", variable.values.light),
+                (Mode::Dark, "Dark", variable.values.dark),
+            ] {
+                result.push(field(
+                    StructuralTarget::VariableMode { variable: id, mode },
+                    StructuralProperty::Color,
+                    label,
+                    Value::Color(color),
+                    None,
+                ));
+            }
+        }
+        Ok(result)
     }
 }

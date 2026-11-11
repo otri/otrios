@@ -895,7 +895,16 @@ fn object_rows(doc: &Document) -> Result<Vec<ObjectInfo>> {
     Ok(out)
 }
 pub fn objects(seed: &Seed, allocations: &[Allocation]) -> Result<Vec<ObjectInfo>> {
-    object_rows(&expanded_metadata(seed, allocations)?)
+    let metadata = expanded_metadata(seed, allocations)?;
+    let mut objects = object_rows(&metadata)?;
+    if let Some(styles) = seed.graph.as_ref().and_then(|graph| graph.styles.as_ref()) {
+        for system in &styles.catalog.systems {
+            objects.extend(system.styles.iter().map(|style| ObjectInfo { selection: Selection::Style(style.id), name: style.name.clone(), class: metadata.class, depth: 1, layout_node: None }));
+            objects.extend(system.variables.iter().map(|variable| ObjectInfo { selection: Selection::Variable(variable.id), name: variable.name.clone(), class: metadata.class, depth: 1, layout_node: None }));
+        }
+    }
+    if objects.len() > 512 { return Err("OIB hierarchy budget".into()); }
+    Ok(objects)
 }
 pub fn properties(
     seed: &Seed,
@@ -903,6 +912,7 @@ pub fn properties(
     selection: &Selection,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Vec<PropertyInfo>> {
+    if matches!(selection, Selection::Style(_) | Selection::Variable(_)) { return Ok(vec![]); }
     let expanded = super::instances::expanded_seed(seed, allocations)?;
     let doc = metadata(&expanded)?;
     let (class_id, scope) = match selection {

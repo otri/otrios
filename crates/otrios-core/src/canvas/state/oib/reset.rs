@@ -359,6 +359,13 @@ pub(super) fn restore(
         }
     }
     let mut result = source.clone();
+    // Reset is deliberately gated for packaged style baselines until their
+    // restoration identity mapping is admitted; ordinary local authoring starts
+    // from no packaged styles and clears its disposable authored design system.
+    if signed.styles.is_some() {
+        return Err("Packaged style reset is not admitted".into());
+    }
+    result.styles = None;
     result.definitions = signed
         .definitions
         .iter()

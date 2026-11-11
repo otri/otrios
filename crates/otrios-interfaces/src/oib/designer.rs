@@ -56,6 +56,8 @@ pub struct ObjectAddress {
 /// neither selection, expansion nor mode belongs in the signed/live document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
+    Style(super::styles::StyleId),
+    Variable(super::styles::VariableId),
     Document(DocumentId),
     Definition(DefinitionId),
     DefinitionNode {
@@ -101,6 +103,16 @@ pub enum PropertyAddress {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum StructuralTarget {
+    Style(super::styles::StyleId),
+    StyleField {
+        style: super::styles::StyleId,
+        field: super::styles::FieldId,
+    },
+    Variable(super::styles::VariableId),
+    VariableMode {
+        variable: super::styles::VariableId,
+        mode: super::styles::Mode,
+    },
     Definition(DefinitionId),
     Property {
         definition: DefinitionId,

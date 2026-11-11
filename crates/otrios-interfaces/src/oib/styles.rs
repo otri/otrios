@@ -7,6 +7,7 @@ use super::{
 use serde::{Deserialize, Serialize};
 
 pub const FORMAT: &str = "otrios-oib-color-styles-v1";
+pub const DOCUMENT_FEATURE: &str = "otrios-oib-document-styles-v1";
 pub const HEADER: &[u8] = b"OTriOS\0oib-color-styles-v1\0";
 pub const MAX_SYSTEMS: usize = 8;
 pub const MAX_VARIABLES: usize = 256;
@@ -59,7 +60,7 @@ pub struct StyleRef {
     pub style: StyleId,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Mode {
     Light,
     Dark,
@@ -207,4 +208,58 @@ pub struct ComponentStyle {
     pub style: StyleRef,
     /// Complete Body-domain mapping. Focus remains a separate overlay contract.
     pub fields: Vec<PropertyMapping>,
+}
+
+/// Editable document-local design system. Imported style packages remain gated.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentStyles {
+    pub catalog: Catalog,
+    pub components: Vec<ComponentStyle>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StyleEdit {
+    CreateStyle {
+        id: u64,
+        name: String,
+        definition: DefinitionId,
+    },
+    RenameStyle {
+        style: StyleId,
+        name: String,
+    },
+    CreateVariable {
+        id: u64,
+        name: String,
+        values: ColorModes,
+    },
+    RenameVariable {
+        variable: VariableId,
+        name: String,
+    },
+    SetVariable {
+        variable: VariableId,
+        mode: Mode,
+        color: [u8; 4],
+    },
+    SetField {
+        style: StyleId,
+        field: FieldId,
+        value: FieldValue,
+    },
+    Assign {
+        definition: DefinitionId,
+        style: Option<StyleId>,
+    },
+    DeleteStyle {
+        style: StyleId,
+    },
+    DeleteVariable {
+        variable: VariableId,
+    },
+    /// Conditional history restoration; introduced identities are remapped fresh.
+    Replace {
+        styles: Option<DocumentStyles>,
+    },
 }

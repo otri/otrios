@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styles: Option<super::styles::DocumentStyles>,
     pub id: DocumentId,
     pub name: String,
     pub class: ClassId,

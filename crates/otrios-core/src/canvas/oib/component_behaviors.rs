@@ -396,10 +396,11 @@ fn resolve_value(
     address: &ObjectAddress,
     read: &Read,
     values: &BTreeMap<u64, Option<Value>>,
+    styles: Option<&super::styles::Frame>,
     read_field: &impl Fn(u16) -> Result<Value>,
 ) -> Result<Value> {
     let (_, literal, binding) =
-        document::graph_property(seed, address.instance, &read.path, values)?;
+        document::graph_property_styled(seed, address.instance, &read.path, values, styles)?;
     let value = if let Some(Binding::Local(local)) = binding {
         let selector = ui
             .selectors
@@ -430,12 +431,15 @@ fn validate_default_contexts(
     ui: &Ui,
     specs: &[Spec],
     values: &BTreeMap<u64, Option<Value>>,
+    mode: otrios_interfaces::oib::styles::Mode,
     read_field: &impl Fn(u16) -> Result<Value>,
 ) -> Result<()> {
     if specs.is_empty() {
         return Ok(());
     }
     let seed = seed(ui).ok_or("Missing component behavior source")?;
+    let styles =
+        super::styles::automatic(seed, &super::instances::initial_allocations(seed), mode)?;
     for spec in specs {
         let properties = spec
             .properties
@@ -443,7 +447,15 @@ fn validate_default_contexts(
             .map(|read| {
                 Ok(Field {
                     id: read.id,
-                    value: resolve_value(ui, seed, &spec.address, read, values, read_field)?,
+                    value: resolve_value(
+                        ui,
+                        seed,
+                        &spec.address,
+                        read,
+                        values,
+                        styles.as_ref(),
+                        read_field,
+                    )?,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -474,7 +486,22 @@ pub(crate) fn validate_context(
     oib_values: &BTreeMap<u64, Option<Value>>,
     read_field: impl Fn(u16) -> Result<Value>,
 ) -> Result<()> {
-    validate_default_contexts(ui, &specs(ui, layout)?, oib_values, &read_field)
+    validate_context_mode(
+        ui,
+        layout,
+        oib_values,
+        otrios_interfaces::oib::styles::Mode::Dark,
+        read_field,
+    )
+}
+pub(crate) fn validate_context_mode(
+    ui: &Ui,
+    layout: &Layout,
+    oib_values: &BTreeMap<u64, Option<Value>>,
+    mode: otrios_interfaces::oib::styles::Mode,
+    read_field: impl Fn(u16) -> Result<Value>,
+) -> Result<()> {
+    validate_default_contexts(ui, &specs(ui, layout)?, oib_values, mode, &read_field)
 }
 fn read_value(
     ui: &Ui,
@@ -489,12 +516,18 @@ fn read_value(
     if read.selector.is_none() && values.is_none() {
         *values = Some(doc.oib_active()?);
     }
+    let styles = if read.descriptor.value_type == otrios_interfaces::layout::ValueType::Color {
+        doc.oib_style_frame_for(seed)?
+    } else {
+        None
+    };
     resolve_value(
         ui,
         seed,
         address,
         read,
         values.as_ref().unwrap_or(&BTreeMap::new()),
+        styles.as_ref(),
         &|id| doc.typed_value(id),
     )
 }
@@ -589,7 +622,13 @@ impl Instances {
         let specs = specs(ui, layout)?;
         // Reject an oversized initial context before compiling or reserving a
         // single guest; individual field bounds do not imply an aggregate fit.
-        validate_default_contexts(ui, &specs, &BTreeMap::new(), &|id| default_field(ui, id))?;
+        validate_default_contexts(
+            ui,
+            &specs,
+            &BTreeMap::new(),
+            otrios_interfaces::oib::styles::Mode::Dark,
+            &|id| default_field(ui, id),
+        )?;
         runtime.check_capacity(specs.len())?;
         let mut result = Self::default();
         for spec in specs {

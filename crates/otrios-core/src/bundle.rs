@@ -227,6 +227,7 @@ pub fn pack(
         required_features.push(otrios_interfaces::oib::FEATURE.into());
         if canvas::oib::seed(&ui).is_some_and(|s| s.designer.is_some()) {
             required_features.push(otrios_interfaces::oib::designer::FEATURE.into());
+            required_features.push(otrios_interfaces::oib::styles::DOCUMENT_FEATURE.into());
         }
         if canvas::oib::seed(&ui)
             .is_some_and(|s| s.cells.iter().any(|c| c.authored_override.is_some()))
@@ -786,6 +787,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-restore-v1"
                     | "otrios-oib-authored-defaults-v1"
                     | "otrios-oib-designer-v2"
+                    | "otrios-oib-document-styles-v1"
                     | "otrios-layout-v5"
                     | AUTO_LAYOUT_FEATURE
                     | RESPONSIVE_VIEWPORT_FEATURE
@@ -797,6 +799,14 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
         return Err("Unsupported required bundle feature".into());
     }
     let ui = canvas::decode_ui(get(UI_PATH)?)?;
+    if canvas::oib::seed(&ui).is_some_and(|seed| {
+        seed.graph
+            .as_ref()
+            .is_some_and(|graph| graph.styles.is_some())
+    }) && !features.contains(otrios_interfaces::oib::styles::DOCUMENT_FEATURE)
+    {
+        return Err("Missing required document-local styles feature".into());
+    }
     if canvas::oib::seed(&ui).is_some_and(|s| s.designer.is_some())
         && !features.contains(otrios_interfaces::oib::designer::FEATURE)
     {

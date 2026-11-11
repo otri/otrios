@@ -70,6 +70,7 @@ pub struct EditBatch {
 // Inline graph edits are bounded by MAX_OPERATIONS and MAX_BATCH_BYTES.
 #[allow(clippy::large_enum_variant)]
 pub enum DocumentEdit {
+    Style(super::styles::StyleEdit),
     Definition(DefinitionEdit),
     Preset(PresetEdit),
     Hierarchy(HierarchyEdit),
@@ -145,6 +146,8 @@ impl EditBatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styles: Option<super::styles::DocumentStyles>,
     pub definitions: Vec<super::designer::ComponentDefinition>,
     pub presets: Vec<super::graph::Preset>,
     pub instances: Vec<InstanceRecord>,

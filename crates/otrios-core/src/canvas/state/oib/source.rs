@@ -43,7 +43,7 @@ impl Document {
                 .presets
                 .windows(2)
                 .any(|pair| pair[0].id >= pair[1].id)
-            || bytes(&source.definitions)?.len() > MAX_SOURCE_BYTES
+            || bytes(&(&source.definitions, &source.styles))?.len() > MAX_SOURCE_BYTES
             || bytes(&source.placements)?.len() > MAX_PLACEMENT_BYTES
             || bytes(&source.connections)?.len() > MAX_CONNECTION_BYTES
             || source.placements.len() > MAX_ALLOCATIONS
@@ -241,7 +241,45 @@ impl Document {
         // Materialization depends on definitions/presets, while placement and
         // resident changes still require their own full-source validation.
         // Compute this structural key once per source miss, never per UI hit.
-        let structural = digest(&bytes(&(&source.definitions, &source.presets))?);
+        if let Some(styles) = &source.styles {
+            let mut ids = BTreeSet::new();
+            for system in &styles.catalog.systems {
+                for id in system
+                    .styles
+                    .iter()
+                    .map(|style| style.id.0)
+                    .chain(system.variables.iter().map(|variable| variable.id.0))
+                {
+                    let signed = graph
+                        .styles
+                        .iter()
+                        .flat_map(|styles| &styles.catalog.systems)
+                        .any(|system| {
+                            system.styles.iter().any(|style| style.id.0 == id)
+                                || system.variables.iter().any(|variable| variable.id.0 == id)
+                        });
+                    if id == 0
+                        || id >= source.next_identity
+                        || id < first && !signed
+                        || !ids.insert(id)
+                        || source.definitions.iter().any(|definition| {
+                            definition.id.0 == id
+                                || definition.nodes.iter().any(|node| node.id.0 == id)
+                                || definition.slots.iter().any(|slot| slot.id.0 == id)
+                        })
+                        || source.presets.iter().any(|preset| preset.id == id)
+                        || source.instances.iter().any(|instance| instance.id == id)
+                    {
+                        return Err("Invalid or reused local style identity".into());
+                    }
+                }
+            }
+        }
+        let structural = digest(&bytes(&(
+            &source.definitions,
+            &source.presets,
+            &source.styles,
+        ))?);
         let validated = std::sync::Arc::new(CachedSource {
             leaf,
             binding,

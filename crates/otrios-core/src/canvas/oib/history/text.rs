@@ -214,6 +214,7 @@ pub(super) fn property_label(s: &DocumentSource, address: &PropertyAddress) -> S
 }
 pub(super) fn label(s: &DocumentSource, key: &Key) -> String {
     match key {
+        Key::Styles => "Styles and variables".into(),
         Key::Definition(d) => definition_name(s, *d),
         Key::DefinitionName(d) => format!("{} / Name", definition_name(s, *d)),
         Key::Node(d, n) => format!("{} / {}", definition_name(s, *d), node_name(s, *d, *n)),
@@ -265,6 +266,27 @@ pub(super) fn label(s: &DocumentSource, key: &Key) -> String {
 pub(super) fn source_text(s: &DocumentSource, key: &Key) -> String {
     let absent = || "Absent".to_string();
     match key {
+        Key::Styles => s
+            .styles
+            .as_ref()
+            .map(|styles| {
+                format!(
+                    "{} styles, {} variables",
+                    styles
+                        .catalog
+                        .systems
+                        .iter()
+                        .map(|system| system.styles.len())
+                        .sum::<usize>(),
+                    styles
+                        .catalog
+                        .systems
+                        .iter()
+                        .map(|system| system.variables.len())
+                        .sum::<usize>()
+                )
+            })
+            .unwrap_or_else(absent),
         Key::Definition(d) => definition(s, *d)
             .map(|v| {
                 format!(

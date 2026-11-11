@@ -8,6 +8,7 @@ mod bound_endpoint_tests;
 mod editing;
 mod layout_editor;
 mod style;
+mod style_editor;
 use super::oib_property_editor::PropertyDrafts;
 use super::oib_workspace::{self, Appearance, Task};
 use super::*;
@@ -42,6 +43,15 @@ const WINDOW_STEP: f32 = 8. * ROW;
 enum LocalAction {
     Select(Selection),
     NewComponent,
+    LibrarySection(style_editor::Section),
+    StylePage(usize),
+    Style(otrios_interfaces::oib::styles::StyleEdit),
+    StyleChoose(otrios_interfaces::oib::designer::DefinitionId),
+    StyleVariable(
+        otrios_interfaces::oib::styles::StyleId,
+        otrios_interfaces::oib::styles::FieldId,
+    ),
+    StyleField(otrios_interfaces::oib::styles::FieldId),
     BackDocument,
     Undo,
     Redo,
@@ -207,6 +217,12 @@ pub(super) struct Designer {
     api_open: bool,
     api_property: Option<otrios_interfaces::oib::designer::PropertyPath>,
     api_model: Option<api_editor::Model>,
+    library_section: style_editor::Section,
+    style_page: usize,
+    style_pick: Option<style_editor::Pick>,
+    style_field: Option<otrios_interfaces::oib::styles::FieldId>,
+    style_component: Option<otrios_interfaces::oib::designer::DefinitionId>,
+    style_cursor: u64,
     management: Option<ManagedComponent>,
     management_nodes: Vec<SceneNode>,
     structure_tools: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
@@ -264,6 +280,12 @@ impl Clone for Designer {
             api_open: self.api_open,
             api_property: self.api_property.clone(),
             api_model: self.api_model.clone(),
+            library_section: self.library_section,
+            style_page: self.style_page,
+            style_pick: self.style_pick,
+            style_field: self.style_field,
+            style_component: self.style_component,
+            style_cursor: self.style_cursor,
             management: self.management.clone(),
             management_nodes: self.management_nodes.clone(),
             structure_tools: self.structure_tools.clone(),
@@ -335,6 +357,12 @@ impl Designer {
             api_open: false,
             api_property: None,
             api_model: None,
+            library_section: style_editor::Section::Components,
+            style_page: 0,
+            style_pick: None,
+            style_field: None,
+            style_component: None,
+            style_cursor: 0,
             management: None,
             management_nodes: vec![],
             structure_tools: vec![],
@@ -507,6 +535,10 @@ impl Designer {
         self.api_open = false;
         self.api_property = None;
         self.api_model = None;
+        if self.selection != selection {
+            self.style_field = None;
+        }
+        self.style_pick = None;
         self.selection = selection;
         self.revision = None;
         if let Some(panel) = self.panels.last_mut() {
@@ -597,42 +629,67 @@ impl Designer {
             self.management_nodes = nodes;
         }
         let hierarchy = if structure && self.panels.len() == 2 {
-            Some(if self.focus_layout {
-                focus_hierarchy(
-                    &mut builder,
-                    &self.tree,
-                    &self.selection,
-                    &self.tree_closed,
-                    self.workspace_task,
-                    self.mode,
-                    AuthoringTools {
-                        operations: &self.structure_tools,
-                        delete_definition: match self.selection {
-                            Selection::Definition(id)
-                            | Selection::DefinitionNode { definition: id, .. } => Some(id),
-                            _ => None,
-                        },
-                        open: self.palette_open,
-                        placement: self
-                            .management
-                            .as_ref()
-                            .filter(|_| {
-                                seed.designer.as_ref().is_some_and(|d| {
-                                    d.definitions.iter().any(|d| !d.slots.is_empty())
+            Some(
+                if self.focus_layout
+                    && self.workspace_task == Task::Library
+                    && self.library_section != style_editor::Section::Components
+                {
+                    style_editor::library(
+                        &mut builder,
+                        seed,
+                        self.library_section,
+                        self.style_page,
+                        self.style_pick,
+                        self.style_cursor,
+                        editable && self.mode == DesignerMode::Edit,
+                    )?
+                } else if self.focus_layout {
+                    let mut hierarchy = focus_hierarchy(
+                        &mut builder,
+                        &self.tree,
+                        &self.selection,
+                        &self.tree_closed,
+                        self.workspace_task,
+                        self.mode,
+                        AuthoringTools {
+                            operations: &self.structure_tools,
+                            delete_definition: match self.selection {
+                                Selection::Definition(id)
+                                | Selection::DefinitionNode { definition: id, .. } => Some(id),
+                                _ => None,
+                            },
+                            open: self.palette_open,
+                            placement: self
+                                .management
+                                .as_ref()
+                                .filter(|_| {
+                                    seed.designer.as_ref().is_some_and(|d| {
+                                        d.definitions.iter().any(|d| !d.slots.is_empty())
+                                    })
                                 })
-                            })
-                            .map(|m| (&m.root, self.placement_open)),
-                    },
-                )?
-            } else {
-                hierarchy(
-                    &mut builder,
-                    &objects,
-                    &self.selection,
-                    &self.collapsed,
-                    self.mode,
-                )?
-            })
+                                .map(|m| (&m.root, self.placement_open)),
+                        },
+                    )?;
+                    if self.workspace_task == Task::Library {
+                        for node in &mut hierarchy.0 {
+                            node.frame.y += 64.;
+                        }
+                        let mut tabs = style_editor::tabs(&mut builder, self.library_section)?;
+                        tabs.extend(hierarchy.0);
+                        hierarchy.0 = tabs;
+                        hierarchy.1 += 64.;
+                    }
+                    hierarchy
+                } else {
+                    hierarchy(
+                        &mut builder,
+                        &objects,
+                        &self.selection,
+                        &self.collapsed,
+                        self.mode,
+                    )?
+                },
+            )
         } else {
             None
         };
@@ -669,6 +726,32 @@ impl Designer {
             )?
         };
 
+        if self.focus_layout {
+            let extras = style_editor::inspector(
+                &mut builder,
+                seed,
+                &self.selection,
+                self.style_cursor,
+                editable && self.mode == DesignerMode::Edit,
+                self.style_field,
+                self.style_component,
+                match self.appearance {
+                    Appearance::Dark => otrios_interfaces::oib::styles::Mode::Dark,
+                    Appearance::Light => otrios_interfaces::oib::styles::Mode::Light,
+                },
+            )?;
+            if extras.1 > 0. {
+                for node in inspector.0.iter_mut().skip(1) {
+                    node.frame.y += extras.1;
+                }
+                let mut extra_nodes = extras.0;
+                for node in &mut extra_nodes {
+                    node.frame.y += 44.;
+                }
+                inspector.0.splice(1..1, extra_nodes);
+                inspector.1 += extras.1;
+            }
+        }
         if self.focus_layout && api_editor::definition(&self.selection).is_some() {
             let mut height = 0.;
             let api = api_editor::build(
@@ -702,6 +785,15 @@ impl Designer {
                 selected.name,
                 class.map_or("signed class", |c| c.name.as_str())
             );
+        }
+        if let Some(title) = inspector.0.first_mut()
+            && let Primitive::Text { value, .. } = &mut title.primitive
+        {
+            match self.selection {
+                Selection::Style(_) => *value = "Style".into(),
+                Selection::Variable(_) => *value = "Color variable".into(),
+                _ => {}
+            }
         }
         if self.focus_layout
             && let Some(wrapper) = self
@@ -1459,6 +1551,8 @@ fn choices(seed: &otrios_interfaces::oib::Seed, p: &PropertyInfo) -> Vec<Value> 
 fn identity_lines(selection: &Selection) -> Vec<String> {
     match selection {
         Selection::Document(id) => vec![format!("Document #{}", id.0)],
+        Selection::Style(id) => vec![format!("Style #{}", id.0)],
+        Selection::Variable(id) => vec![format!("Variable #{}", id.0)],
         Selection::Definition(id) => vec![format!("Definition #{}", id.0)],
         Selection::DefinitionNode { definition, node } => {
             vec![format!("Definition #{} / node #{}", definition.0, node.0)]
@@ -1676,6 +1770,12 @@ impl Mount {
             let authoring_seed = self.design_doc().oib_authoring_seed()?;
             let seed = &authoring_seed;
             let allocations = self.design_doc().oib_allocations()?;
+            if !self.oib_paint_refresh || designer.style_cursor == 0 {
+                designer.style_cursor = self.design_doc().oib_history_source()?.next_identity;
+            }
+            if let Some(component) = style_editor::component(seed, &designer.selection) {
+                designer.style_component = Some(component);
+            }
             if self.oib_paint_refresh
                 && !changed
                 && designer.revision.is_some()
@@ -1685,12 +1785,9 @@ impl Mount {
                 && designer.registers.is_empty()
                 && self.design_doc().oib_conflicts().is_empty()
             {
-                let mut properties = super::super::oib::document::properties(
-                    seed,
-                    &allocations,
-                    &designer.selection,
-                    &self.design_doc().oib_active()?,
-                )?;
+                let mut properties = self
+                    .design_doc()
+                    .oib_presented_properties(&designer.selection)?;
                 properties.extend(
                     self.design_doc()
                         .oib_structural_properties(&designer.selection)?,
@@ -1701,6 +1798,12 @@ impl Mount {
                 {
                     properties.extend(placement);
                 }
+                properties = style_editor::filter_properties(
+                    seed,
+                    &designer.selection,
+                    designer.style_field,
+                    properties,
+                );
                 designer.editor_revision = self
                     .working_copy
                     .as_ref()
@@ -1739,12 +1842,7 @@ impl Mount {
             }
             if let Some(address) = designer.pending_source.take() {
                 let target = editing::selection(&address);
-                let trace = super::super::oib::document::property_sources(
-                    seed,
-                    &allocations,
-                    &address,
-                    &self.design_doc().oib_active()?,
-                );
+                let trace = self.design_doc().oib_style_sources(seed, &address);
                 if objects.iter().any(|o| o.selection == target) && trace.is_ok() {
                     designer.select(target);
                     designer.details = Some(trace?);
@@ -2129,12 +2227,9 @@ impl Mount {
                 }
             }
 
-            let mut properties = super::super::oib::document::properties(
-                seed,
-                &allocations,
-                &designer.selection,
-                &self.design_doc().oib_active()?,
-            )?;
+            let mut properties = self
+                .design_doc()
+                .oib_presented_properties(&designer.selection)?;
             properties.extend(
                 self.design_doc()
                     .oib_structural_properties(&designer.selection)?,
@@ -2145,6 +2240,12 @@ impl Mount {
             {
                 properties.extend(placement);
             }
+            properties = style_editor::filter_properties(
+                seed,
+                &designer.selection,
+                designer.style_field,
+                properties,
+            );
             designer.connection_tools.clear();
             if editable && designer.mode == DesignerMode::Edit {
                 for property in &properties {
@@ -2603,6 +2704,12 @@ impl Client {
             return Ok(false);
         }
         match action {
+            LocalAction::LibrarySection(_)
+            | LocalAction::StylePage(_)
+            | LocalAction::Style(_)
+            | LocalAction::StyleChoose(_)
+            | LocalAction::StyleVariable(..)
+            | LocalAction::StyleField(_) => self.designer_style_action(action),
             LocalAction::ApiOpen(_) | LocalAction::ApiProperty(_) => {
                 if self.input_busy() {
                     return Ok(false);
@@ -2823,7 +2930,7 @@ impl Client {
                 }
                 d.appearance = appearance;
                 d.revision = None;
-                m.refresh_designer()?;
+                m.refresh()?;
                 m.invalidate();
                 Ok(true)
             }

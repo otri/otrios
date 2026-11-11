@@ -325,12 +325,41 @@ pub(crate) fn compile_prepared(
     blueprint: &Blueprint,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Layout> {
+    let seed = seed(ui).ok_or("Missing OIB seed")?;
+    let frame = styles::automatic(
+        seed,
+        &instances::initial_allocations(seed),
+        otrios_interfaces::oib::styles::Mode::Dark,
+    )?;
+    compile_prepared_styled(ui, blueprint, values, frame.as_ref())
+}
+pub(crate) fn compile_prepared_styled(
+    ui: &Ui,
+    blueprint: &Blueprint,
+    values: &BTreeMap<u64, Option<Value>>,
+    styles: Option<&styles::Frame>,
+) -> Result<Layout> {
     let _profile = crate::canvas::profiling::span("oib.compile_layout");
     let seed = seed(ui).ok_or("Missing OIB seed")?;
+    if let Some(styles) = styles {
+        styles.validate_source(seed)?;
+    }
     let mut blueprint = blueprint.clone();
     let outputs = document::output_cells(seed)?;
     for cell in &seed.cells {
-        let value = effective(seed, values, cell.id)?;
+        let value = if let Some(styles) = styles.filter(|_| matches!(cell.default, Value::Color(_)))
+        {
+            match document::address_for_cell(seed, cell.id)? {
+                designer::PropertyAddress::Occurrence { instance, path } => {
+                    document::graph_property_styled(seed, instance, &path, values, Some(styles))?
+                        .1
+                        .map_or_else(|| effective(seed, values, cell.id), Ok)?
+                }
+                _ => effective(seed, values, cell.id)?,
+            }
+        } else {
+            effective(seed, values, cell.id)?
+        };
         validate_value(cell, &value)?;
         for target in &cell.targets {
             if outputs.get(&document::output_key(target)) != Some(&cell.id) {

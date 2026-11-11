@@ -22,6 +22,8 @@ mod lifecycle;
 mod reset;
 mod source;
 mod structure;
+mod style_presentation;
+mod styles;
 pub(super) use structure::IdentityPlan;
 
 /// One disposable compiled structural revision, shared by document clones and
@@ -227,6 +229,7 @@ impl Document {
                 .clone();
             presets.sort_by_key(|preset| preset.id);
             let source = otrios_interfaces::oib::authoring::DocumentSource {
+                styles: seed.graph.as_ref().and_then(|graph| graph.styles.clone()),
                 definitions: seed
                     .graph
                     .as_ref()
@@ -367,8 +370,14 @@ impl Document {
         {
             return Ok(cached.ui.clone());
         }
+        let mut input = super::super::oib::graph::PreparedUi::from_ui(&signed)?;
+        if let Some(Presentation::Oib(seed)) = &mut input.ui.presentation
+            && let Some(graph) = &mut seed.graph
+        {
+            graph.styles = authored.styles.clone();
+        }
         let prepared = std::sync::Arc::new(super::super::oib::graph::with_source_prepared(
-            super::super::oib::graph::PreparedUi::from_ui(&signed)?,
+            input,
             &authored.definitions,
             &authored.presets,
         )?);
@@ -441,8 +450,11 @@ impl Document {
                 .ok_or("Missing OIB seed")?
                 .clone()
         } else {
-            let signed = self.oib_binding()?.seed.clone();
+            let mut signed = self.oib_binding()?.seed.clone();
             let authored = self.oib_source_shared()?;
+            if let Some(graph) = &mut signed.graph {
+                graph.styles = authored.styles.clone();
+            }
             super::super::oib::graph::with_seed_source(
                 &signed,
                 &authored.definitions,
@@ -633,6 +645,13 @@ impl Document {
         branch: u64,
         _selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
+        self.oib_compiled_mode(branch, otrios_interfaces::oib::styles::Mode::Dark)
+    }
+    fn oib_compiled_mode(
+        &self,
+        branch: u64,
+        mode: otrios_interfaces::oib::styles::Mode,
+    ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
         let _profile = crate::canvas::profiling::span("oib.compiled");
         let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
         let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
@@ -645,6 +664,7 @@ impl Document {
         let semantic = digest(&bytes(&(
             live.iter().collect::<Vec<_>>(),
             values.iter().collect::<Vec<_>>(),
+            mode,
         ))?);
         let same_key = |cached: &CachedCompilation| {
             std::sync::Arc::ptr_eq(&signed, &cached.signed)
@@ -663,7 +683,10 @@ impl Document {
             }
         }
         let _profile = crate::canvas::profiling::span("oib.compiled.miss");
-        let previous = {
+        let has_styles = self.oib_source_shared()?.styles.is_some();
+        let previous = if has_styles {
+            None
+        } else {
             let cache = self.oib_compiled_cache.lock().map_err(err)?;
             cache
                 .iter()
@@ -710,22 +733,34 @@ impl Document {
                 doc.placements = self.oib_placements()?;
                 doc.connections = self.oib_connections()?;
             }
-            let prepared = super::super::oib::graph::expand_prepared(
+            let allocations = self.oib_allocations()?;
+            let style_frame = super::super::oib::styles::automatic(
+                super::super::oib::seed(&prepared.ui).ok_or("Missing styled source")?,
+                &allocations,
+                mode,
+            )?;
+            let prepared = super::super::oib::graph::expand_prepared_styled(
                 prepared,
-                &self.oib_allocations()?,
+                &allocations,
                 &live,
                 &values,
+                style_frame.as_ref(),
             )?;
-            let layout =
-                super::super::oib::compile_prepared(&prepared.ui, &prepared.blueprint, &values)?;
+            let layout = super::super::oib::compile_prepared_styled(
+                &prepared.ui,
+                &prepared.blueprint,
+                &values,
+                style_frame.as_ref(),
+            )?;
             (prepared, layout)
         };
         let prepared = std::sync::Arc::new(prepared);
         let resolved = prepared.to_ui_with_layout(&layout)?;
-        super::super::oib::component_behaviors::validate_context(
+        super::super::oib::component_behaviors::validate_context_mode(
             &resolved,
             &layout,
             &values,
+            mode,
             |id| self.typed_value(id),
         )?;
         let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
@@ -1211,7 +1246,25 @@ impl StateAdapter {
         &self,
         selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
-        self.doc.oib_compiled_selected(2, selected)
+        let _ = selected;
+        self.doc.oib_compiled_mode(2, self.oib_style_mode)
+    }
+    pub(in crate::canvas) fn set_oib_style_mode(
+        &mut self,
+        mode: otrios_interfaces::oib::styles::Mode,
+    ) -> bool {
+        let changed = self.oib_style_mode != mode;
+        self.oib_style_mode = mode;
+        changed
+    }
+    pub(in crate::canvas) fn oib_style_mode(&self) -> otrios_interfaces::oib::styles::Mode {
+        self.oib_style_mode
+    }
+    pub(in crate::canvas) fn oib_style_frame_for(
+        &self,
+        seed: &otrios_interfaces::oib::Seed,
+    ) -> Result<Option<super::super::oib::styles::Frame>> {
+        super::super::oib::styles::automatic(seed, &self.oib_allocations()?, self.oib_style_mode)
     }
     pub fn oib_status_text(&self) -> String {
         let Ok(status) = self.doc.oib_status() else {

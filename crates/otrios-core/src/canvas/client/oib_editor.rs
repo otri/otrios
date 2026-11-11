@@ -158,14 +158,41 @@ impl Mount {
             "All changes applied".into()
         })
     }
+    pub(super) fn sync_oib_style_mode(&mut self) {
+        let mode = match self.designer.as_ref().map(|designer| designer.appearance()) {
+            Some(oib_workspace::Appearance::Light) => otrios_interfaces::oib::styles::Mode::Light,
+            _ => otrios_interfaces::oib::styles::Mode::Dark,
+        };
+        self.doc.set_oib_style_mode(mode);
+        if let Some(working) = &mut self.working_copy {
+            working.base.set_oib_style_mode(mode);
+            working.candidate.set_oib_style_mode(mode);
+        }
+        if let Some(preview) = &mut self.definition_presentation {
+            preview.samples.set_oib_style_mode(mode);
+        }
+        if let Some(preview) = &mut self.designer_preview {
+            preview.doc.set_oib_style_mode(mode);
+        }
+    }
     pub(super) fn refresh_definition_presentation(&mut self) -> Result<bool> {
         let definition = self.selected_definition();
+        let has_styles = self
+            .design_doc()
+            .oib_authoring_seed()?
+            .graph
+            .as_ref()
+            .is_some_and(|graph| graph.styles.is_some());
+        let style_mode = has_styles.then_some(self.design_doc().oib_style_mode());
         let old = self
             .definition_presentation
             .as_ref()
             .map(|p| p.preview.definition);
         let revision = self.working_copy.as_ref().map(|w| w.revision);
-        if definition == old && revision == self.working_presented {
+        if definition == old
+            && revision == self.working_presented
+            && style_mode == self.oib_style_mode_presented
+        {
             return Ok(false);
         };
         if self.input.active()
@@ -190,11 +217,12 @@ impl Mount {
                     values.insert(address, value);
                 }
             }
-            let preview = super::super::oib::graph::definition_preview_with_values(
+            let preview = super::super::oib::graph::definition_preview_with_values_mode(
                 &ui,
                 definition,
                 [320., 240.],
                 &values,
+                self.design_doc().oib_style_mode(),
             )?;
             let samples = preview.sample_adapter()?;
             ui = preview.ui.clone();
@@ -234,6 +262,7 @@ impl Mount {
         }
         self.definition_presentation = presentation;
         self.working_presented = revision;
+        self.oib_style_mode_presented = style_mode;
         if let Some(seed) = super::super::oib::seed(&self.ui)
             && let Some(surface) = &seed.instance_surface
         {

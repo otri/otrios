@@ -27,6 +27,7 @@ fn definition(id: u64, root: u64) -> ComponentDefinition {
 }
 fn source(definitions: Vec<ComponentDefinition>, presets: Vec<Preset>) -> DocumentSource {
     DocumentSource {
+        styles: None,
         definitions,
         presets,
         instances: vec![],

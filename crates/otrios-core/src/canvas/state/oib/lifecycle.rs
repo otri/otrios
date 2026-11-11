@@ -30,6 +30,19 @@ pub(super) fn first_id(seed: &otrios_interfaces::oib::Seed) -> Result<u64> {
                 }),
         )
         .chain(std::iter::once(graph.presented_root.0))
+        .chain(
+            graph
+                .styles
+                .iter()
+                .flat_map(|styles| &styles.catalog.systems)
+                .flat_map(|system| {
+                    system
+                        .styles
+                        .iter()
+                        .map(|style| style.id.0)
+                        .chain(system.variables.iter().map(|variable| variable.id.0))
+                }),
+        )
         .max()
         .unwrap_or(0)
         .checked_add(1)

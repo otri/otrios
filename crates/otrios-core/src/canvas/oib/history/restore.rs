@@ -756,6 +756,28 @@ impl Graph {
     ) -> Result<DocumentEdit> {
         let mut op = op.clone();
         match &mut op {
+            DocumentEdit::Style(edit) => match edit {
+                otrios_interfaces::oib::styles::StyleEdit::Assign { definition, .. }
+                | otrios_interfaces::oib::styles::StyleEdit::CreateStyle { definition, .. } => {
+                    *definition = map.definition(*definition)
+                }
+                otrios_interfaces::oib::styles::StyleEdit::Replace {
+                    styles: Some(styles),
+                } => {
+                    for component in &mut styles.components {
+                        for mapping in &mut component.fields {
+                            for target in &mut mapping.targets {
+                                *target = self.path(current, map, component.definition, target)?;
+                            }
+                        }
+                        component.definition = map.definition(component.definition);
+                    }
+                    styles
+                        .components
+                        .sort_by_key(|component| component.definition);
+                }
+                _ => {}
+            },
             DocumentEdit::Definition(edit) => match edit {
                 DefinitionEdit::SetProperty {
                     definition,

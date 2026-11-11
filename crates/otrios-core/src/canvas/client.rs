@@ -97,6 +97,7 @@ struct Mount {
     working_copy: Option<oib_working_copy::WorkingCopy>,
     definition_presentation: Option<oib_editor::DefinitionPresentation>,
     working_presented: Option<u64>,
+    oib_style_mode_presented: Option<otrios_interfaces::oib::styles::Mode>,
     leave: Option<oib_leave::Pending>,
     review_pointer: Option<oib_history_review::Pointer>,
     delete_review: Option<oib_delete::Pending>,
@@ -4535,6 +4536,7 @@ impl Mount {
     }
     fn refresh(&mut self) -> Result<bool> {
         let capture = self.capture_validation.take();
+        self.sync_oib_style_mode();
         let mut oib_changed = self.sync_working_copy()?;
         oib_changed |= self.refresh_oib_view()?;
         if let Some(generation) = self
@@ -4550,7 +4552,12 @@ impl Mount {
             let colors = self
                 .oib_paint_basis
                 .as_ref()
-                .filter(|previous| previous.same_structure(&basis))
+                .filter(|previous| {
+                    super::oib::seed(&self.ui)
+                        .and_then(|seed| seed.graph.as_ref())
+                        .is_none_or(|graph| graph.styles.is_none())
+                        && previous.same_structure(&basis)
+                })
                 .map(|previous| {
                     super::oib::paint::changes(
                         super::oib::seed(&self.ui).ok_or("Missing presented OIB seed")?,
@@ -5287,6 +5294,7 @@ fn qualify(
         working_copy: None,
         definition_presentation: None,
         working_presented: None,
+        oib_style_mode_presented: None,
         leave: None,
         review_pointer: None,
         delete_review: None,

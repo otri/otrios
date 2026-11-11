@@ -1499,3 +1499,17 @@ claimed. The next integration must also correct serialized library style owners:
 embedding a package's own Revision in its hashed payload creates a circular hash.
 Use stable logical ownership in source with exact revisions bound separately by
 verified import admission. That correction remains unimplemented.
+
+
+## T27 local style controls build-out — 2026-11-11
+
+The user clarified that enabling actual style controls is required; redeploying the
+inactive engine was insufficient. Three roles implemented authority/source support,
+mounted style consumption and parent-owned UI. Library Styles/Variables and typed
+name/Light/Dark color editing now use the existing private Apply/field editor path.
+T27 defines the first local scope and remaining gates. Required feature is
+otrios-oib-document-styles-v1; synchronized state protocol is v38.
+
+No new automated suite was added or broad checks run. A necessary core compilation
+found one UI Option/Result error, corrected before the publisher build. The focused
+live authoring journey and deployment evidence will be recorded after execution.

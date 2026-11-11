@@ -31,6 +31,7 @@ struct PropertyInverse {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum Key {
+    Styles,
     Definition(DefinitionId),
     DefinitionName(DefinitionId),
     Node(DefinitionId, NodeId),
@@ -132,6 +133,7 @@ fn visual_parent(source: &DocumentSource, d: DefinitionId, id: NodeId) -> Option
 }
 fn read(source: &DocumentSource, key: &Key) -> Result<Vec<u8>> {
     match key {
+        Key::Styles => encoded(&source.styles),
         Key::Definition(d) => encoded(&source.definitions.iter().find(|v| v.id == *d)),
         Key::DefinitionName(d) => encoded(&definition(source, *d)?.name),
         Key::Node(d, n) => encoded(&definition(source, *d)?.nodes.iter().find(|v| v.id == *n)),
@@ -318,6 +320,15 @@ impl Entry {
             .collect();
         for op in apply.operations.iter().rev() {
             match op {
+                DocumentEdit::Style(_) => {
+                    if entry.guard(before, after, Key::Styles)? {
+                        entry.operations.push(DocumentEdit::Style(
+                            otrios_interfaces::oib::styles::StyleEdit::Replace {
+                                styles: before.styles.clone(),
+                            },
+                        ));
+                    }
+                }
                 DocumentEdit::Definition(edit) => {
                     let d = match edit {
                         DefinitionEdit::CreateDefinition { definition, .. }
@@ -723,6 +734,7 @@ impl Entry {
                 (0, 0, d.0, parent.map_or(0, |p| p.0), usize::MAX - index)
             }
             DocumentEdit::Definition(_) => (0, 1, 0, 0, 0),
+            DocumentEdit::Style(_) => (0, 2, 0, 0, 0),
             DocumentEdit::Preset(_) => (1, 0, 0, 0, 0),
             DocumentEdit::Hierarchy(HierarchyEdit::Move { instance, .. }) => (
                 2,

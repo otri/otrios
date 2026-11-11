@@ -15,12 +15,7 @@ pub(super) fn sources(
     seed: &otrios_interfaces::oib::Seed,
     address: &PropertyAddress,
 ) -> Result<PropertySources> {
-    let mut trace = crate::canvas::oib::document::property_sources(
-        seed,
-        &state.oib_allocations()?,
-        address,
-        &state.oib_active()?,
-    )?;
+    let mut trace = state.oib_style_sources(seed, address)?;
     if matches!(address, PropertyAddress::Structural { .. }) {
         let field = state
             .oib_structural_properties(&selection(address))?
@@ -37,6 +32,14 @@ pub(super) fn sources(
 pub(super) fn selection(address: &PropertyAddress) -> Selection {
     match address {
         PropertyAddress::Structural { target, .. } => match target {
+            otrios_interfaces::oib::designer::StructuralTarget::Style(style)
+            | otrios_interfaces::oib::designer::StructuralTarget::StyleField { style, .. } => {
+                Selection::Style(*style)
+            }
+            otrios_interfaces::oib::designer::StructuralTarget::Variable(variable)
+            | otrios_interfaces::oib::designer::StructuralTarget::VariableMode {
+                variable, ..
+            } => Selection::Variable(*variable),
             otrios_interfaces::oib::designer::StructuralTarget::Definition(definition)
             | otrios_interfaces::oib::designer::StructuralTarget::Property { definition, .. } => {
                 Selection::Definition(*definition)
@@ -259,7 +262,9 @@ pub(super) fn inspector(
             nodes.push(label(
                 b,
                 y,
-                if allowed {
+                if p.source == "variable" {
+                    "Variable"
+                } else if allowed {
                     "Read only - app binding"
                 } else {
                     "Read only / resolve conflict"
@@ -838,12 +843,7 @@ impl Client {
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let authoring_seed = m.design_doc().oib_authoring_seed()?;
         let seed = &authoring_seed;
-        let trace = crate::canvas::oib::document::property_sources(
-            seed,
-            &m.design_doc().oib_allocations()?,
-            address,
-            &m.design_doc().oib_active()?,
-        )?;
+        let trace = m.design_doc().oib_style_sources(seed, address)?;
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         d.details = Some(trace);
         d.workspace_task = Task::Inspect;

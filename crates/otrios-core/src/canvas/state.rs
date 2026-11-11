@@ -1037,6 +1037,7 @@ pub struct StateUsage {
 /// RAM-only pending intents, separate from authoritative causal metadata.
 pub struct StateAdapter {
     doc: Document,
+    oib_style_mode: otrios_interfaces::oib::styles::Mode,
     read_only: bool,
     writer: [u8; 16],
     replica: Option<merkle::Replica>,
@@ -1094,6 +1095,7 @@ impl StateAdapter {
         doc.required_fields = selection.fields;
         let mut result = Self {
             doc,
+            oib_style_mode: otrios_interfaces::oib::styles::Mode::Dark,
             read_only: false,
             writer,
             replica: None,
@@ -1126,6 +1128,7 @@ impl StateAdapter {
         pending.extend(self.pending.clone());
         Self {
             doc: self.doc.clone(),
+            oib_style_mode: self.oib_style_mode,
             read_only: false,
             writer: self.writer,
             replica: None,

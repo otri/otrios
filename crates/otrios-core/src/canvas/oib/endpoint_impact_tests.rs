@@ -12,6 +12,7 @@ mod library_fixture;
 fn source(seed: &Seed) -> DocumentSource {
     let graph = seed.graph.as_ref().unwrap();
     DocumentSource {
+        styles: None,
         definitions: graph.definitions.clone(),
         presets: graph.presets.clone(),
         baseline: vec![],

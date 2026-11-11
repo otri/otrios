@@ -79,6 +79,9 @@ impl Frame {
         }
         Ok(())
     }
+    pub(crate) fn validate_source(&self, seed: &Seed) -> Result<()> {
+        self.validate_compiler(seed, &self.allocations)
+    }
     pub(crate) fn validate_compiler(&self, seed: &Seed, allocations: &[Allocation]) -> Result<()> {
         self.validate(seed, allocations)?;
         if self.focus.values().any(|fields| !fields.is_empty()) {
@@ -95,4 +98,94 @@ impl Frame {
     pub fn focus(&self) -> &BTreeMap<ObjectAddress, BTreeMap<FieldId, ResolvedField>> {
         &self.focus
     }
+}
+
+/// Build the same receiving-mode frame for rendering, inspection and guest reads.
+/// Local authoring currently has a single Light/Dark mode dimension; each use
+/// keeps its canonical source/occurrence identity across that local change.
+pub(crate) fn automatic(
+    seed: &Seed,
+    allocations: &[Allocation],
+    mode: Mode,
+) -> Result<Option<Frame>> {
+    use otrios_interfaces::oib::designer::{DefinitionId, NodeId};
+    if seed
+        .graph
+        .as_ref()
+        .is_none_or(|graph| graph.styles.is_none())
+    {
+        return Ok(None);
+    }
+    let Some(catalog) = super::local_admitted(seed)? else {
+        return Ok(None);
+    };
+    let payload = seed
+        .graph
+        .as_ref()
+        .and_then(|graph| graph.styles.as_ref())
+        .ok_or("Missing local style source")?;
+    if payload.components.is_empty() {
+        return Ok(None);
+    }
+    let doc = crate::canvas::oib::document::expanded_metadata(seed, allocations)?;
+    fn walk(
+        doc: &otrios_interfaces::oib::designer::Document,
+        payload: &DocumentStyles,
+        definition: DefinitionId,
+        instance: otrios_interfaces::oib::designer::InstanceId,
+        prefix: &[NodeId],
+        uses: &mut Vec<(ComponentStyle, ObjectAddress)>,
+    ) -> Result<()> {
+        if prefix.len() > 8 {
+            return Err("Style component ancestry limit".into());
+        }
+        let definition = doc
+            .definitions
+            .iter()
+            .find(|candidate| candidate.id == definition)
+            .ok_or("Unknown styled definition")?;
+        if let Some(binding) = payload
+            .components
+            .iter()
+            .find(|binding| binding.definition == definition.id)
+        {
+            if uses.len() >= MAX_ENTRIES {
+                return Err("Style occurrence limit".into());
+            }
+            uses.push((
+                binding.clone(),
+                ObjectAddress {
+                    instance,
+                    references: prefix.to_vec(),
+                    node: definition.root,
+                },
+            ));
+        }
+        for node in &definition.nodes {
+            if let Some(reference) = &node.reference {
+                let mut child = prefix.to_vec();
+                child.push(node.id);
+                walk(doc, payload, reference.definition, instance, &child, uses)?;
+            }
+        }
+        Ok(())
+    }
+    let mut bindings = vec![];
+    for root in &doc.instances {
+        walk(&doc, payload, root.definition, root.id, &[], &mut bindings)?;
+    }
+    let uses: Vec<_> = bindings
+        .iter()
+        .map(|(component, scope)| Occurrence {
+            component,
+            scope,
+            context: Context {
+                mode,
+                state: StateMask::default(),
+                document: &[],
+                instance: &[],
+            },
+        })
+        .collect();
+    Frame::new(seed, allocations, &catalog, &uses).map(Some)
 }

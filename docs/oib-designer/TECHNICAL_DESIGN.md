@@ -1205,3 +1205,44 @@ guest property reads and inspector queries, not just shape compilation. Implemen
 mode propagation and native focus overlays before claiming the corresponding
 capabilities. Retained-paint dependency proofs, source-aware editing, contrast and
 representative live journeys remain T24/B6c–B6d work.
+
+
+## T27. First enabled local style/variable authoring
+
+The first enabled Designer styling workflow is document-local: Library has
+Components/Styles/Variables subnavigation; a compatible local component can create
+a named style, edit its literal color inputs or bind them to named Color variables.
+Variables expose independent Light/Dark colors using the existing validated
+hex/opacity/swatch editor. Names use stable typed IDs and the style identifier
+character rules. Only one style field is edited at a time so the ordinary scrolling
+inspector stays inside its existing coordinate/node/control budgets. Large record
+lists page only above 96 rows because 256 × 56 exceeds the 8192-unit panel limit.
+
+Creation, rename, field source/value changes, assignment and dependency-safe removal
+are typed StyleEdit operations in the ordinary private working copy. Global Apply
+publishes them with the existing generation/receipt/history boundary. Style/variable
+IDs use the existing monotonic allocator. Selecting Use style explicitly clears
+matching owned root defaults in the same batch; shared and occurrence overrides
+remain above styles. This first reference is a Definition style shared by its
+instances, labeled as such; per-instance style-reference selection remains future
+work, while existing per-field occurrence overrides still win.
+
+DocumentSource and canonical graph carry optional DocumentStyles (local catalog and
+component bindings). Normal compilation, definition samples, property inspection and
+guest Color reads use the admitted local style context. Preview Dark/Light controls
+that receiving context as well as the chrome, without publishing a mode/app-value
+write. Unknown style paint dependencies use full compilation.
+
+The required package feature is `otrios-oib-document-styles-v1`; native/core package
+admission recognizes it. State protocol becomes v38 in native/server/browser and
+release publication. Release-control opening envelope stays v1; guest ABI remains 1.
+No resource ceiling was raised. Definition source plus style bytes shares the
+existing source budget. Imported/signed-library style owners are rejected by this
+local payload; library style packaging and its ownership/hash correction remain
+gated, as do focus overlays, state-recipe authoring, explicit subtree mode boundaries,
+contrast diagnostics and the remaining representative-control qualification.
+
+Acceptance for this slice is one live journey: create/assign a local style, create
+and bind a descriptive variable, edit both mode colors, Apply, compare local preview
+modes, reload and confirm persistence plus native synchronization. Routine broad
+suites are excluded following the user's testing restraint.

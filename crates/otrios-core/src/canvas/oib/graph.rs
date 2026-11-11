@@ -10,7 +10,9 @@ use otrios_interfaces::{
 
 #[path = "graph_preview.rs"]
 mod preview;
-pub(crate) use preview::{DefinitionPreview, definition_preview, definition_preview_with_values};
+pub(crate) use preview::{DefinitionPreview, definition_preview_with_values_mode};
+#[cfg(test)]
+pub(crate) use preview::{definition_preview, definition_preview_with_values};
 
 /// Admitted typed chrome plus disposable graph output. Internal transformations
 /// update `blueprint`; conversion to an artifact Ui serializes at the boundary.
@@ -445,6 +447,19 @@ struct Lowering {
     previews: Vec<TemplateNode>,
 }
 fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
+    build_with_style_mode(
+        input,
+        node_base,
+        control_base,
+        otrios_interfaces::oib::styles::Mode::Dark,
+    )
+}
+fn build_with_style_mode(
+    input: &Seed,
+    node_base: u16,
+    control_base: u8,
+    mode: otrios_interfaces::oib::styles::Mode,
+) -> Result<Lowering> {
     let _profile = crate::canvas::profiling::span("oib.graph.lower");
     let graph = super::imports::resolve(input)?;
     validate_source(&graph)?;
@@ -648,13 +663,15 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
                 .authored_override = authored;
         }
     }
+    let style_allocations = super::instances::initial_allocations(&seed);
+    let style_frame = super::styles::automatic(&seed, &style_allocations, mode)?;
     let mut compiler = Compiler {
         graph: &graph,
         seed,
         selectors,
         handlers: vec![],
         values: BTreeMap::new(),
-        styles: None,
+        styles: style_frame.as_ref(),
         next_node: node_base,
         next_control: control_base,
     };
@@ -1447,7 +1464,7 @@ pub(crate) fn expand_prepared(
     live: &BTreeSet<u64>,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<PreparedUi> {
-    expand_prepared_with_styles(prepared, allocations, live, values, None)
+    expand_prepared_styled(prepared, allocations, live, values, None)
 }
 /// Explicit style-aware compilation. This does not advertise package support or
 /// serialize style state; source/package activation remains a separate gate.
@@ -1458,7 +1475,7 @@ pub fn expand_styled(
     values: &BTreeMap<u64, Option<Value>>,
     styles: &super::styles::Frame,
 ) -> Result<Ui> {
-    expand_prepared_with_styles(
+    expand_prepared_styled(
         PreparedUi::from_ui(ui)?,
         allocations,
         live,
@@ -1467,7 +1484,7 @@ pub fn expand_styled(
     )?
     .finish()
 }
-fn expand_prepared_with_styles(
+pub(crate) fn expand_prepared_styled(
     prepared: PreparedUi,
     allocations: &[Allocation],
     live: &BTreeSet<u64>,

@@ -17,12 +17,13 @@ pub(crate) struct DefinitionPreview {
     pub(crate) definition: DefinitionId,
     pub(crate) instance: InstanceId,
     pub(crate) objects: Vec<ObjectMapping>,
+    pub(crate) mode: otrios_interfaces::oib::styles::Mode,
 }
 impl DefinitionPreview {
     /// A transportless sample document also supplies literal guest contexts.
     /// Its OIB seed is this disposable preview, never the live app document.
     pub(crate) fn sample_adapter(&self) -> Result<crate::canvas::StateAdapter> {
-        Ok(crate::canvas::StateAdapter::for_ui(
+        let mut adapter = crate::canvas::StateAdapter::for_ui(
             &self.ui,
             &format!(
                 "designer-definition:{}:{}",
@@ -31,7 +32,9 @@ impl DefinitionPreview {
             &[],
             [0xd5; 16],
         )?
-        .preview_clone())
+        .preview_clone();
+        adapter.set_oib_style_mode(self.mode);
+        Ok(adapter)
     }
     /// Imported descendants select their local reference boundary. Editing that
     /// boundary does not pretend the imported implementation is locally owned.
@@ -125,17 +128,25 @@ fn canvas_node(id: u16, frame: [f32; 4], children: Vec<TemplateNode>) -> Templat
 /// Compile exactly one selected definition against synthetic local sample fields.
 /// The supplied UI/source remain byte-identical, including unused definitions,
 /// imports, fixed application objects and every real preset/instance assignment.
+#[cfg(test)]
 pub(crate) fn definition_preview(
     ui: &Ui,
     selected: DefinitionId,
     viewport: [f32; 2],
 ) -> Result<DefinitionPreview> {
-    compile_preview(ui, selected, viewport, &BTreeMap::new())
+    compile_preview(
+        ui,
+        selected,
+        viewport,
+        &BTreeMap::new(),
+        otrios_interfaces::oib::styles::Mode::Dark,
+    )
 }
 
 /// Semantic definition overrides are projected as private occurrence defaults.
 /// Authored literal/forward connections keep their normal precedence; immutable
 /// imported library bodies are never modified to display a working copy.
+#[cfg(test)]
 pub(crate) fn definition_preview_with_values(
     ui: &Ui,
     selected: DefinitionId,
@@ -145,13 +156,29 @@ pub(crate) fn definition_preview_with_values(
     if values.is_empty() {
         return super::definition_preview(ui, selected, viewport);
     }
-    compile_preview(ui, selected, viewport, values)
+    compile_preview(
+        ui,
+        selected,
+        viewport,
+        values,
+        otrios_interfaces::oib::styles::Mode::Dark,
+    )
+}
+pub(crate) fn definition_preview_with_values_mode(
+    ui: &Ui,
+    selected: DefinitionId,
+    viewport: [f32; 2],
+    values: &BTreeMap<PropertyAddress, Option<Value>>,
+    mode: otrios_interfaces::oib::styles::Mode,
+) -> Result<DefinitionPreview> {
+    compile_preview(ui, selected, viewport, values, mode)
 }
 fn compile_preview(
     ui: &Ui,
     selected: DefinitionId,
     viewport: [f32; 2],
     values: &BTreeMap<PropertyAddress, Option<Value>>,
+    mode: otrios_interfaces::oib::styles::Mode,
 ) -> Result<DefinitionPreview> {
     if viewport
         .iter()
@@ -210,6 +237,11 @@ fn compile_preview(
     graph
         .definitions
         .retain(|definition| needed.contains(&definition.id));
+    if let Some(styles) = &mut graph.styles {
+        styles
+            .components
+            .retain(|binding| needed.contains(&binding.definition));
+    }
     let private_shell = graph
         .definitions
         .iter_mut()
@@ -286,7 +318,7 @@ fn compile_preview(
         .unwrap_or(0)
         .checked_add(1)
         .ok_or("Preview back/control identity budget")?;
-    let baseline = build(&private, baseline_node_base, control_base)?;
+    let baseline = build_with_style_mode(&private, baseline_node_base, control_base, mode)?;
     let effective = super::super::imports::resolve(&private)?;
     let mut forwards = BTreeSet::new();
     forwarded_targets(&effective, selected, &mut vec![], &mut forwards)?;
@@ -340,7 +372,7 @@ fn compile_preview(
             source: source.clone(),
         })
         .collect();
-    let baseline = build(&private, baseline_node_base, control_base)?;
+    let baseline = build_with_style_mode(&private, baseline_node_base, control_base, mode)?;
     let mut fields = vec![];
     let mut assignments = projected;
     let mut grants = vec![];
@@ -421,7 +453,7 @@ fn compile_preview(
         .max(hierarchy_id.unwrap_or(0))
         .checked_add(1)
         .ok_or("Preview tooling identity budget")?;
-    let lowering = build(&private, node_base, control_base)?;
+    let lowering = build_with_style_mode(&private, node_base, control_base, mode)?;
     if lowering.previews.len() != 1 {
         return Err("Definition preview must contain one virtual root".into());
     }
@@ -509,7 +541,18 @@ fn compile_preview(
     result.navigation.clear();
     result.behavior = None;
     result.presentation = Some(Presentation::Oib(Box::new(lowering.seed)));
-    let layout = super::super::compile(&result, &BTreeMap::new())?;
+    let output_seed = super::super::seed(&result).ok_or("Missing styled preview seed")?;
+    let frame = super::super::styles::automatic(
+        output_seed,
+        &super::super::instances::initial_allocations(output_seed),
+        mode,
+    )?;
+    let layout = super::super::compile_prepared_styled(
+        &result,
+        &blueprint,
+        &BTreeMap::new(),
+        frame.as_ref(),
+    )?;
     super::super::component_behaviors::validate(&result, &layout)?;
     let mut bindings = BTreeMap::new();
     for selector in &result.selectors {
@@ -536,6 +579,7 @@ fn compile_preview(
         definition: selected,
         instance: InstanceId(virtual_id),
         objects,
+        mode,
     })
 }
 

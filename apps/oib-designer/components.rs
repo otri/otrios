@@ -771,6 +771,7 @@ pub fn graph(sliders_only: bool) -> g::Document {
         defs.retain(|d| matches!(d.id.0, 11 | 12));
     }
     g::Document {
+        styles: None,
         id: DocumentId(1),
         name: if sliders_only {
             "Live UI"

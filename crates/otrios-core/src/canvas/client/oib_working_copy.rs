@@ -159,6 +159,7 @@ impl WorkingCopy {
     fn phase(op: &DocumentEdit) -> u8 {
         match op {
             DocumentEdit::Definition(_) => 0,
+            DocumentEdit::Style(_) => 0,
             DocumentEdit::Preset(_) => 1,
             DocumentEdit::Hierarchy(_) => 2,
             DocumentEdit::Restore { .. } => 3,
