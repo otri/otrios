@@ -611,8 +611,9 @@ final IMPLEMENTATION.md restart list for authoritative next work.
 
 ## T15. B5 history, composition and viewport contracts
 
-This follow-up is implemented and locally tested; see the final IMPLEMENTATION.md
-entry for live status and restart paths. Full B5–B7 remain in progress.
+This follow-up is implemented, locally tested and published as commit `2f95205`;
+see the final IMPLEMENTATION.md entry for exact release, focused Frame/Web
+acceptance and restart paths. Full B5–B7 remain in progress.
 
 An accepted Apply is one published history unit. Undo/Redo prepares a new private
 inverse and uses the same explicit Apply boundary. The inverse guards affected

@@ -437,10 +437,10 @@ component behavior14; leave3; real macOS authority-process/WebSocket test1;
 browser session/update22. Strict core library Clippy with `-D warnings` passed.
 No full repository preflight or full catalog acceptance is claimed.
 
-## B5 follow-up implementation — pending publication, 2026-11-11
+## B5 follow-up implementation — published, 2026-11-11
 
-The live code remains `a5b1e3a`/release `4faf7ae0…` until the acceptance below.
-The following changes are implemented in the working branch and locally tested:
+This implementation supersedes `a5b1e3a`/release `4faf7ae0…`; the exact new
+publication and acceptance follow below. The following changes are implemented:
 
 - Local command history retains selection and task. Undo creation restores its
   originating selection/task; Redo reopens the created definition. Local and
@@ -527,3 +527,64 @@ Focused evidence before publication:
   -- -D warnings`) and `git diff --check` passed after the clean-base and held
   review fixes. No full preflight or new PR. Existing live publication
   authorization remains in effect.
+
+### Live acceptance of commit `2f95205`
+
+`python3 /tmp/otrios-designer-live-build.py` completed successfully through the
+existing publisher: Mac, Wasm and ARM artifacts built, Frame and native code
+activated release
+`2fcbc24b1a5dbdd065465bf3a12801f36623a8e9af46a25d9fcaaa3a64de3549`.
+The automatic builder was paused during publication, restored afterward, and its
+source pin advanced to exact commit `2f95205326cef9097d2f5188a31aa90786cf1fdb`.
+No new services, identities, ceilings or dependencies were introduced.
+
+- An already-open browser upgraded without manual reload. At 1920×1080, the
+  previous release's 1728×1080 fitted canvas/129.59px Library tab became a full
+  1920×1080 canvas/96px tab. A selected-definition preview also resized down to
+  800×480 and back to 1920×1080, retaining 96px chrome controls and authored content.
+  These are actual browser DOM/semantic measurements, not screenshot judgments.
+- Real browser pointers performed New → Undo → Redo. Undo restored the original
+  Document inspector; Redo reopened the new definition. Add text and Link
+  LabeledSlider then succeeded in one global Apply, observed on the Frame as
+  generation 34. The live document exposes its local LabeledSlider; the imported
+  export path remains covered by the focused admitted-import integration fixture,
+  and is not claimed as a live imported-library acceptance.
+- A subsequent width change 320→480 published at generation 35. Clean Undo
+  prepared 320 privately while the Frame stayed at generation 35. Apply published
+  the inverse, then Redo prepared 480 and Apply published the accepted inverse's
+  inverse. The new component remains uninstantiated; app instance IDs 20/30/66
+  and sample Volume51%/Brightness57% were unchanged.
+- Two independent browser editors exercised real concurrent source publication.
+  Editor A applied the name `B5 responsive composition`; editor B applied
+  `B5 concurrent rename`. A's Undo displayed Before `New component`, Applied
+  `B5 responsive composition`, Current `B5 concurrent rename`, with no shared
+  write. Clicking the background New command did not create a private edit and
+  no text inputs were exposed. B then applied `B5 reviewed composition` while
+  the dialog remained open: A retained captured comparisons and showed
+  “Sources changed again; Inspect loads latest values.” Inspect current closed
+  review and exposed the latest name with All changes applied.
+- Native taps used the existing calibrated evdev input path: New selected private
+  definition76, with no authority generation advance; Discard returned to Document
+  Inspect. Final native report: same release, generation40, state/stream/reload
+  ready, input idle, two qualified app guest instances and zero guest errors.
+  Both owned browser tabs were closed after the checks.
+
+Visual capture remains unqualified: two preview snapshots failed with
+`Preview automation snapshot timed out after 15000ms`; the alternate computer-use
+surface reported `The browser access host is unavailable`. DOM, physical browser
+pointer, real native input and authority reports above are the actual evidence.
+No screenshot/color judgment or human touch acceptance is inferred. The four
+focused review tests cover held-pointer concurrency and large bounded review
+scrolling beyond this smaller live conflict example.
+
+### Next implementation order
+
+Keep B5 open for fresh-ID restoration/creation Redo, typed API and slots, and
+dependency impact/blocked-delete/retire/replace journeys. B6 begins with the
+concrete RFC0037 codec, stable owner/field addressing and bounded resolver before
+exposing named variables/styles in the inspector. Its first authoring slice must
+edit a real Light/Dark color pair through the private working copy and atomic
+Apply, retain literals and exact imported owners, and show affected document uses.
+Chrome Dark/Light and the legacy Accent property do not satisfy that requirement.
+B7 still requires per-control/per-flow evidence in CONTROL_MATRIX. None of these
+remaining gates is closed by the publication above.
