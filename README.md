@@ -49,6 +49,11 @@ the same hosts. XR remains a separate later runtime milestone in
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
+The proposed [OTriOS design reference](DESIGN.md) defines the SpaceX-inspired
+monochrome direction. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
+named styles, descriptive variables, Light/Dark modes and state resolution;
+this visual/style cutover is not implemented yet.
+
 ## Build and check
 
 Install Rust through [official rustup](https://rustup.rs/), then run:

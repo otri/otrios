@@ -3,6 +3,7 @@
 
 | Read about | Start here |
 | --- | --- |
+| Visual language and proposed style system | [Design reference](../DESIGN.md), [technical design](rfcs/0037-oib-design-system.md) |
 | Current apps and development | [Dashboard](DASHBOARD.md), [app packages](../apps/README.md) |
 | Frame operation, signing, deployment and rollback | [Frame hosting](FRAME_HOSTING.md) |
 | Public routes and private Monitoring | [Public access](PUBLIC_ACCESS.md), [Monitoring](MONITORING.md) |
