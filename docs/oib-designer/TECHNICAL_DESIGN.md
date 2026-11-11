@@ -982,8 +982,26 @@ the outer source and preserves forwarding aliases to the guest outlet. Test
 gestures execute the existing bounded Wasmi ABI against that sample adapter;
 they never change real app fields, authored defaults or pending shared edits.
 
-Document/component navigation improvements are deferred to a separate slice.
+Document/component navigation is separate from this bound-property slice;
+T23 adds the one-level return to document.
 Generic changed events, arbitrary action routing, new control effects and editable guest code
 remain separate capability gates; this slice does not relabel numericSet as a
 general action API. State protocol v37 distinguishes the expanded declaration
 admission contract while preserving release-control v1.
+
+
+## T23. Definition-to-document return
+
+A definition or definition-node selection shows its component name in the shared
+workspace heading and a 48-unit Back to document action. This is local scope
+navigation, distinct from the existing app-exit back action and from Apply. It
+returns to the current document without a reload, preserves the current task,
+Edit/Test mode and private working copy, and removes the scope action in document
+context. Subsequent selection of the definition resumes its private source.
+
+Before changing scope, use the existing focused-field commit path: a valid field
+is committed only to the working copy, while an invalid field remains selected
+with its keyboard/error. Active input capture and modal barriers block the action.
+Returning publishes no source or sample value, and does not discard or auto-Apply.
+This one-level return does not implement a general breadcrumb/history stack or
+change the separate future action/slot authoring gates.

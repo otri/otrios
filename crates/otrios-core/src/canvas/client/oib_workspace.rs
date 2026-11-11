@@ -26,6 +26,7 @@ pub(super) const UNDO: u32 = BASE + 41;
 pub(super) const REDO: u32 = BASE + 42;
 pub(super) const DISCARD: u32 = BASE + 43;
 pub(super) const APPLY: u32 = BASE + 44;
+pub(super) const BACK_DOCUMENT: u32 = BASE + 45;
 pub(super) const MODAL_ACTION_START: u32 = BASE + 400;
 pub(super) const MODAL_ACTION_END: u32 = BASE + 420;
 pub(super) const MODAL_CONTENT: u32 = BASE + 505;
@@ -34,6 +35,7 @@ pub(super) const MODAL_LINK_END: u32 = MODAL_LINK_START + 255;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct EditorChrome {
+    pub(super) component_name: Option<String>,
     pub(super) management: bool,
     pub(super) new_component: bool,
     pub(super) undo: bool,
@@ -740,20 +742,39 @@ pub(super) fn project(
         });
         preview_back = Some(node);
     }
+    let heading_width = (width
+        - 96.
+        - if editor.component_name.is_some() {
+            232.
+        } else {
+            0.
+        })
+    .max(1.);
     chrome.push(label(
         BASE + 103,
-        Rect::new(80., 4., (width - 96.).max(1.), 40.),
-        "OIB Designer",
+        Rect::new(80., 4., heading_width, 40.),
+        editor.component_name.as_deref().unwrap_or("OIB Designer"),
         3,
         p.text,
     ));
     chrome.push(label(
         STATUS,
-        Rect::new(80., 42., (width - 96.).max(1.), 28.),
+        Rect::new(80., 42., heading_width, 28.),
         "All changes applied",
         2,
         p.muted,
     ));
+    if editor.component_name.is_some() {
+        // Scope navigation has no command outline or selected mode treatment.
+        chrome.push(control(
+            BACK_DOCUMENT,
+            Rect::new(width - 232., 12., 216., 48.),
+            "Back to document",
+            false,
+            true,
+            p,
+        ));
+    }
     if let Some(node) = preview_back {
         chrome.push(node);
     }

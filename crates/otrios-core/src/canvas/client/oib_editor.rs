@@ -109,6 +109,11 @@ impl Mount {
             .as_ref()
             .is_some_and(|d| d.drafts.drafts().iter().any(|f| f.dirty));
         oib_workspace::EditorChrome {
+            component_name: self
+                .designer
+                .as_ref()
+                .and_then(|d| d.component_name())
+                .map(str::to_owned),
             management: self
                 .designer
                 .as_ref()

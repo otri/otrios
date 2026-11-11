@@ -1311,3 +1311,21 @@ for this inspector wording fix.
 The previously pending T22 outer-instance binding UI journey is now verified.
 Broader actions/slots, B6 styles and Q01–Q16/F01–F06 remain open; this acceptance
 does not complete the responsive Designer goal.
+
+
+## T23 scope return implementation — 2026-11-11
+
+The prior live insertion journey required a page reload to leave a definition.
+The next bounded lifecycle slice adds Back to document plus the current component
+name in the heading. It uses the existing selection/field-blur paths and shared
+workspace controls. Private work, task and Edit/Test mode survive; capture and
+invalid fields prevent navigation. No schema/protocol or capability change.
+
+Integrated the previously deferred navigation candidate after reviewing it against
+current code. Three focused scope-navigation tests pass: child-to-document return
+and private insertion, invalid/valid field handling, capture blocking and Test-mode
+retention. Viewports 800×480, 1280×800 and 1920×1080 retain a hit-testable 48-unit
+control and existing 512-node/128-control ceilings. Additional Designer regression
+and live evidence follow below. Broader styles/actions/slots stay separate.
+
+T23 local regression: `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline` passed **94 tests**, with one existing ignored timing diagnostic. Diff check passed.

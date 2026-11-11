@@ -42,6 +42,7 @@ const WINDOW_STEP: f32 = 8. * ROW;
 enum LocalAction {
     Select(Selection),
     NewComponent,
+    BackDocument,
     Undo,
     Redo,
     DiscardWorkingCopy,
@@ -95,6 +96,7 @@ impl LocalAction {
                 | Self::ReviewDefinition(_)
                 | Self::ReviewProperty(..)
                 | Self::NewComponent
+                | Self::BackDocument
                 | Self::Undo
                 | Self::Redo
                 | Self::DiscardWorkingCopy
@@ -403,6 +405,13 @@ impl Designer {
             _ => None,
         }
     }
+    pub(super) fn component_name(&self) -> Option<&str> {
+        let definition = self.definition_scope()?;
+        self.objects
+            .iter()
+            .find(|object| object.selection == Selection::Definition(definition))
+            .map(|object| object.name.as_str())
+    }
     fn task_scope(&self, task: Task) -> HierarchyScope {
         if task == Task::Library || self.definition_scope().is_some() {
             HierarchyScope::Components
@@ -421,6 +430,7 @@ impl Designer {
                 oib_workspace::APPEARANCE_DARK => Some(LocalAction::Appearance(Appearance::Dark)),
                 oib_workspace::APPEARANCE_LIGHT => Some(LocalAction::Appearance(Appearance::Light)),
                 oib_workspace::NEW_COMPONENT => Some(LocalAction::NewComponent),
+                oib_workspace::BACK_DOCUMENT => Some(LocalAction::BackDocument),
                 oib_workspace::UNDO => Some(LocalAction::Undo),
                 oib_workspace::REDO => Some(LocalAction::Redo),
                 oib_workspace::DISCARD => Some(LocalAction::DiscardWorkingCopy),
@@ -2582,6 +2592,7 @@ impl Client {
             && !matches!(
                 action,
                 LocalAction::Workspace(_)
+                    | LocalAction::BackDocument
                     | LocalAction::Appearance(_)
                     | LocalAction::Mode(_)
                     | LocalAction::Select(_)
@@ -2706,6 +2717,31 @@ impl Client {
                 } else {
                     self.designer_stage_structure(operation)
                 }
+            }
+            LocalAction::BackDocument => {
+                if self.input_busy() || !self.designer_blur_workspace_field()? {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let id = m
+                    .design_doc()
+                    .oib_authoring_seed()?
+                    .designer
+                    .as_ref()
+                    .ok_or("Missing designer metadata")?
+                    .id;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                if d.definition_scope().is_none() || d.editor_focused() {
+                    return Ok(false);
+                }
+                let task = d.workspace_task;
+                d.select(Selection::Document(id));
+                d.workspace_task = task;
+                d.tree_scope = d.task_scope(task);
+                d.invalidate_bounds();
+                m.refresh()?;
+                m.invalidate();
+                Ok(true)
             }
             LocalAction::Workspace(task) => {
                 if self.input_busy() {
@@ -3223,3 +3259,7 @@ impl Mount {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "oib_scope_navigation_tests.rs"]
+mod scope_navigation_tests;
