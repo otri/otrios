@@ -29,6 +29,8 @@ pub(super) const APPLY: u32 = BASE + 44;
 pub(super) const MODAL_ACTION_START: u32 = BASE + 400;
 pub(super) const MODAL_ACTION_END: u32 = BASE + 420;
 pub(super) const MODAL_CONTENT: u32 = BASE + 505;
+pub(super) const MODAL_LINK_START: u32 = BASE + 10_000;
+pub(super) const MODAL_LINK_END: u32 = MODAL_LINK_START + 255;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct EditorChrome {
@@ -44,9 +46,16 @@ pub(super) struct EditorChrome {
 pub(super) struct Modal {
     pub(super) title: String,
     pub(super) lines: Vec<String>,
+    /// Navigable original lines. Wrapping never creates separate commands.
+    pub(super) links: Vec<ModalLink>,
     pub(super) actions: Vec<ModalAction>,
     /// None keeps a small decision fully visible; Some enables bounded scrolling.
     pub(super) scroll: Option<u16>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ModalLink {
+    pub(super) line: usize,
+    pub(super) id: u32,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ModalAction {
@@ -252,7 +261,7 @@ fn modal_overlay(
     root_height: f32,
     p: Palette,
 ) -> Result<SceneNode, String> {
-    if modal.scroll.is_some() {
+    if modal.scroll.is_some() || !modal.links.is_empty() {
         return scrolling_modal_overlay(modal, width, available_height, root_height, p);
     }
     let card_width = (width - 64.).clamp(288., 760.);
@@ -351,20 +360,81 @@ struct ScrollDialog {
     card_width: f32,
     content_width: f32,
     title: Vec<String>,
-    lines: Vec<String>,
+    rows: Vec<DialogRow>,
     buttons: Vec<(Rect, usize)>,
     body_top: f32,
     body_height: f32,
     content_height: f32,
     card_height: f32,
 }
+struct DialogRow {
+    y: f32,
+    height: f32,
+    lines: Vec<String>,
+    link: Option<u32>,
+    text_index: usize,
+    label: String,
+}
+fn dialog_rows(
+    modal: &Modal,
+    content_width: f32,
+    validate_ids: bool,
+) -> Result<(Vec<DialogRow>, f32), String> {
+    let columns = ((content_width / 12.).floor() as usize).clamp(1, 72);
+    let mut linked = std::collections::BTreeMap::new();
+    let mut link_ids = std::collections::BTreeSet::new();
+    for link in &modal.links {
+        if validate_ids && !(MODAL_LINK_START..=MODAL_LINK_END).contains(&link.id)
+            || link.line >= modal.lines.len()
+            || modal.lines[link.line].trim().is_empty()
+            || linked.insert(link.line, link.id).is_some()
+            || !link_ids.insert(link.id)
+        {
+            return Err("Invalid Designer dialog link".into());
+        }
+    }
+    let mut rows = vec![];
+    let mut content_height = 0.;
+    let mut text_index = 0;
+    for (index, line) in modal.lines.iter().enumerate() {
+        let link = linked.get(&index).copied();
+        let columns = if link.is_some() {
+            (((content_width - 24.) / 12.).floor() as usize).clamp(1, 72)
+        } else {
+            columns
+        };
+        let lines = wrapped_lines(std::slice::from_ref(line), columns);
+        let height = if link.is_some() {
+            (lines.len() as f32 * 24. + 16.).max(48.)
+        } else {
+            lines.len() as f32 * 24.
+        };
+        rows.push(DialogRow {
+            y: content_height,
+            height,
+            lines,
+            link,
+            text_index,
+            label: line.clone(),
+        });
+        content_height += height;
+        text_index += rows.last().unwrap().lines.len();
+    }
+    let content_height = content_height.max(48.);
+    Ok((rows, content_height))
+}
+/// Measure the complete list before deciding whether the existing 8192px body
+/// limit requires bounded paging. Rendering still validates every action ID.
+pub(super) fn modal_content_height(modal: &Modal, width: f32) -> Result<f32, String> {
+    let content_width = (width - 64.).clamp(288., 760.) - 48.;
+    Ok(dialog_rows(modal, content_width, false)?.1)
+}
 fn scroll_dialog(modal: &Modal, width: f32, available_height: f32) -> Result<ScrollDialog, String> {
     let card_width = (width - 64.).clamp(288., 760.);
     let content_width = card_width - 48.;
     let columns = ((content_width / 12.).floor() as usize).clamp(1, 72);
     let title = wrapped_lines(std::slice::from_ref(&modal.title), columns);
-    let lines = wrapped_lines(&modal.lines, columns);
-    let content_height = (lines.len().max(2) as f32) * 24.;
+    let (rows, content_height) = dialog_rows(modal, content_width, true)?;
     if title.len() > 4 || content_height > 8192. || modal.actions.len() > 21 {
         return Err("Designer review content exceeds its bounded viewport".into());
     }
@@ -398,7 +468,7 @@ fn scroll_dialog(modal: &Modal, width: f32, available_height: f32) -> Result<Scr
         card_width,
         content_width,
         title,
-        lines,
+        rows,
         buttons,
         body_top,
         body_height,
@@ -422,7 +492,7 @@ fn scrolling_modal_overlay(
         card_width,
         content_width,
         title,
-        lines,
+        rows,
         buttons,
         body_top,
         body_height,
@@ -462,16 +532,66 @@ fn scrolling_modal_overlay(
     );
     content_backdrop.responder = Some(TouchResponder::Consume);
     let mut body = vec![content_backdrop];
-    for (index, line) in lines.iter().enumerate() {
-        let line_y = index as f32 * 24. - offset;
-        if line_y + 24. >= 0. && line_y <= body_height {
-            body.push(label(
-                BASE + 600 + index as u32,
-                Rect::new(0., line_y, content_width, 24.),
-                line,
-                2,
-                p.muted,
-            ));
+    for row in &rows {
+        let y = row.y - offset;
+        if y + row.height <= 0. || y >= body_height {
+            continue;
+        }
+        if let Some(id) = row.link {
+            let mut children = vec![
+                rect(
+                    id + 1000,
+                    Rect::new(0., 0., content_width, row.height),
+                    p.line,
+                    5.,
+                ),
+                rect(
+                    id + 2000,
+                    Rect::new(1., 1., content_width - 2., row.height - 2.),
+                    p.surface,
+                    4.,
+                ),
+            ];
+            for (index, line) in row.lines.iter().enumerate() {
+                let line_y = y + 8. + index as f32 * 24.;
+                if line_y + 24. <= 0. || line_y >= body_height {
+                    continue;
+                }
+                children.push(label(
+                    BASE + 14_000 + (row.text_index + index) as u32,
+                    Rect::new(12., 8. + index as f32 * 24., content_width - 24., 24.),
+                    line,
+                    2,
+                    p.text,
+                ));
+            }
+            let mut node = canvas(id, Rect::new(0., y, content_width, row.height), children);
+            node.responder = Some(TouchResponder::Activate(Action::KeyboardKey(u16::MAX)));
+            let mut semantic_label = row.label.clone();
+            if semantic_label.len() > 96 {
+                while semantic_label.len() > 93 {
+                    semantic_label.pop();
+                }
+                semantic_label.push_str("...");
+            }
+            node.semantics = Some(SwitchSemantics {
+                label: semantic_label,
+                checked: false,
+            });
+            body.push(node);
+        } else {
+            for (index, line) in row.lines.iter().enumerate() {
+                let line_y = y + index as f32 * 24.;
+                if line_y + 24. >= 0. && line_y <= body_height {
+                    body.push(label(
+                        BASE + 600 + (row.text_index + index) as u32,
+                        Rect::new(0., line_y, content_width, 24.),
+                        line,
+                        2,
+                        p.muted,
+                    ));
+                }
+            }
         }
     }
     let mut viewport = canvas(
@@ -1119,6 +1239,7 @@ mod tests {
             let editor = EditorChrome {
                 modal: Some(Modal {
                     scroll: None,
+                    links: vec![],
                     title: "Discard changes?".into(),
                     lines: vec!["Your component has unapplied changes.".into()],
                     actions: vec![
@@ -1193,6 +1314,7 @@ mod tests {
         };
         let mut modal = Modal {
             scroll: None,
+            links: vec![],
             title: "Review changes".into(),
             lines: vec![],
             actions: vec![action.clone(), action.clone()],

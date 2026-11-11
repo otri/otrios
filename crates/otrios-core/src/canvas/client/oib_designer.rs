@@ -46,6 +46,7 @@ enum LocalAction {
     Placement(Selection),
     EditComponent(Selection),
     DeleteComponent(u64),
+    ReviewDefinition(otrios_interfaces::oib::designer::DefinitionId),
     Structure(otrios_interfaces::oib::InstanceOperation),
     FocusField(u32),
     Apply(PropertyAddress),
@@ -81,6 +82,7 @@ impl LocalAction {
                 | Self::EditComponent(_)
                 | Self::Placement(_)
                 | Self::DeleteComponent(_)
+                | Self::ReviewDefinition(_)
                 | Self::NewComponent
                 | Self::Undo
                 | Self::Redo
@@ -557,6 +559,11 @@ impl Designer {
                     self.mode,
                     AuthoringTools {
                         operations: &self.structure_tools,
+                        delete_definition: match self.selection {
+                            Selection::Definition(id)
+                            | Selection::DefinitionNode { definition: id, .. } => Some(id),
+                            _ => None,
+                        },
                         open: self.palette_open,
                         placement: self
                             .management
@@ -1123,6 +1130,7 @@ fn hierarchy(
 }
 struct AuthoringTools<'a> {
     operations: &'a [(String, otrios_interfaces::oib::InstanceOperation)],
+    delete_definition: Option<otrios_interfaces::oib::designer::DefinitionId>,
     open: bool,
     placement: Option<(&'a Selection, bool)>,
 }
@@ -1137,6 +1145,7 @@ fn focus_hierarchy(
 ) -> Result<(Vec<SceneNode>, f32)> {
     let AuthoringTools {
         operations: structure,
+        delete_definition,
         open: palette_open,
         placement,
     } = tools;
@@ -1166,6 +1175,16 @@ fn focus_hierarchy(
         nodes.push(palette);
         y += 56.;
         for (label, operation) in structure {
+            if operation.operations.iter().any(|edit| {
+                matches!(
+                    edit,
+                    otrios_interfaces::oib::authoring::DocumentEdit::Definition(
+                        otrios_interfaces::oib::authoring::DefinitionEdit::DeleteDefinition { .. }
+                    )
+                )
+            }) {
+                continue;
+            }
             let insert = operation.operations.iter().any(|edit| {
                 matches!(
                     edit,
@@ -1186,6 +1205,18 @@ fn focus_hierarchy(
             )?);
             y += 56.;
         }
+    }
+    if mode == DesignerMode::Edit
+        && let Some(definition) = delete_definition
+    {
+        nodes.push(b.focus_button(
+            0.,
+            y,
+            288.,
+            "Delete component...",
+            LocalAction::ReviewDefinition(definition),
+        )?);
+        y += 56.;
     }
     if let Some((selection, open)) = placement {
         nodes.push(b.focus_button(
@@ -2564,7 +2595,21 @@ impl Client {
                 m.refresh_designer()?;
                 Ok(true)
             }
-            LocalAction::Structure(operation) => self.designer_stage_structure(operation),
+            LocalAction::ReviewDefinition(definition) => self.designer_review_delete(definition),
+            LocalAction::Structure(operation) => {
+                if let Some(definition) = operation.operations.iter().find_map(|edit| match edit {
+                    otrios_interfaces::oib::authoring::DocumentEdit::Definition(
+                        otrios_interfaces::oib::authoring::DefinitionEdit::DeleteDefinition {
+                            definition,
+                        },
+                    ) => Some(*definition),
+                    _ => None,
+                }) {
+                    self.designer_review_delete(definition)
+                } else {
+                    self.designer_stage_structure(operation)
+                }
+            }
             LocalAction::Workspace(task) => {
                 if self.input_busy() {
                     return Ok(false);

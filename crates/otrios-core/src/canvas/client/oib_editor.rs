@@ -123,7 +123,10 @@ impl Mount {
                 && !fields_invalid
                 && self.doc.confirmed()
                 && working.is_some_and(|w| w.error.is_none() && (w.dirty() || fields_dirty)),
-            modal: self.leave_modal().or_else(|| self.history_review_modal()),
+            modal: self
+                .leave_modal()
+                .or_else(|| self.delete_modal())
+                .or_else(|| self.history_review_modal()),
         }
     }
     pub(super) fn selected_definition(&self) -> Option<DefinitionId> {

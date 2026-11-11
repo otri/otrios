@@ -6,14 +6,7 @@ use oib_applied_history::Direction;
 use oib_workspace::{MODAL_ACTION_START, MODAL_CONTENT, Modal, ModalAction};
 const CLOSE: u32 = MODAL_ACTION_START + 3;
 const INSPECT: u32 = MODAL_ACTION_START + 4;
-pub(super) struct Pointer {
-    id: u32,
-    action: Option<u32>,
-    start: [f32; 2],
-    scroll: u16,
-    content: bool,
-    moved: bool,
-}
+pub(super) type Pointer = super::oib_dialog::Pointer;
 fn summary(value: &str) -> String {
     let count = value.chars().count();
     if count <= 160 {
@@ -28,6 +21,7 @@ fn summary(value: &str) -> String {
 impl Mount {
     pub(super) fn local_modal_open(&self) -> bool {
         self.leave.is_some()
+            || self.delete_review.is_some()
             || self
                 .working_copy
                 .as_ref()
@@ -56,6 +50,7 @@ impl Mount {
             lines.push(String::new());
         }
         Some(Modal {
+            links: vec![],
             title: match review.direction {
                 Direction::Undo => "Undo needs review",
                 Direction::Redo => "Redo needs review",
@@ -89,6 +84,7 @@ impl Mount {
         self.keyboard.cancel();
         self.keyboard.hide();
         self.keyboard_pointer = None;
+        self.order_drag = None;
         self.review_pointer = None;
         self.invalidate();
     }
@@ -128,77 +124,33 @@ impl Client {
                 .is_none_or(|w| w.history_review().is_none())
         }) {
             return Ok(None);
-        };
+        }
         let scene = self.scene()?;
-        let hit = scene.hit_path(event.position);
-        let action = hit
-            .iter()
-            .find_map(|n| [CLOSE, INSPECT].contains(&n.node.id).then_some(n.node.id));
-        let content = hit.iter().any(|n| n.node.id == MODAL_CONTENT);
         let modal = self
             .active
             .as_ref()
             .unwrap()
             .history_review_modal()
             .unwrap();
-        let limit = f32::from(oib_workspace::modal_scroll_limit(
-            &modal,
-            scene.root().frame.width,
-            scene.root().frame.height,
-        )?);
         let m = self.active.as_mut().unwrap();
-        match event.phase {
-            PointerPhase::Down => {
-                if m.review_pointer.is_none() {
-                    let scroll = m
-                        .working_copy
-                        .as_ref()
-                        .unwrap()
-                        .history_review()
-                        .unwrap()
-                        .scroll;
-                    m.review_pointer = Some(Pointer {
-                        id: event.id,
-                        action,
-                        start: event.position,
-                        scroll,
-                        content,
-                        moved: false,
-                    });
-                }
-            }
-            PointerPhase::Move => {
-                if let Some(pointer) = &mut m.review_pointer
-                    && pointer.id == event.id
-                {
-                    let delta = event.position[1] - pointer.start[1];
-                    pointer.moved |=
-                        (event.position[0] - pointer.start[0]).abs() > 8. || delta.abs() > 8.;
-                    if pointer.content && pointer.moved {
-                        let scroll =
-                            (f32::from(pointer.scroll) - delta).round().clamp(0., limit) as u16;
-                        m.working_copy
-                            .as_mut()
-                            .unwrap()
-                            .history_review_mut()
-                            .unwrap()
-                            .scroll = scroll;
-                        m.invalidate_presentation();
-                    }
-                }
-            }
-            PointerPhase::Up | PointerPhase::Cancel => {
-                if m.review_pointer.as_ref().is_some_and(|p| p.id == event.id) {
-                    let pointer = m.review_pointer.take().unwrap();
-                    if event.phase == PointerPhase::Up
-                        && !pointer.moved
-                        && pointer.action == action
-                        && let Some(id) = action
-                    {
-                        self.history_review_activate(id)?;
-                    }
-                }
-            }
+        let review = m
+            .working_copy
+            .as_mut()
+            .unwrap()
+            .history_review_mut()
+            .unwrap();
+        let update = oib_dialog::update(
+            &mut m.review_pointer,
+            event,
+            &scene,
+            &modal,
+            &mut review.scroll,
+        )?;
+        if update.changed {
+            m.invalidate_presentation();
+        }
+        if let Some(id) = update.action {
+            self.history_review_activate(id)?;
         }
         Ok(Some(true))
     }

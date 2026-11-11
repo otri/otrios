@@ -218,6 +218,11 @@ impl Client {
             return Ok(false);
         }
         if !self.host_active
+            && let Some(changed) = self.delete_review_scroll(position, delta)?
+        {
+            return Ok(changed);
+        }
+        if !self.host_active
             && let Some(changed) = self.history_review_scroll(position, delta)?
         {
             return Ok(changed);

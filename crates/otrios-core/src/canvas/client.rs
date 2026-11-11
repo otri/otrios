@@ -8,7 +8,9 @@ mod host_moves;
 mod host_panel;
 mod host_transfers;
 mod oib_applied_history;
+mod oib_delete;
 mod oib_designer;
+mod oib_dialog;
 mod oib_editor;
 mod oib_history_review;
 mod oib_leave;
@@ -97,6 +99,7 @@ struct Mount {
     working_presented: Option<u64>,
     leave: Option<oib_leave::Pending>,
     review_pointer: Option<oib_history_review::Pointer>,
+    delete_review: Option<oib_delete::Pending>,
     behavior: Option<Behavior>,
     component_runtime: Arc<super::component_behavior::Runtime>,
     components: super::oib::component_behaviors::Instances,
@@ -1875,6 +1878,7 @@ impl Client {
                     .as_ref()
                     .is_some_and(oib_designer::Designer::busy)
                     || m.review_pointer.is_some()
+                    || m.delete_pointer_active()
                     || m.input.active()
                     || m.keyboard_pointer.is_some()
                     || m.order_drag.is_some()
@@ -3997,6 +4001,13 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if let Some(m) = &mut self.active
+            && m.delete_review.is_some()
+        {
+            m.delete_review = None;
+            m.invalidate();
+            return Ok(true);
+        }
         if self.active.as_ref().is_some_and(|m| {
             m.leave.is_none()
                 && m.working_copy
@@ -4738,6 +4749,7 @@ impl Mount {
             .as_ref()
             .is_some_and(oib_designer::Designer::busy)
             || self.review_pointer.is_some()
+            || self.delete_pointer_active()
             || self.input.active()
             || (self.designer.is_some()
                 && (self.keyboard_pointer.is_some()
@@ -5277,6 +5289,7 @@ fn qualify(
         working_presented: None,
         leave: None,
         review_pointer: None,
+        delete_review: None,
         behavior,
         component_runtime,
         components: Default::default(),

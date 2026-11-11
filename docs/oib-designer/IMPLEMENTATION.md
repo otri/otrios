@@ -667,3 +667,74 @@ and `git diff --check` passed. The earlier 32-test history run predates these tw
 corrections; it is not represented as a final rerun. Retry the completed corrected
 commit through the existing publisher when the Frame is reachable, then perform
 native creation Apply/Undo/Redo and attached browser checks. Full B5–B7 remain open.
+
+## B5 deletion feedback — local implementation, pending publication
+
+The next batch adds a persistent Library Delete component command for definition
+selection, including in-use and imported definitions. It opens a scoped dependency
+review with named groups and navigable uses. Known direct/transitive references,
+instances, presets, API/slot/app-property connections, exact imported exports and
+fixed ownership are reported. Missing/malformed/stale source marks the scan
+incomplete and blocks deletion. Imported bodies remain read-only; this is not a
+global consumer inventory or a signed-export removal operation.
+
+Unused definitions require explicit confirmation, which recomputes the report
+and the complete private admission before staging definition plus palette-preset
+removal. Global Apply publishes; fresh-ID history can undo an accepted deletion.
+Deleting a component with unapplied literal values prunes only that definition's
+pending causal writes, preserving unrelated edits and the full local Undo command.
+This closes the reproduced New → color edit → Delete failure rather than asking
+authors to discard the entire working copy.
+
+The review retains captured rows and pointer ownership during incoming edits,
+marks stale source, blocks its actions and requires Check again. A dirty editor
+on older structural source remains blocked after rescan and retains its edits.
+Background
+semantic/pointer/text/app routes remain gated. Both review types now share one
+dialog drag/cancel/release implementation. Dependency buttons support wrapping,
+visible clipped hits and offscreen culling. Fitting lists scroll; only display
+projections exceeding the existing 8192-coordinate bound at minimum
+viewport use bounded pages with no dropped rows. Semantic labels stay within
+96 bytes, while visible wrapped text remains complete.
+
+Focused local evidence:
+
+- Dependency query: six passed (direct/transitive/named uses, unused palette
+  removals, fixed shell, stale/incomplete source, exact imported owner/closure and
+  app-property navigation).
+- Deletion UI: five passed, including actual pointer confirmation/navigation,
+  no writes before Apply, published Undo, in-use disabled confirmation, stale
+  held-pointer capture, clean/dirty rescan behavior, private-value pruning/local Undo and unrelated-edit
+  preservation. Actual shared scenes at 800×480, 1280×800 and 1920×1080 stayed
+  within 512 nodes/128 controls and retained the authored layout Arc while panning.
+- Shared dialog: three passed for wrapped/clipped navigation, culling,
+  drag/cancel/foreign release/disabled actions and the unchanged content gate.
+  The 300-row paging fixture duplicates only the display projection; it does not
+  claim 300 admitted instances. Every index is preserved and fitting reports
+  return to a single scrolling page.
+- Existing history review: four passed after migrating to shared capture;
+  workspace: six passed; leave confirmation: three passed.
+- `test -p otrios-core --features canvas --lib canvas::client::oib_designer::tests
+  --locked --offline`: 59 passed, one existing ignored diagnostic. This precedes
+  the final private-value pruning change; its new deletion tests passed afterward.
+  Final strict core library Clippy (`--features canvas --lib --locked --offline
+  -- -D warnings`) and `git diff --check` passed after the final changes. No full
+  repository preflight or Linux process acceptance is claimed by these local UI tests.
+
+Three pinned Frame SSH probes during this work timed out. No new publication was
+started and no live acceptance is claimed for this batch. The previous publisher
+is already terminal; the automatic builder remains on the last successful code
+pin recorded above. Recheck reachability, publish the completed commit once, then
+qualify native creation/deletion/history and attached browser dependency review.
+
+Remaining B5 gates include removed occurrence/owned-slot restoration, typed API
+and slots, retirement/unretirement and explicit replacement mappings. Full B6
+styles/modes and B7 catalog qualification remain open. Node removal dependencies
+still need the same source-aware journey; this component-level review does not
+claim that broader UI. Existing admission and limits are preserved; no wire
+version, capability, service or dependency was added.
+
+Restart paths: `canvas/oib/impact.rs`, `impact_tests.rs`,
+`client/oib_delete.rs`, `oib_delete_tests.rs`, `oib_dialog.rs`,
+`oib_dialog_tests.rs`, `oib_workspace.rs`; the Library affordance is in
+`client/oib_designer.rs` and scoped pending-value pruning in `oib_working_copy.rs`.

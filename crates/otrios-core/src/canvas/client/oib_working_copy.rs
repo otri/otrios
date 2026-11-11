@@ -322,6 +322,17 @@ impl WorkingCopy {
         }
         let mut next = self.apply.clone();
         for op in batch.operations {
+            if let DocumentEdit::Definition(DefinitionEdit::DeleteDefinition { definition }) = &op {
+                // Confirmed component deletion also discards its unapplied
+                // literal overrides. Keep unrelated edits, and retain the
+                // complete prior command in local Undo through set().
+                next.changes.retain(|change| {
+                    !matches!(
+                        &change.address,
+                        PropertyAddress::Definition { definition: owner, .. } if owner == definition
+                    )
+                });
+            }
             if let Some(i) = next
                 .operations
                 .iter()

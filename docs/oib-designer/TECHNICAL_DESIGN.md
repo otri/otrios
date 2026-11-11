@@ -691,3 +691,45 @@ into several publications is not permitted. Removed owned occurrence closures,
 app-bound reconstruction and dependent repair remain separate explicit gates
 until complete source/property capture and safe fresh mapping are implemented.
 See IMPLEMENTATION.md for actual implementation and acceptance status.
+
+## T17. Component deletion impact and confirmation
+
+Library exposes Delete component for a selected definition even when deletion is
+blocked. The command opens a local review, not an executable deletion disguised
+as an unavailable toolbar choice. Query the captured canonical candidate and its
+exact admitted import closure, grouping named direct/transitive component uses,
+instances, presets, API/slot/property connections, exports and fixed ownership.
+Each known navigable use opens its semantic selection. State the document-scoped
+scan boundary; incomplete, missing or cyclic source never proves zero uses.
+
+Palette presets belonging directly to the definition are listed as removals in
+the same candidate. Required presets, live/transitive uses, fixed shell ownership
+and imported ownership block deletion. Local deletion does not remove a signed
+library export. Retirement, replacement mapping and publication remain separate
+capabilities; this report does not simulate them.
+
+Keep component cancels the review. Confirm recomputes impact and final admission
+against the exact current source, then stages one private definition/preset batch.
+Global Apply remains the publication boundary. Deletion drops unapplied causal
+values owned by that definition while preserving other working-copy edits; local
+Undo retains the complete pre-delete command, including those values. Accepted
+deletion uses T16 conditional fresh-ID restoration for published Undo.
+
+An incoming source revision makes a captured review stale. Keep its rows, action
+geometry and held pointer stable; disable confirmation/navigation and require an
+explicit Check again. Do not automatically retarget the action under a held
+pointer. A dirty working copy on older structural source remains blocked after
+rescan, retaining its edits until the author resolves or discards them. All modal
+paths gate background pointer, semantic, text and app input.
+The shared dialog capture handles matching release, cancellation, drag scrolling
+and foreign pointer IDs for both history and deletion reviews.
+
+Dependency rows wrap into clickable blocks of at least 48 logical pixels. The
+visible clipped part remains clickable and offscreen rows are culled. Scrolling
+changes the local presentation overlay and retains the authored layout cache.
+Reports scroll as one list when they fit the existing 8192-pixel content bound
+at the supported minimum 800-pixel viewport. Only reports exceeding that bound
+use bounded pages, preserving every reported row with bounded navigation IDs. Existing combined
+512-node/128-control scene ceilings and the 96-byte semantic label ceiling remain;
+long visible labels retain their full text, with an explicitly abbreviated
+semantic label. No limit increase or new wire contract is implied.

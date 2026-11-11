@@ -3122,7 +3122,7 @@ fn responsive_workspace_chrome_has_no_retired_profile_or_divider_controls() {
     }
 }
 
-fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
+pub(in crate::canvas::client) fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
     if label == "New component" {
         let id = super::super::oib_workspace::NEW_COMPONENT;
         assert!(client.activate(client.epoch(), id).unwrap());
