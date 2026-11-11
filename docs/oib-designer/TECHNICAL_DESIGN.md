@@ -423,19 +423,24 @@ or desktop window” notice rather than compress the inspector into unusable for
 Proposed support floor is 1024×640 landscape, to be qualified; 1280×800 is the
 required Frame acceptance viewport, not an assumed minimum scene resource limit.
 
-Desktop uses persistent Library/Layers on the left, canvas in the center,
-Properties on the right, and a compact status/Apply region. Frame uses canvas plus
-one task panel at a time: Library/Layers or Properties. Both panels can be shown
-only if canvas remains useful. Panel switches retain selection, expansion,
-scroll and typed drafts. No offscreen panel should materialize its entire scene.
+Use one responsive canvas/task-dock composition on all hosts. There is no saved
+Frame/Desktop profile or device-based layout branch. A single local active-task
+value selects Library, Layers or Inspect in the dock; underlined tabs convey this
+navigation. Edit/Test is a separately labeled segmented mode group and appearance
+is a labeled dropdown. Neither shares navigation state or emits document edits.
 
-Preferred widths: desktop left 240, right 320, canvas remainder; Frame task panel
-320–360, canvas remainder. Toolbar ~56 and footer ~40 leave the working height.
-These are design targets, not admission overrides. A 48-unit touch target applies
-to Frame actions, including disclosure and close controls. Compact desktop targets
-need separate input-profile qualification. The software keyboard must avoid the
-active field; shrinking canvas is allowed, shrinking the text is not. Scroll the
-inspector to the focused field and restore its anchor when the keyboard closes.
+Available viewport width controls the canvas/dock allocation; available height,
+chrome and software-keyboard reservation determine scrollable work height.
+Resize must retain semantic selection, field drafts, per-task scroll anchors,
+Test sample state, mode and focus when still valid. Measured preview sizes refresh
+without recompiling source merely because editor chrome changed. Production must
+separate editor viewport sizing from the chosen finite preview-parent fixture.
+
+The prototype dock is 280–360px and its work height adapts to the viewport minus
+measured chrome, bounded to 240–720px for inline rendering. These are study dimensions, not permission to alter current scene caps
+or the production 48-unit touch target. Test smaller/wider sizes with the same DOM
+and source to catch accidental state resets. Unsupported phone portrait shows a
+notice while retaining local work; it is not a compressed authoring profile.
 
 Selection overlays are local chrome and input pass-through. Canvas zoom/pan is
 local, preserving authored logical sizes. Fit to component is available; numeric

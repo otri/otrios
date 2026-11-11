@@ -15,7 +15,8 @@ React, CSS or Code Connect as its runtime.
 
 For **editor chrome**, Figma's [UI3 retrospective](https://www.figma.com/blog/our-approach-to-designing-ui3/)
 describes the tradeoffs around panel attachment, canvas room and labeling. It
-supports our choice of docked/resizable desktop panels and deliberate Frame Focus.
+supports our choice of a docked task panel in one responsive workspace. OIB no
+longer offers separate Frame/Desktop profiles.
 The [UI3 kit link](https://www.figma.com/community/file/1486123838948777078/ui3-figmas-ui-kit)
 was found as a reference, but its actual Community contents/publisher metadata
 were not inspected. Do not claim we audited or imported that kit.
@@ -66,7 +67,7 @@ families in T12/C03; HTML CSS cannot establish engine equivalence.
 | Variable mode | Inherited Light/Dark context | RFC 0037 core | Nested override, local host preference |
 | Design library update | Signed exact revision/adoption | Existing foundation extended | Compatibility, failed admission, rollback |
 | Multiplayer changes | Authorized generation/CRDT model | OIB-specific semantics | Stale Apply/receipt/reconnect; no silent rebase |
-| Editor panels | Desktop docked panels; Frame task panel | OIB adaptation | Target viewports, keyboard, retained scroll |
+| Editor panels | One responsive canvas/task dock | OIB adaptation | Target viewports, keyboard, retained scroll |
 
 No `.fig` import/export, round-trip compatibility, plugin API compatibility or
 full feature parity is promised. A later importer needs its own explicit supported

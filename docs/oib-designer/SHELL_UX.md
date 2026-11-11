@@ -22,33 +22,50 @@ Apply. Destructive definition actions live in its labeled lifecycle menu. A foot
 contains the latest result, conflicts/errors and a way to reopen details. Notices
 remain until superseded or acknowledged; never rely on a fleeting toast for failure.
 
-## S02. Two workspace profiles
+## S02. One responsive workspace
 
-| Region | Desktop Studio | Frame Focus |
+There is no Frame/Desktop selector or saved device profile. The same canvas and
+right-hand task dock adapt to available viewport width. Library, Layers and Inspect
+select the contents of that dock; switching tasks does not move the canvas or
+change interaction mode. Keep the current task, selection, drafts, sample values
+and each panel's scroll anchor when resizing. Native Frame and browser use this
+same information architecture, with their input adapters and available space.
+
+| Control family | Treatment | Meaning |
 | --- | --- | --- |
-| Header | One compact command row, full breadcrumb | Short breadcrumb, Edit/Test, visible Apply status |
-| Navigation | Docked resizable 240-unit Library/Layers tab panel | One docked task panel, switched with Library/Layers/Properties |
-| Canvas | Central, largest remaining area | Canvas remains visible beside active task panel |
-| Properties | Docked resizable 320-unit inspector | Active task panel, target width 320–360 |
-| Footer | Confirmed/draft, diagnostics, zoom | Stable Apply/Discard action area and result |
-| Keyboard | Hardware entry, shortcuts, contextual fields | Software keyboard reserves space and scrolls active field into view |
+| Library / Layers / Inspect | Underlined tabs, selected indicator and tab semantics | Navigate the task dock |
+| Edit / Test | One bordered segmented group with a filled selection | Change how canvas input behaves |
+| Preview appearance | Labeled dropdown, Light/Dark | Change local preview context |
+| New / Undo / Redo / Discard / Publish | Command buttons in the action bar | Perform an operation |
+| Apply | Primary command when a valid draft can be applied | Confirm shared source edits |
+| Revision/result | Muted status text, outside option groups | Report state; never a clickable choice |
 
-Logical 1280×800 is the required Frame design target. Desktop reference is
-1920×1080. At narrower landscape sizes, use Focus automatically; retain explicit
-local profile selection. Proposed 1024×640 support needs real scene and keyboard
-qualification. Do not claim phone portrait support. An unsupported viewport shows
-a readable notice and draft/connection status; it must not discard an open draft.
+Group labels Workspace, Interaction and Preview appearance make the distinction
+explicit. Tabs use Left/Right/Home/End plus normal keyboard focus. Edit/Test uses
+pressed state within its own labeled group, not tab styling. Navigation never
+silently switches Edit/Test, and appearance never writes an app theme preference.
 
-Panel resize, zoom, scope breadcrumb, disclosure, search and scroll are local
-preferences. They never emit document edits. Restore by stable row/selection anchor,
-not raw index. Keep panel minima; collapse one panel if the canvas becomes too
-small instead of compressing typography. Use docked panels, not stacks of floating
-inspectors. No essential action depends on hover, right-click or drag precision.
+At wide sizes, grow the canvas and task dock up to its readable width; at smaller
+landscape sizes, retain a useful canvas and scrollable dock instead of shrinking
+labels. The prototype dock ranges from 280 to 360px; production panel widths and
+48-unit targets still need real Frame/scene-budget qualification. Toolbar groups
+wrap as units and status can occupy another line. No essential action depends on
+hover, right-click or precision dragging. Device identity is never a layout input.
 
-The prototype uses smaller panels and a 700px visual demonstration cutoff so it can
-be viewed inline; those are prototype dimensions, not production support targets.
-It has two header rows and scrolls panes within a bounded 580px workspace. Native
-Frame keyboard/scene-budget behavior remains unqualified by that HTML layout.
+1280×800 is the required Frame target; 1920×1080 is the larger desktop design
+reference. Smaller landscape acceptance remains proposed. Below the supported
+authoring envelope, show an honest notice and preserve work; phone portrait is
+unsupported. In production, available height determines the workspace after chrome
+and keyboard reservation; panels scroll internally and preserve their anchors.
+The standalone conversation prototype computes available work height from the
+viewport minus measured chrome, bounded to 240–720px for inline rendering. It
+uses integer rounding and observes chrome/viewport changes to avoid height loops;
+the upper bound is a study limit, not a device mode.
+
+Preview parent dimensions are a separate fixture context. Changing editor width
+can reflow the dock/chrome, but it must not silently rewrite authored Fixed W/H,
+app values, component IDs or a chosen preview fixture size. The software keyboard
+keeps the active field and validation visible, then restores its scroll anchor.
 
 ## S03. Library and blank states
 

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prototype validation and implementation progress
 
-Date: 2026-11-11. Latest results: **V05 completeness audit** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Date: 2026-11-11. Latest results: **V06 responsive workspace** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
 Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
 acceptance is unchanged. This task made no live deployment or state changes.
 
@@ -139,3 +139,32 @@ Actual browser output and current model results are in
 [evidence/completeness-model-tests.txt](evidence/completeness-model-tests.txt).
 No broader production or native qualification was performed. Earlier evidence
 files intentionally retain their earlier counts and narrower tested source.
+
+## V06. Responsive workspace and distinct control roles
+
+The Frame/Desktop selector and device-based layout branch are removed. A single
+canvas/task-dock layout adapts to viewport width and available height. Library,
+Layers and Inspect are underlined semantic tabs; Edit/Test is a labeled segmented
+interaction control; Preview appearance is a labeled dropdown. Revision status
+and command buttons remain separate from these choices. See S02 and J22.
+
+The prototype retains each task panel's scroll position and observes preview
+geometry changes so measured W/H stays current after resizing. Work height is
+computed from viewport minus measured chrome, bounded to 240–720px for the inline
+study. Production height fills the available app area under its own host contract.
+No device profile preference is stored.
+
+Repeated model suite: **30 passed**. Browser injection at **728×800, 1280×800 and
+1600×800**: **30 scenarios / 205 assertions per run**, zero failures and no
+horizontal overflow. Output height was 800px at each width. Added checks cover
+selected tab/panel agreement, arrow-key tab navigation, independent interaction
+mode, absence of the profile selector, scroll restoration, width changes on the
+same DOM without source/selection resets, and controlled available-height changes.
+The latter invokes the sizing helper with synthetic 600/900px heights; it is not
+a native window-manager resize or keyboard acceptance test.
+
+Evidence: [responsive-workspace.json](evidence/responsive-workspace.json). Build,
+JS syntax, local document links, generated-HTML reproducibility and whitespace
+checks passed. Native deployment, shared-runtime layout and production keyboard/
+accessibility qualification remain unperformed. Earlier evidence retains the
+profile-based source and counts it actually tested; V06 supersedes that UX choice.

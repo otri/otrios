@@ -47,27 +47,19 @@ remain available on touch. Lists scroll rather than becoming Previous/Next pages
 
 ## 2. Workspace and navigation contract
 
-**Desktop Studio:** persistent Library/Layers on the left, canvas centrally and
-Properties on the right. Library and Layers are named tabs in one navigation
-region, avoiding a permanently crowded fourth column. Properties has clear
-Layout, Appearance, Data and API sections, with only applicable fields shown.
-The top bar contains document/component name, Definition/Instance scope, Edit/Test,
-Apply and a status affordance. Publishing lives in a separate Library action.
+**One responsive workspace:** a canvas and a right-hand task dock share the same
+information architecture at every supported width. There is no Frame/Desktop
+profile selector. Library/Layers/Inspect are underlined navigation tabs selecting
+the dock content. Edit/Test is a separate segmented interaction-mode control;
+Preview appearance is a labeled local-context dropdown. Commands and revision
+status remain separate from these choice groups.
 
-**Frame Focus:** target logical landscape 1280×800; the physical display is
-reported as 800×1280 in historic evidence and uses an accepted rotation. This is
-a proposed logical design target, not a fresh measurement of native coordinates.
-Show a large canvas with one docked inspector at a time; Layers, Insert and
-Properties open as labeled dock views, keeping the current selection and scroll
-position. Important actions sit in a stable lower action strip. An on-screen
-keyboard temporarily replaces part of the dock rather than compressing every
-panel. Bring the edited field and its validation message above the keyboard.
-
-At smaller landscape desktop widths use Frame Focus automatically with an explicit
-local profile override. Phone portrait is unsupported: show a clear size/orientation
-message, existing work status and read-only exit/retry choices. Do not shrink
-controls into an unusable miniature editor. Desktop window resizing must not
-change authored component dimensions, selection, draft or preview fixture state.
+Target logical Frame landscape is 1280×800, with larger desktop layouts as another
+qualification target. Width changes grow/shrink the dock and canvas automatically,
+with toolbar groups wrapping as needed. Preserve active task, selection, field
+drafts, sample values and scroll anchors. Phone portrait remains unsupported;
+show a readable notice without discarding work. Software keyboard reservation
+scrolls the active field into view without compressing all panels or shrinking text.
 
 Canvas background and document/component background are visually distinct.
 Selection outlines and alignment guides pass input through. Edit mode selects;
@@ -120,7 +112,7 @@ library, a library with no definitions, or a connection still loading.
 2. Resolve the selected library revision and document permission. An empty library
    shows “No components yet”, Create component and Import/library selection where
    supported. Do not display fake demo controls as authored content.
-3. Restore the last still-valid component selection and workspace profile locally.
+3. Restore the last still-valid component selection and active task locally.
    If the component was removed, select the library, explain that it is unavailable
    and offer the component list; do not redirect an old ID to a new object.
 4. A read-only source shows View source and Fork to editable library, with editing
@@ -797,15 +789,16 @@ Contrast warnings cannot be fixed automatically by changing user color choices.
 Button/Toggle/Field/Segment/Dialog fixtures have keyboard and touch coverage.
 Clipped visible controls remain clickable; blank modal gutters do not hit the app.
 
-## J22. Change editor profile and preview dimensions
+## J22. Resize the workspace and change preview dimensions
 
 **Entry/preconditions.** A landscape Frame or desktop browser is editing a component.
 The user may be halfway through a draft, color drag, hierarchy scroll or text entry.
 
 **Steps and feedback.**
 
-1. Desktop uses persistent panels; Frame Focus uses one docked editing view and a
-   large canvas. An explicit local profile control lets the author choose when valid.
+1. The same canvas/task dock adapts automatically to viewport width and available
+   height. No device/profile selector is offered. Preserve the active task and
+   interaction mode; tabs and Edit/Test remain visibly distinct.
 2. Resizing panels/window updates editor layout only. Preview parent width/height
    is a separate labeled specimen control; authored Fixed dimensions stay authored.
 3. Changing the specimen width demonstrates layout and wrapping. Fit to selection
@@ -815,7 +808,7 @@ The user may be halfway through a draft, color drag, hierarchy scroll or text en
 5. On unsupported portrait phone dimensions show an honest unsupported editor
    state; preserve the document and local work status instead of squeezing panels.
 
-**Saved effects versus preview.** Panel sizes, profile, zoom, pan and specimen size
+**Saved effects versus preview.** Panel sizes, active task, zoom, pan and specimen size
 are local preferences/test context. No shared document revision is created.
 
 **Cancel/back/error.** A resize during pointer capture must follow existing host
