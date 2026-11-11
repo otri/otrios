@@ -676,6 +676,14 @@ Apply. Prior conflicts require explicit review; they cannot be flattened into a
 chosen value. Neither original retired addresses nor their causal registers are
 resurrected. Remap local selection to the restored object before presenting it.
 
+The captured pre-delete replica must also be proven current. Existing Apply
+guards the structural generation, so a property-only publication can race ahead
+of deletion. Retain restoration history only when the accepted UI generation is
+exactly one after the captured base UI generation. A gap gives an explicit
+unavailable-history reason; the post-delete replica cannot reconstruct what was
+actually removed. This conservative check uses the existing receipt, including
+equal-value causal publications, and adds no wire fields or implicit overwrite.
+
 Validate the final inverse, including restored property changes, against the same
 16-operation/8 KiB Apply envelope and source/scene/control limits. An oversized
 inverse remains unavailable with a visible reason; splitting one history unit

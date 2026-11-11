@@ -355,6 +355,51 @@ fn accepted_creation_undo_redo_restores_fresh_identity_properties_and_selection(
         );
         previous = restored.id;
     }
+
+    // A property-only publication can race ahead of deletion without changing
+    // the structural generation. The accepted receipt must not turn our older
+    // captured color into proof of the actual removed value.
+    let source = live.oib_history_source().unwrap();
+    let removed = source
+        .definitions
+        .iter()
+        .find(|d| d.id == previous)
+        .unwrap();
+    let address = PropertyAddress::Definition {
+        definition: removed.id,
+        node: removed.root,
+        property: property.descriptor.id,
+    };
+    copy.stage_structure(EditBatch {
+        generation: copy.candidate.oib_structural_generation().unwrap(),
+        operations: vec![DocumentEdit::Definition(DefinitionEdit::DeleteDefinition {
+            definition: previous,
+        })],
+    })
+    .unwrap();
+    let (mut rival, mut rival_session) = connect(&mut authority, 105);
+    rival
+        .edit_oib_property(&address, Some(Value::Color([98, 76, 54, 255])))
+        .unwrap();
+    pump(&mut rival, &mut authority, &mut rival_session);
+    publish(&mut copy, &mut live, &mut authority, &mut session);
+    assert!(
+        !live
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|d| d.id == previous)
+    );
+    assert!(copy.undo().unwrap());
+    assert!(!copy.dirty());
+    assert!(
+        copy.history_review()
+            .unwrap()
+            .reason
+            .contains("changed before deletion")
+    );
+    assert!(live.generate().unwrap().is_none());
 }
 #[test]
 fn local_and_applied_history_share_one_memory_budget() {

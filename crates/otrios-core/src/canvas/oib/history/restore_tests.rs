@@ -174,6 +174,7 @@ fn fresh_graph_uses_before_occurrence_origin_after_replacement_and_preserves_con
     };
     let value = Some(Value::Color([1, 2, 3, 255]));
     let graph = Graph::capture(&before, &after, &[(address.clone(), vec![value.clone()])]).unwrap();
+    assert!(encoded(&graph).unwrap().len() <= MAX_HISTORY_BYTES);
     assert!(graph.guard_keys().contains(&Key::Instance(InstanceId(50))));
     assert_eq!(
         graph.values(&after).unwrap(),

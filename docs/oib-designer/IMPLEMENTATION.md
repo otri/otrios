@@ -632,3 +632,38 @@ or limits were added. Known restart files: `oib/history/restore.rs`,
 `oib/history/restore_tests.rs`, `client/oib_applied_history.rs`,
 `client/oib_applied_history_tests.rs`, `client/oib_designer_tests.rs` and
 `state/oib/apply.rs` (authored register capture).
+
+### Publication attempt and final local corrections
+
+Commit `95be467` built Mac, Wasm and ARM artifacts successfully. Its existing
+Frame publisher then exited with SSH255 / `client_loop: send disconnect: Broken
+pipe`; an independent pinned SSH check also timed out connecting to the Frame.
+No FRAME/NATIVE/PUBLISHED success was reported. The wrapper restored the automatic
+builder and did not advance its source pin. Do not treat this attempt as live
+acceptance or restart a presumed-running build: that process is terminal.
+
+The open browser still referenced release `2fcbc24b…` in its module/resource URLs
+before its owned tab was closed. Native activation could not be rechecked during
+the connection failure. The last verified native state remains generation40 on
+that release; current remote state must be probed after reachability returns.
+
+Further local review added two corrections before retrying publication:
+
+- A rival property-only publication can precede deletion while its structural
+  generation stays unchanged. The manager now retains deleted-value history only
+  when the matching receipt's accepted UI generation is exactly the captured base
+  plus one. A new real-authority regression performs that race and verifies Undo
+  gives an explicit unavailable reason and emits no stale restoration.
+- Affected occurrence origins now use serializable ID pairs, rather than numeric
+  Flexbuffers map keys. The planner regression checks actual history-byte encoding;
+  the deleted-text Designer test now instantiates the component first and verifies
+  deletion/Undo/Redo preserve the existing allocation IDs. This fixes the concrete
+  `KeyMustBeString` failure found by the added encoding check.
+
+After these corrections, the repeated creation/override/selection + race case,
+the instantiated deleted-text case, imported Slider composition history and the
+occurrence-origin encoding case all passed individually. Final strict core Clippy
+and `git diff --check` passed. The earlier 32-test history run predates these two
+corrections; it is not represented as a final rerun. Retry the completed corrected
+commit through the existing publisher when the Frame is reachable, then perform
+native creation Apply/Undo/Redo and attached browser checks. Full B5–B7 remain open.

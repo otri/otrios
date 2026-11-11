@@ -12,7 +12,7 @@ pub(super) struct Graph {
     deleted_slots: BTreeSet<(DefinitionId, SlotId)>,
     presets: Vec<Preset>,
     values: Vec<(PropertyAddress, Option<Value>)>,
-    origins: BTreeMap<InstanceId, DefinitionId>,
+    origins: Vec<(InstanceId, DefinitionId)>,
 }
 #[derive(Default)]
 struct Mapping {
@@ -59,7 +59,7 @@ impl Graph {
         for instance in &before.instances {
             let origin = DefinitionId(instance.component);
             if result.reaches_fragment(before, origin, &mut BTreeSet::new()) {
-                result.origins.insert(InstanceId(instance.id), origin);
+                result.origins.push((InstanceId(instance.id), origin));
             }
         }
         for (address, alternatives) in properties {
@@ -100,8 +100,8 @@ impl Graph {
     }
     fn origin(&self, current: &DocumentSource, instance: InstanceId) -> Result<DefinitionId> {
         self.origins
-            .get(&instance)
-            .copied()
+            .iter()
+            .find_map(|(id, definition)| (*id == instance).then_some(*definition))
             .or_else(|| {
                 current
                     .instances
@@ -125,7 +125,7 @@ impl Graph {
             .iter()
             .map(|d| Key::Definition(d.id))
             .chain(self.presets.iter().map(|p| Key::Preset(p.id)))
-            .chain(self.origins.keys().copied().map(Key::Instance))
+            .chain(self.origins.iter().map(|(id, _)| Key::Instance(*id)))
             .collect()
     }
     fn removed_address(&self, source: &DocumentSource, address: &PropertyAddress) -> Result<bool> {

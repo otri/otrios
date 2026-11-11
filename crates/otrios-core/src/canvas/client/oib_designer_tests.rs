@@ -5920,6 +5920,29 @@ fn working_copy_deleted_text_undo_restores_authored_text_and_fresh_selected_node
         panic!("component selection")
     };
     let source = m.doc.oib_history_source().unwrap();
+    let preset = source
+        .presets
+        .iter()
+        .find(|p| p.definition == definition)
+        .unwrap()
+        .id;
+    let m = client.active.as_mut().unwrap();
+    m.stage_structure(otrios_interfaces::oib::authoring::EditBatch {
+        generation: m.design_doc().oib_structural_generation().unwrap(),
+        operations: vec![otrios_interfaces::oib::authoring::DocumentEdit::Hierarchy(
+            otrios_interfaces::oib::authoring::HierarchyEdit::Insert {
+                prototype: InstanceId(preset),
+                name: Some("History use".into()),
+                destination: otrios_interfaces::oib::authoring::Destination::Canvas,
+                before: None,
+                frame: None,
+            },
+        )],
+    })
+    .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let allocations = authority.oib_allocations().unwrap();
     let component = source
         .definitions
         .iter()
@@ -6011,4 +6034,5 @@ fn working_copy_deleted_text_undo_restores_authored_text_and_fresh_selected_node
             .any(|n| n.id == restored)
     );
     assert!(client.scene().unwrap().controls().len() <= 128);
+    assert_eq!(authority.oib_allocations().unwrap(), allocations);
 }

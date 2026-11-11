@@ -298,6 +298,19 @@ impl AppliedHistory {
             )
         });
         let captured = (|| {
+            // Structure admission guards the structural generation, allowing a
+            // separate property publication immediately before this deletion.
+            // The receipt must prove our captured pre-delete view was the last
+            // coherent UI revision; otherwise removed values may be stale and
+            // cannot be reconstructed from the post-delete replica.
+            if removed {
+                let ApplyResult::Accepted { generation, .. } = receipt.result else {
+                    unreachable!("accepted receipt checked above")
+                };
+                if before.oib_generation().and_then(|g| g.checked_add(1)) != Some(generation) {
+                    return Err("Sources changed before deletion was accepted; captured removed values cannot establish Undo history".into());
+                }
+            }
             let properties = if removed {
                 before.oib_history_properties()?
             } else {
