@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Existing typed endpoint forwarding. This never invents descriptors or grants.
+//! Definition-owned properties and typed endpoint forwarding within admitted grants.
 use super::*;
 use otrios_interfaces::oib::{InstanceOperation, authoring::*, designer::*};
 
@@ -21,6 +21,7 @@ pub(super) struct Model {
     pub selected: Option<PropertyPath>,
     pub choices: Vec<Choice>,
     pub root: bool,
+    pub removable: Option<(DefinitionId, PropertyId)>,
 }
 pub(super) fn definition(selection: &Selection) -> Option<DefinitionId> {
     match selection {
@@ -112,6 +113,17 @@ pub(super) fn model(
         .cloned();
     let mut choices = vec![];
     let imported = crate::canvas::oib::imports::imported_definitions(seed).contains(&id);
+    let removable = selected
+        .as_ref()
+        .filter(|path| {
+            root && writable
+                && !imported
+                && definition
+                    .properties
+                    .iter()
+                    .any(|descriptor| descriptor.id == path.property)
+        })
+        .map(|path| (id, path.property));
     if let Some(path) = &selected {
         let field = fields.iter().find(|f| &f.path == path).unwrap();
         if root {
@@ -236,6 +248,7 @@ pub(super) fn model(
                             selected,
                             choices,
                             root,
+                            removable,
                         }));
                     }
                 };
@@ -317,6 +330,7 @@ pub(super) fn model(
         selected,
         choices,
         root,
+        removable,
     }))
 }
 
@@ -401,6 +415,14 @@ pub(super) fn build(
         )?);
         if !expanded {
             continue;
+        }
+        if let Some((definition, property)) = model.removable {
+            nodes.push(button(
+                b,
+                y,
+                "Remove property...",
+                LocalAction::ReviewProperty(definition, property),
+            )?);
         }
         if model.choices.is_empty() {
             description(

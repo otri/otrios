@@ -2,6 +2,7 @@
 //! Document-scoped deletion review; confirmation stages one private candidate.
 use super::*;
 use crate::canvas::oib::{
+    endpoint_impact,
     impact::{self, Kind},
     instance_impact,
 };
@@ -10,7 +11,7 @@ use oib_workspace::{
 };
 use otrios_interfaces::oib::{
     authoring::*,
-    designer::{DefinitionId, InstanceId, Selection},
+    designer::{DefinitionId, InstanceId, PropertyId, Selection},
 };
 use std::ops::Range;
 
@@ -24,6 +25,7 @@ const NEXT: u32 = MODAL_ACTION_START + 9;
 enum Target {
     Definition(DefinitionId),
     Instance(InstanceId),
+    Property(DefinitionId, PropertyId),
 }
 struct Report {
     target: Target,
@@ -44,11 +46,30 @@ impl Report {
     fn instance(&self) -> bool {
         matches!(self.target, Target::Instance(_))
     }
+    fn property(&self) -> bool {
+        matches!(self.target, Target::Property(..))
+    }
 }
 fn query(state: &StateAdapter, target: Target) -> Result<Report> {
     let source = state.oib_history_source()?;
     let seed = state.oib_authoring_seed()?;
     Ok(match target {
+        Target::Property(definition, property) => {
+            let r = endpoint_impact::endpoint(&seed, &source, definition, property);
+            let removable = r.can_remove();
+            Report {
+                target: Target::Property(r.target, r.property),
+                removable,
+                name: r.name,
+                scope: r.scope,
+                complete: r.complete,
+                readonly: r.readonly,
+                items: r.items,
+                blockers: r.blockers,
+                removable_presets: vec![],
+                removal_order: vec![],
+            }
+        }
         Target::Definition(id) => {
             let r = impact::component(&seed, &source, id);
             let removable = r.can_delete();
@@ -124,16 +145,23 @@ impl Pending {
             if !self.report.complete {
                 "Cannot delete: some dependencies could not be checked.".into()
             } else if self.report.readonly {
-                if self.report.instance() {
+                if self.report.property() {
+                    "This property belongs to an inherited class or imported component."
+                } else if self.report.instance() {
                     "This instance is fixed by the host."
                 } else {
                     "This component belongs to an imported library."
                 }
                 .into()
             } else if self.report.can_delete() {
-                if self.report.instance() { "Removes this instance, its owned children and their connections. The component remains in the library." } else { "Deletion removes this component and the listed palette presets." }.into()
+                if self.report.property() { "Removes this property, its authored fallback and outgoing forwarding routes. The component and linked controls remain." } else if self.report.instance() { "Removes this instance, its owned children and their connections. The component remains in the library." } else { "Deletion removes this component and the listed palette presets." }.into()
             } else {
-                "Cannot delete while in use. Open a use to inspect it.".into()
+                if self.report.property() {
+                    "Cannot remove while in use. Open a use to inspect it."
+                } else {
+                    "Cannot delete while in use. Open a use to inspect it."
+                }
+                .into()
             },
         ];
         if let Some(error) = &self.error {
@@ -186,7 +214,9 @@ impl Pending {
         let mut actions = vec![
             ModalAction {
                 id: CLOSE,
-                label: if self.report.instance() {
+                label: if self.report.property() {
+                    "Keep property"
+                } else if self.report.instance() {
                     "Keep instance"
                 } else {
                     "Keep component"
@@ -201,7 +231,9 @@ impl Pending {
             },
             ModalAction {
                 id: DELETE,
-                label: if self.report.instance() {
+                label: if self.report.property() {
+                    "Remove property"
+                } else if self.report.instance() {
                     "Remove instance"
                 } else {
                     "Delete component"
@@ -223,7 +255,9 @@ impl Pending {
             });
         }
         Modal {
-            title: if self.report.instance() {
+            title: if self.report.property() {
+                "Remove property?"
+            } else if self.report.instance() {
                 "Remove instance?"
             } else {
                 "Delete component?"
@@ -289,6 +323,14 @@ fn candidate(state: &StateAdapter, report: &Report) -> Result<EditBatch> {
     }
     let mut apply = state.oib_apply_base()?;
     match report.target {
+        Target::Property(definition, property) => {
+            apply
+                .operations
+                .push(DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                    definition,
+                    property,
+                }));
+        }
         Target::Definition(definition) => {
             apply
                 .operations
@@ -334,6 +376,13 @@ impl Client {
     }
     pub(super) fn designer_review_instance_delete(&mut self, instance: InstanceId) -> Result<bool> {
         self.review_delete(Target::Instance(instance))
+    }
+    pub(super) fn designer_review_property_delete(
+        &mut self,
+        definition: DefinitionId,
+        property: PropertyId,
+    ) -> Result<bool> {
+        self.review_delete(Target::Property(definition, property))
     }
     fn review_delete(&mut self, target: Target) -> Result<bool> {
         let Some(m) = self.active.as_mut() else {
@@ -468,6 +517,9 @@ impl Client {
                                 m.discard_removed_occurrence_drafts(&report.removal_order)?
                             }
                             Target::Definition(id) => m.discard_removed_definition_drafts(id)?,
+                            Target::Property(definition, property) => {
+                                m.discard_removed_property_drafts(definition, property)?
+                            }
                         }
                     }
                     Ok::<_, String>(changed)

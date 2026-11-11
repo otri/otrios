@@ -69,6 +69,7 @@ pub fn transform(seed: &Seed, operations: &[DefinitionEdit]) -> Result<Vec<Compo
             | DefinitionEdit::DeleteNode { definition, .. }
             | DefinitionEdit::SetVisual { definition, .. }
             | DefinitionEdit::SetProperty { definition, .. }
+            | DefinitionEdit::DeleteProperty { definition, .. }
             | DefinitionEdit::SetSlots { definition, .. }
             | DefinitionEdit::SetDefault { definition, .. }
             | DefinitionEdit::ClearDefault { definition, .. }
@@ -107,6 +108,8 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
             definition,
             name: label,
             root,
+            properties,
+            next_property,
         } => {
             name(label)?;
             name(&root.name)?;
@@ -133,8 +136,8 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 name: label.clone(),
                 root: root.id,
                 nodes: vec![root.clone()],
-                properties: vec![],
-                next_property: 0,
+                properties: properties.clone(),
+                next_property: *next_property,
                 exposed: vec![],
                 slots: vec![],
             });
@@ -430,6 +433,25 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 def.properties.sort_by_key(|p| p.id);
             }
             def.next_property = next;
+        }
+        DefinitionEdit::DeleteProperty {
+            definition,
+            property,
+        } => {
+            let def = definition_mut(seed, *definition)?;
+            let index = def
+                .properties
+                .iter()
+                .position(|descriptor| descriptor.id == *property)
+                .ok_or("Only a declared endpoint can be removed from a component")?;
+            def.properties.remove(index);
+            def.nodes
+                .iter_mut()
+                .find(|node| node.id == def.root)
+                .ok_or("Missing endpoint root")?
+                .defaults
+                .retain(|default| default.property != *property);
+            def.exposed.retain(|exposed| exposed.property != *property);
         }
         DefinitionEdit::Expose {
             definition,

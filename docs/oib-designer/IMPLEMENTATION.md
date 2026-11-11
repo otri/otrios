@@ -1131,3 +1131,51 @@ and existing Audio/Display values unchanged. Native reported zero component
 errors and no pending commands throughout the sequence. The builder resumed on
 `ca22fc2`; no publisher remains running. Runtime limits and state protocol v35
 were unchanged. Full B5–B7 completion and per-control qualification remain open.
+
+## T21 endpoint removal implementation — 2026-11-11
+
+The next coherent slice adds reviewed removal of local declared root properties,
+with a private DeleteProperty command and conditional published Undo/Redo. The
+existing dependency modal is reused; imported/class properties remain read-only.
+Confirmation removes only the endpoint's own descriptor, root fallback and
+outgoing routes, matching raw buffers and staged literal writes. The definition,
+children, instances, unrelated invalid fields and app values remain intact.
+
+Property allocation is now sparse and monotonic. Partial restoration allocates a
+fresh contextual property ID and maps exact terminal paths/causal values; numeric
+coincidence on another node does not change its address. Fresh whole-definition
+restoration initializes the sparse table/cursor through CreateDefinition. Late
+ordinary writes to a retired endpoint cannot revive it, and Apply to that address
+rejects. Creation inverses require an unchanged accepted UI revision, including
+new endpoint creation, so unseen causal writes cannot be silently discarded.
+
+Dependency tests hardened inherited-ID ambiguity, shared-subtree depth and invalid
+slot placements. A real authority test exposed an existing admission gap: unused
+incoming forwarding routes could survive target deletion because lowering alone
+did not validate them. Canonical lowering now runs complete document metadata
+admission after building its tables; all visual/action property reads are checked,
+including unused definitions. This work stays on structural cache misses rather
+than moving validation into the paint/input path.
+
+Reset defaults also needs the new retirement rule: retain a surviving definition's
+cursor, and remap deleted signed endpoints through contextual baseline Property
+roles. This prevents reset from recycling removed addresses. The edit extension
+and baseline role use state protocol v36 consistently in Rust, browser and release
+manifest; release-control v1 remains unchanged. No new dependency, service or
+resource limit is introduced. Live publication is pending final validation; the
+preceding signed release remains the last verified live result.
+
+Final local validation for T21: `cargo test -p otrios-core --features canvas --lib
+--locked --offline` passes **552 tests**, four existing ignored diagnostics. This
+includes reviewed UI removal with Apply/Undo/Redo, exact outgoing/default/literal
+restoration, stale ordinary and Apply writes, explicit incoming-use repairs,
+unused readers, sparse whole-definition restoration, contextual baseline Reset
+and repeated Reset. The browser session/Monitoring tests pass **27/27**, including
+native/browser protocol agreement. The broader core run was warranted by the
+discovered shared metadata-admission gap. Its two initially failing assumptions
+were corrected: cancel a private published Undo with Discard, and give the layout
+fixture distinct definition/preset global IDs. No runtime limit was relaxed.
+Workspace all-target compilation with the canvas feature, runtime-library Clippy
+with signed-bundles and `-D warnings`, and diff checks also pass. ARM/Wasm build
+and focused Frame/Web acceptance still require the publication below; no Linux
+IPC or full repository preflight result is implied by these checks.

@@ -48,6 +48,10 @@ enum LocalAction {
     EditComponent(Selection),
     DeleteComponent(u64),
     ReviewDefinition(otrios_interfaces::oib::designer::DefinitionId),
+    ReviewProperty(
+        otrios_interfaces::oib::designer::DefinitionId,
+        otrios_interfaces::oib::designer::PropertyId,
+    ),
     Structure(otrios_interfaces::oib::InstanceOperation),
     FocusField(u32),
     Apply(PropertyAddress),
@@ -86,6 +90,7 @@ impl LocalAction {
                 | Self::Placement(_)
                 | Self::DeleteComponent(_)
                 | Self::ReviewDefinition(_)
+                | Self::ReviewProperty(..)
                 | Self::NewComponent
                 | Self::Undo
                 | Self::Redo
@@ -2682,6 +2687,9 @@ impl Client {
                 Ok(true)
             }
             LocalAction::ReviewDefinition(definition) => self.designer_review_delete(definition),
+            LocalAction::ReviewProperty(definition, property) => {
+                self.designer_review_property_delete(definition, property)
+            }
             LocalAction::Structure(operation) => {
                 if let Some(definition) = operation.operations.iter().find_map(|edit| match edit {
                     otrios_interfaces::oib::authoring::DocumentEdit::Definition(
@@ -3156,6 +3164,10 @@ mod layout_editor_tests;
 #[path = "oib_viewport_tests.rs"]
 mod viewport_tests;
 
+#[cfg(test)]
+#[path = "oib_endpoint_removal_tests.rs"]
+mod endpoint_removal_tests;
+
 impl Mount {
     pub(super) fn discard_removed_occurrence_drafts(
         &mut self,
@@ -3169,6 +3181,18 @@ impl Mount {
     ) -> Result<()> {
         self.discard_removed_designer_drafts(|address| matches!(editing::selection(address),
             Selection::Definition(id) | Selection::DefinitionNode { definition: id, .. } if id == definition))
+    }
+    pub(super) fn discard_removed_property_drafts(
+        &mut self,
+        definition: otrios_interfaces::oib::designer::DefinitionId,
+        property: otrios_interfaces::oib::designer::PropertyId,
+    ) -> Result<()> {
+        let source = self.design_doc().oib_history_source()?;
+        self.discard_removed_designer_drafts(|address| {
+            crate::canvas::oib::endpoint_impact::addresses_endpoint(
+                &source, address, definition, property,
+            )
+        })
     }
     fn discard_removed_designer_drafts(
         &mut self,

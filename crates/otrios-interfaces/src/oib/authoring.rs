@@ -18,6 +18,10 @@ pub const MAX_PLACEMENT_BYTES: usize = 4 * 1024;
 pub const MAX_CONNECTION_BYTES: usize = 4 * 1024;
 pub const MAX_DOCUMENT_BYTES: usize = 24 * 1024;
 
+fn zero_property_cursor(value: &u64) -> bool {
+    *value == 0
+}
+
 /// One private working copy, submitted as a bounded OIB-only atomic candidate.
 /// The baseline lock identifies the exact admitted import/source closure.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -165,6 +169,12 @@ pub enum BaselineIdentity {
         definition: DefinitionId,
         source: NodeId,
         current: NodeId,
+    },
+    /// Contextual endpoint role within the signed/source definition namespace.
+    Property {
+        definition: DefinitionId,
+        source: PropertyId,
+        current: PropertyId,
     },
     Slot {
         definition: DefinitionId,
@@ -315,6 +325,12 @@ pub enum DefinitionEdit {
         definition: DefinitionId,
         name: String,
         root: super::designer::DefinitionNode,
+        /// Initial endpoint namespace for a fresh definition identity. Sparse
+        /// tables preserve retired local IDs when recreating a removed graph.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        properties: Vec<super::designer::PropertyDescriptor>,
+        #[serde(default, skip_serializing_if = "zero_property_cursor")]
+        next_property: u64,
     },
     /// References and presets must be explicitly repaired in this same batch.
     DeleteDefinition { definition: DefinitionId },
@@ -339,6 +355,13 @@ pub enum DefinitionEdit {
     SetProperty {
         definition: DefinitionId,
         descriptor: super::designer::PropertyDescriptor,
+    },
+    /// Remove a declared endpoint, its root fallback and outgoing forwarding
+    /// row. Other dependencies require explicit repair in the same candidate.
+    /// The definition's local allocation cursor never moves backward.
+    DeleteProperty {
+        definition: DefinitionId,
+        property: PropertyId,
     },
     SetSlots {
         definition: DefinitionId,

@@ -95,7 +95,9 @@ impl Document {
             + graph
                 .definitions
                 .iter()
-                .map(|definition| definition.nodes.len() + definition.slots.len())
+                .map(|definition| {
+                    definition.nodes.len() + definition.slots.len() + definition.properties.len()
+                })
                 .sum::<usize>();
         if source.baseline.len() > role_limit {
             return Err("OIB baseline role budget".into());
@@ -103,7 +105,58 @@ impl Document {
         let first = baseline.identity_floor;
         let mut roles = BTreeSet::new();
         let mut assigned = BTreeSet::new();
+        let mut assigned_properties = BTreeSet::new();
         for identity in &source.baseline {
+            if let BaselineIdentity::Property {
+                definition,
+                source: property,
+                current,
+            } = identity
+            {
+                let owner = source
+                    .baseline
+                    .iter()
+                    .find_map(|role| match role {
+                        BaselineIdentity::Definition { source, current }
+                            if source == definition =>
+                        {
+                            Some(*current)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(*definition);
+                let admitted = graph
+                    .definitions
+                    .iter()
+                    .find(|d| d.id == *definition)
+                    .is_some_and(|d| d.properties.iter().any(|p| p.id == *property));
+                let cursor_valid =
+                    if let Some(owner) = source.definitions.iter().find(|d| d.id == owner) {
+                        let root = owner
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == owner.root)
+                            .ok_or("Missing baseline property owner")?;
+                        let inherited = super::super::super::oib::document::class_descriptors(
+                            &graph.classes,
+                            root.class,
+                        )?;
+                        current.0 > inherited.iter().map(|p| p.id.0).max().unwrap_or(0)
+                            && current.0 < owner.next_property
+                    } else {
+                        true
+                    };
+                if !admitted
+                    || current.0 == 0
+                    || current.0 == u64::MAX
+                    || !roles.insert(vec![5, definition.0, property.0])
+                    || !assigned_properties.insert((owner, *current))
+                    || !cursor_valid
+                {
+                    return Err("Invalid OIB baseline property mapping".into());
+                }
+                continue;
+            }
             let fixed = match identity {
                 BaselineIdentity::Definition { source, .. } => *source == shell_definition.id,
                 BaselineIdentity::Node {
@@ -111,7 +164,7 @@ impl Document {
                 } => *definition == shell_definition.id && *source == shell_definition.root,
                 BaselineIdentity::Preset { source, .. } => *source == shell.preset,
                 BaselineIdentity::Instance { source, .. } => *source == graph.presented_root,
-                BaselineIdentity::Slot { .. } => false,
+                BaselineIdentity::Slot { .. } | BaselineIdentity::Property { .. } => false,
             };
             let (key, original, current, admitted) = match identity {
                 BaselineIdentity::Definition { source, current } => (
@@ -170,6 +223,9 @@ impl Document {
                         .iter()
                         .any(|instance| instance.id == *source),
                 ),
+                BaselineIdentity::Property { .. } => {
+                    unreachable!("property roles checked separately")
+                }
             };
             if !admitted
                 || !roles.insert(key)

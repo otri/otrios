@@ -913,3 +913,45 @@ contracts remain unchanged. Library sealing orders descriptors, and behavior pat
 lookup recognizes declared root properties. Definition deletion confirmation also
 discards its own raw name/property buffers; Cancel keeps them and unrelated dirty
 buffers remain the author's responsibility before Apply.
+
+## T21. Declared endpoint removal and fresh-identity restoration
+
+Remove property is available only for a locally declared root endpoint. Review
+lists uses in the current document and exact admitted imports. Unknown paths,
+ambiguous declarations, missing imports and exceeded evidence budgets block
+confirmation. Inherited class fields and imported declarations are read-only.
+Incoming forwarding, reference/preset assignments, visual/action reads and app
+connections require explicit repair; removal never invents replacement routes.
+
+`DeleteProperty` removes the declaration, its own root fallback and its outgoing
+forwarding row in one private edit. The definition, children and occurrences
+remain. Confirmation is guarded by the current working source and generation;
+Apply remains the single shared publication boundary. Cancel preserves raw
+fields; confirmation discards only that endpoint's raw name/value buffers and
+private literal writes, retaining unrelated errors for explicit author repair.
+
+Property IDs are definition-scoped monotonic identities. Deleting leaves a hole
+and retains `next_property`, including when the table becomes empty. Sparse
+declarations are admitted above inherited class IDs and below the cursor. Undo
+inside a surviving definition allocates a fresh property ID, restores descriptor,
+fallback, outgoing routes and captured causal values, and remaps repaired paths
+to that fresh address. Old causal leaves remain retired and cannot revive the
+removed ID. Rename still preserves identity. Stale receipts or source/value
+conflicts require review; equal values alone do not establish causal continuity.
+
+Whole-definition restoration uses a fresh global definition identity and may
+initialize its contextual property table/cursor through `CreateDefinition`.
+This preserves sparse property IDs within the fresh namespace without recycling
+any address or adding a general cursor mutation operation. Restored node/path
+and endpoint IDs are resolved by their original owner, not by numeric coincidence.
+History remains bounded by the existing 64 KiB, 16-operation/8 KiB publication
+limits. State protocol v36 carries the edit extension; release-control v1 stays
+unchanged. This section supersedes T20's temporary contiguous-ID restriction.
+
+Reset defaults observes the same retirement rule. A surviving definition retains
+its property high-water mark even when the signed baseline has no declarations.
+If a signed endpoint has been removed, Reset restores it under a fresh local ID
+and records its contextual `BaselineIdentity::Property` role; later resets reuse
+the live mapped identity. Source, forwarding, preset and visual/action paths use
+that mapping. A fresh global definition namespace may retain its signed local
+property IDs. Reset cannot make an old endpoint address writable again.

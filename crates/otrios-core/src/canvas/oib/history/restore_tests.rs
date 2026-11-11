@@ -44,6 +44,174 @@ fn path(references: &[u64], node: u64) -> PropertyPath {
     }
 }
 
+fn endpoint_descriptor(id: u64, name: &str) -> PropertyDescriptor {
+    PropertyDescriptor {
+        id: PropertyId(id),
+        name: name.into(),
+        label: name.into(),
+        value_type: otrios_interfaces::layout::ValueType::Text,
+        default: Value::Text("Default".into()),
+        number_range: None,
+        number_step: None,
+        units: None,
+        group: InspectorGroup::Appearance,
+        editor: PropertyEditor::TextSuggestions,
+        policy: PropertyPolicy {
+            live_literal: true,
+            app_binding: false,
+        },
+    }
+}
+fn endpoint_path(references: &[u64], node: u64, property: u64) -> PropertyPath {
+    let mut path = path(references, node);
+    path.property = PropertyId(property);
+    path
+}
+
+#[test]
+fn removed_endpoint_restores_fresh_property_and_exact_terminal_paths_and_values() {
+    let mut owner = definition(10, 11);
+    owner.properties = vec![
+        endpoint_descriptor(2, "caption"),
+        endpoint_descriptor(4, "heading"),
+    ];
+    owner.next_property = 5;
+    owner.nodes[0].defaults.push(PropertyDefault {
+        property: PropertyId(2),
+        value: Value::Text("Fallback".into()),
+    });
+    owner.nodes.push(node(12, Some(11)));
+    owner.exposed.push(ExposedProperty {
+        property: PropertyId(2),
+        targets: vec![endpoint_path(&[], 12, 2)],
+    });
+    let mut host = definition(30, 31);
+    let mut reference = node(32, Some(31));
+    reference.reference = Some(ComponentReference {
+        definition: DefinitionId(10),
+        assignments: vec![],
+    });
+    host.nodes.push(reference);
+    let mut before = source(vec![owner, host], vec![]);
+    before.instances = vec![
+        InstanceRecord {
+            id: 50,
+            name: "Direct".into(),
+            component: 10,
+            prototype: 40,
+        },
+        InstanceRecord {
+            id: 70,
+            name: "Nested".into(),
+            component: 30,
+            prototype: 60,
+        },
+    ];
+    let mut after = before.clone();
+    after.definitions[0]
+        .properties
+        .retain(|p| p.id != PropertyId(2));
+    after.definitions[0].nodes[0].defaults.clear();
+    after.definitions[0].exposed.clear();
+    let definition_value = PropertyAddress::Definition {
+        definition: DefinitionId(10),
+        node: NodeId(11),
+        property: PropertyId(2),
+    };
+    let direct = PropertyAddress::Occurrence {
+        instance: InstanceId(50),
+        path: endpoint_path(&[], 11, 2),
+    };
+    let nested = PropertyAddress::Occurrence {
+        instance: InstanceId(70),
+        path: endpoint_path(&[32], 11, 2),
+    };
+    let unrelated = PropertyAddress::Definition {
+        definition: DefinitionId(10),
+        node: NodeId(12),
+        property: PropertyId(2),
+    };
+    let properties = [definition_value, direct, nested, unrelated]
+        .into_iter()
+        .enumerate()
+        .map(|(index, address)| (address, vec![Some(Value::Text(format!("Value {index}")))]))
+        .collect::<Vec<_>>();
+    let graph = Graph::capture(&before, &after, &properties).unwrap();
+    let inverse = vec![
+        DocumentEdit::Definition(DefinitionEdit::Expose {
+            definition: DefinitionId(30),
+            property: PropertyId(1),
+            targets: vec![endpoint_path(&[32], 11, 2)],
+        }),
+        DocumentEdit::Definition(DefinitionEdit::SetDefault {
+            definition: DefinitionId(10),
+            node: NodeId(12),
+            property: PropertyId(2),
+            value: Value::Text("Child".into()),
+        }),
+        DocumentEdit::Definition(DefinitionEdit::ConnectReference {
+            definition: DefinitionId(30),
+            reference: NodeId(32),
+            target: endpoint_path(&[], 11, 2),
+            source: Some(LiteralSource::Forward(endpoint_path(&[], 31, 1))),
+        }),
+    ];
+    let operations = graph.operations(&after, &inverse).unwrap();
+    assert!(operations.iter().any(|op| matches!(op, DocumentEdit::Definition(DefinitionEdit::SetProperty { definition: DefinitionId(10), descriptor }) if descriptor.id == PropertyId(5) && descriptor.name == "caption")));
+    assert!(operations.iter().any(|op| matches!(op, DocumentEdit::Definition(DefinitionEdit::SetDefault {node:NodeId(11),property:PropertyId(5),value,..}) if value == &Value::Text("Fallback".into()))));
+    assert!(operations.iter().any(|op| matches!(
+        op,
+        DocumentEdit::Definition(DefinitionEdit::SetDefault {
+            node: NodeId(12),
+            property: PropertyId(2),
+            ..
+        })
+    )));
+    assert!(operations.iter().any(|op| matches!(op, DocumentEdit::Definition(DefinitionEdit::Expose {definition:DefinitionId(10),property:PropertyId(5),targets}) if targets == &vec![endpoint_path(&[],12,2)])));
+    assert!(operations.iter().any(|op| matches!(op, DocumentEdit::Definition(DefinitionEdit::Expose {definition:DefinitionId(30),targets,..}) if targets == &vec![endpoint_path(&[32],11,5)])));
+    assert!(operations.iter().any(|op| matches!(op, DocumentEdit::Definition(DefinitionEdit::ConnectReference {target,source,..}) if target == &endpoint_path(&[],11,5) && source == &Some(LiteralSource::Forward(endpoint_path(&[],31,1))))));
+    let values = graph.values(&after).unwrap();
+    assert_eq!(
+        values.len(),
+        3,
+        "same numeric property ID on an unrelated child must not be captured"
+    );
+    for (address, _) in &values {
+        assert!(matches!(
+            address,
+            PropertyAddress::Definition {
+                property: PropertyId(5),
+                ..
+            } | PropertyAddress::Occurrence {
+                path: PropertyPath {
+                    property: PropertyId(5),
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+    assert!(operations.len() + values.len() <= MAX_OPERATIONS);
+}
+
+#[test]
+fn whole_definition_restore_initializes_sparse_property_namespace_in_one_creation() {
+    let mut old = definition(10, 11);
+    old.properties = vec![
+        endpoint_descriptor(2, "caption"),
+        endpoint_descriptor(4, "heading"),
+    ];
+    old.next_property = 6;
+    let before = source(vec![old.clone()], vec![]);
+    let after = source(vec![], vec![]);
+    let graph = Graph::capture(&before, &after, &[]).unwrap();
+    let operations = graph.operations(&after, &[]).unwrap();
+    assert_eq!(operations.len(), 1);
+    assert!(
+        matches!(&operations[0],DocumentEdit::Definition(DefinitionEdit::CreateDefinition {definition:DefinitionId(100),properties,next_property:6,..}) if properties == &old.properties)
+    );
+}
+
 #[test]
 fn fresh_graph_remaps_reference_forward_exposed_slot_and_preset_paths() {
     let mut first = definition(10, 11);

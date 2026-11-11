@@ -332,6 +332,21 @@ impl WorkingCopy {
         }
         let mut next = self.apply.clone();
         for op in batch.operations {
+            if let DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                definition,
+                property,
+            }) = &op
+            {
+                let source = self.candidate.oib_history_source()?;
+                next.changes.retain(|change| {
+                    !super::super::oib::endpoint_impact::addresses_endpoint(
+                        &source,
+                        &change.address,
+                        *definition,
+                        *property,
+                    )
+                });
+            }
             if let DocumentEdit::Definition(DefinitionEdit::DeleteDefinition { definition }) = &op {
                 // Confirmed component deletion also discards its unapplied
                 // literal overrides. Keep unrelated edits, and retain the

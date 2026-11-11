@@ -288,6 +288,22 @@ impl Entry {
                     .map(move |n| (d.id, n.id))
             })
             .collect();
+        let created_properties: BTreeSet<_> = after
+            .definitions
+            .iter()
+            .flat_map(|d| {
+                d.properties
+                    .iter()
+                    .filter(|p| {
+                        before
+                            .definitions
+                            .iter()
+                            .find(|b| b.id == d.id)
+                            .is_some_and(|b| !b.properties.iter().any(|old| old.id == p.id))
+                    })
+                    .map(move |p| (d.id, p.id))
+            })
+            .collect();
         let created_presets: BTreeSet<_> = after
             .presets
             .iter()
@@ -310,6 +326,7 @@ impl Entry {
                         | DefinitionEdit::DeleteNode { definition, .. }
                         | DefinitionEdit::SetVisual { definition, .. }
                         | DefinitionEdit::SetProperty { definition, .. }
+                        | DefinitionEdit::DeleteProperty { definition, .. }
                         | DefinitionEdit::SetSlots { definition, .. }
                         | DefinitionEdit::SetDefault { definition, .. }
                         | DefinitionEdit::ClearDefault { definition, .. }
@@ -337,6 +354,24 @@ impl Entry {
                     }) {
                         continue;
                     }
+                    let target_property = match edit {
+                        DefinitionEdit::SetProperty { descriptor, .. } => Some(descriptor.id),
+                        DefinitionEdit::DeleteProperty { property, .. }
+                        | DefinitionEdit::Expose { property, .. } => Some(*property),
+                        DefinitionEdit::SetDefault { node, property, .. }
+                        | DefinitionEdit::ClearDefault { node, property, .. }
+                            if definition(before, d)?.root == *node =>
+                        {
+                            Some(*property)
+                        }
+                        _ => None,
+                    };
+                    if target_property.is_some_and(|p| {
+                        entry.restoration.recreates_property(d, p)
+                            || created_properties.contains(&(d, p))
+                    }) {
+                        continue;
+                    }
                     let (key, inverse) = match edit {
                         DefinitionEdit::SetProperty { descriptor, .. } => {
                             let Some(previous) = definition(before, d)?
@@ -344,7 +379,7 @@ impl Entry {
                                 .iter()
                                 .find(|p| p.id == descriptor.id)
                             else {
-                                return Err("Undo of a newly declared endpoint requires endpoint removal support".into());
+                                return Err("Missing created endpoint history".into());
                             };
                             (
                                 Key::PropertyDescriptor(d, descriptor.id),
@@ -492,7 +527,8 @@ impl Entry {
                         }
                         DefinitionEdit::CreateNode { .. } => continue,
                         DefinitionEdit::DeleteDefinition { .. }
-                        | DefinitionEdit::DeleteNode { .. } => continue,
+                        | DefinitionEdit::DeleteNode { .. }
+                        | DefinitionEdit::DeleteProperty { .. } => continue,
                         DefinitionEdit::CreateDefinition { .. } => {
                             return Err("Missing created history definition".into());
                         }
@@ -595,25 +631,39 @@ impl Entry {
         // and unchanged, guarding unrecorded newly seeded property registers.
         entry.destructive = !created_definitions.is_empty()
             || !created_nodes.is_empty()
+            || !created_properties.is_empty()
             || !created_presets.is_empty()
             || !created_instances.is_empty();
         // Unknown imported bodies are not evidence of absence. Discard only
         // targets positively introduced by this Apply and removed by its inverse.
-        entry.properties.retain(|p| !match &p.address {
-            PropertyAddress::Definition {
-                definition, node, ..
-            } => {
-                created_definitions.contains(definition)
-                    || created_nodes.contains(&(*definition, *node))
-            }
-            PropertyAddress::Occurrence { instance, path } => {
-                created_instances.contains(instance)
-                    || created_nodes
-                        .iter()
-                        .any(|(_, n)| *n == path.node || path.references.contains(n))
-            }
-            _ => false,
+        entry.properties.retain(|p| {
+            !match &p.address {
+                PropertyAddress::Definition {
+                    definition, node, ..
+                } => {
+                    created_definitions.contains(definition)
+                        || created_nodes.contains(&(*definition, *node))
+                }
+                PropertyAddress::Occurrence { instance, path } => {
+                    created_instances.contains(instance)
+                        || created_nodes
+                            .iter()
+                            .any(|(_, n)| *n == path.node || path.references.contains(n))
+                }
+                _ => false,
+            } && !created_properties.iter().any(|(d, property)| {
+                super::endpoint_impact::addresses_endpoint(after, &p.address, *d, *property)
+            })
         });
+        for (d, property) in created_properties {
+            entry.guard(before, after, Key::Definition(d))?;
+            entry
+                .operations
+                .push(DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                    definition: d,
+                    property,
+                }));
+        }
         for id in created_definitions {
             entry.guard(before, after, Key::Definition(id))?;
             entry

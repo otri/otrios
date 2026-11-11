@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) mod component_behaviors;
 pub mod contract;
 pub mod document;
+pub(crate) mod endpoint_impact;
 pub mod graph;
 pub(crate) mod history;
 pub(crate) mod impact;

@@ -6817,11 +6817,24 @@ fn component_api_declaration_rejects_identity_name_type_and_capability_escalatio
     .unwrap();
     client.designer_apply_working_copy().unwrap();
     settle_editor(&mut client, &mut authority, &mut session);
-    // Adding a single endpoint to an existing component is not yet a supported
-    // published inverse: report review rather than fabricate endpoint removal.
+    // Creation now has a guarded removal inverse. Cancelling that private Undo
+    // through Discard retains the original accepted identity for the rename test.
     assert!(client.designer_history(false).unwrap());
     let m = client.active.as_ref().unwrap();
-    assert!(m.working_copy.as_ref().unwrap().history_review().is_some());
+    assert!(m.working_copy.as_ref().unwrap().history_review().is_none());
+    assert!(
+        m.design_doc()
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .iter()
+            .find(|d| d.id == DefinitionId(10))
+            .unwrap()
+            .properties
+            .is_empty()
+    );
+    assert!(client.designer_discard_working_copy().unwrap());
+    let m = client.active.as_ref().unwrap();
     let mut changed = descriptor;
     changed.value_type = ValueType::Text;
     changed.default = Value::Text("changed type".into());
@@ -6837,7 +6850,6 @@ fn component_api_declaration_rejects_identity_name_type_and_capability_escalatio
         m.doc.preview_oib_apply(&apply).is_err(),
         "published endpoint type cannot change under the same identity"
     );
-    assert!(client.back().unwrap());
     let rename = PropertyAddress::Structural {
         target: StructuralTarget::Property {
             definition: DefinitionId(10),

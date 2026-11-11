@@ -540,17 +540,30 @@ fn named_endpoint_signature_and_cursor_are_part_of_library_admission() {
         seal_graph(changed).unwrap().exports[0].contract,
         sealed.exports[0].contract
     );
-    for cursor in [0, 2, 4] {
+    for cursor in [0, 2] {
         let mut invalid = sealed.clone();
         invalid.definitions[0].next_property = cursor;
         assert!(seal_graph(invalid).is_err());
     }
-    let mut invalid = sealed.clone();
-    invalid.definitions[0].properties[0].id = PropertyId(5);
-    invalid.definitions[0].next_property = 6;
+    let mut sparse = sealed.clone();
+    sparse.definitions[0].properties[0].id = PropertyId(5);
+    sparse.definitions[0].next_property = 6;
     assert!(
-        seal_graph(invalid).is_err(),
-        "sparse declarations are gated until hole-aware endpoint restoration exists"
+        seal_graph(sparse).is_ok(),
+        "retired endpoint holes are admitted"
+    );
+    let mut historical = sealed.clone();
+    historical.definitions[0].next_property = 4;
+    assert_eq!(
+        seal_graph(historical).unwrap().exports[0].contract,
+        sealed.exports[0].contract,
+        "cursor history is body data, not a change to the live export surface"
+    );
+    let mut empty = sealed.clone();
+    empty.definitions[0].properties.clear();
+    assert!(
+        seal_graph(empty).is_ok(),
+        "removing the last endpoint retains its cursor"
     );
     let mut invalid = sealed.clone();
     invalid.definitions[0].properties[0].policy.app_binding = true;

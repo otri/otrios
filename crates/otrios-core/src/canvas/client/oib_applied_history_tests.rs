@@ -723,7 +723,9 @@ fn accepted_creation_undo_redo_restores_fresh_identity_properties_and_selection(
             operations: vec![DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
                 definition,
                 name: "Created".into(),
-                root
+                root,
+                properties: vec![],
+                next_property: 0,
             })]
         })
         .unwrap()

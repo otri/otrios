@@ -155,6 +155,8 @@ pub(super) fn new_component(
                 definition: DefinitionId(next),
                 name: "New component".into(),
                 root: node(root, "Panel", class.id, None, blank_visual()),
+                properties: vec![],
+                next_property: 0,
             }),
             DocumentEdit::Preset(PresetEdit::Create {
                 preset: graph::Preset {

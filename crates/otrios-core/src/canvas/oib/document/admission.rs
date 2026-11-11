@@ -106,8 +106,7 @@ pub(super) fn declarations(
             def.properties.len() <= 64 && ordered(def.properties.iter().map(|p| p.id)),
             "Invalid definition endpoint ordering/budget",
         )?;
-        if def.properties.is_empty() {
-            require(def.next_property == 0, "Invalid definition endpoint cursor")?;
+        if def.properties.is_empty() && def.next_property == 0 {
             continue;
         }
         let root_class = def
@@ -125,13 +124,14 @@ pub(super) fn declarations(
             .unwrap_or(0)
             .checked_add(1)
             .ok_or("Property identity space exhausted")?;
-        for (index, p) in def.properties.iter().enumerate() {
+        require(
+            def.next_property >= first,
+            "Invalid definition endpoint cursor",
+        )?;
+        for p in &def.properties {
             valid_descriptor(p)?;
             require(
-                p.id.0
-                    == first
-                        .checked_add(index as u64)
-                        .ok_or("Property identity space exhausted")?
+                p.id.0 >= first
                     && p.id.0 < def.next_property
                     && names.insert(&p.name)
                     && p.policy.live_literal
@@ -139,17 +139,6 @@ pub(super) fn declarations(
                 "Invalid definition endpoint identity, name or capability policy",
             )?;
         }
-        require(
-            if def.properties.is_empty() {
-                def.next_property == 0
-            } else {
-                def.next_property
-                    == first
-                        .checked_add(def.properties.len() as u64)
-                        .ok_or("Property identity space exhausted")?
-            },
-            "Invalid definition endpoint cursor",
-        )?;
     }
     Ok(())
 }
@@ -430,6 +419,18 @@ pub fn validate(seed: &Seed) -> Result<()> {
                     )?,
                     &default.value,
                 )?;
+            }
+            if let Some(visual) = &n.visual {
+                for parameter in &visual.parameters {
+                    if let otrios_interfaces::oib::graph::ParameterSource::Property(path) =
+                        &parameter.source
+                    {
+                        property(doc, def.id, path)?;
+                    }
+                }
+                if let Some(action) = &visual.action {
+                    property(doc, def.id, &action.source)?;
+                }
             }
             if let Some(reference) = &n.reference {
                 require(

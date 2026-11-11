@@ -10,6 +10,7 @@ pub(super) struct Graph {
     deleted_definitions: BTreeSet<DefinitionId>,
     deleted_nodes: BTreeSet<(DefinitionId, NodeId)>,
     deleted_slots: BTreeSet<(DefinitionId, SlotId)>,
+    deleted_properties: BTreeSet<(DefinitionId, PropertyId)>,
     presets: Vec<Preset>,
     instances: Vec<InstanceRecord>,
     placements: Vec<Placement>,
@@ -23,6 +24,7 @@ struct Mapping {
     definitions: BTreeMap<DefinitionId, DefinitionId>,
     nodes: BTreeMap<(DefinitionId, NodeId), NodeId>,
     slots: BTreeMap<(DefinitionId, SlotId), SlotId>,
+    properties: BTreeMap<(DefinitionId, PropertyId), PropertyId>,
     presets: BTreeMap<u64, u64>,
     instances: BTreeMap<InstanceId, InstanceId>,
 }
@@ -48,9 +50,15 @@ impl Graph {
                     result.deleted_slots.insert((d.id, s.id));
                 }
             }
+            for p in &d.properties {
+                if next.is_none_or(|a| !a.properties.iter().any(|v| v.id == p.id)) {
+                    result.deleted_properties.insert((d.id, p.id));
+                }
+            }
             if result.deleted_definitions.contains(&d.id)
                 || result.deleted_nodes.iter().any(|(id, _)| *id == d.id)
                 || result.deleted_slots.iter().any(|(id, _)| *id == d.id)
+                || result.deleted_properties.iter().any(|(id, _)| *id == d.id)
             {
                 result.definitions.push(d.clone());
             }
@@ -167,6 +175,9 @@ impl Graph {
     pub(super) fn recreates_node(&self, d: DefinitionId, n: NodeId) -> bool {
         self.deleted_nodes.contains(&(d, n))
     }
+    pub(super) fn recreates_property(&self, d: DefinitionId, p: PropertyId) -> bool {
+        self.deleted_properties.contains(&(d, p))
+    }
     pub(super) fn recreates_preset(&self, id: u64) -> bool {
         self.presets.iter().any(|p| p.id == id)
     }
@@ -200,8 +211,14 @@ impl Graph {
     fn removed_address(&self, source: &DocumentSource, address: &PropertyAddress) -> Result<bool> {
         match address {
             PropertyAddress::Definition {
-                definition, node, ..
-            } => Ok(self.deleted_nodes.contains(&(*definition, *node))),
+                definition,
+                node,
+                property,
+            } => Ok(self.deleted_nodes.contains(&(*definition, *node))
+                || self
+                    .old_definition(source, *definition)
+                    .is_some_and(|d| d.root == *node)
+                    && self.deleted_properties.contains(&(*definition, *property))),
             PropertyAddress::Occurrence { instance, path } => {
                 if self.recreates_instance(*instance) {
                     return Ok(true);
@@ -225,7 +242,11 @@ impl Graph {
                     };
                     d = next.definition;
                 }
-                Ok(self.deleted_nodes.contains(&(d, path.node)))
+                Ok(self.deleted_nodes.contains(&(d, path.node))
+                    || self
+                        .old_definition(source, d)
+                        .is_some_and(|def| def.root == path.node)
+                        && self.deleted_properties.contains(&(d, path.property)))
             }
             _ => Ok(false),
         }
@@ -249,6 +270,23 @@ impl Graph {
         }
         for key in &self.deleted_slots {
             map.slots.insert(*key, SlotId(fresh()?));
+        }
+        let mut cursors = BTreeMap::new();
+        for (d, p) in &self.deleted_properties {
+            if self.deleted_definitions.contains(d) {
+                continue;
+            }
+            let cursor = cursors
+                .entry(*d)
+                .or_insert(definition(current, *d)?.next_property);
+            if *cursor == 0 {
+                return Err("Removed endpoint has no retained property cursor".into());
+            }
+            let id = *cursor;
+            *cursor = cursor
+                .checked_add(1)
+                .ok_or("Property identity space exhausted")?;
+            map.properties.insert((*d, *p), PropertyId(id));
         }
         for p in &self.presets {
             map.presets.insert(p.id, fresh()?);
@@ -332,8 +370,28 @@ impl Graph {
         Ok(PropertyPath {
             references,
             node: map.node(d, path.node),
-            property: path.property,
+            property: self.property(current, map, d, path.node, path.property),
         })
+    }
+    fn property(
+        &self,
+        current: &DocumentSource,
+        map: &Mapping,
+        d: DefinitionId,
+        node: NodeId,
+        property: PropertyId,
+    ) -> PropertyId {
+        if self
+            .old_definition(current, d)
+            .is_some_and(|def| def.root == node)
+        {
+            map.properties
+                .get(&(d, property))
+                .copied()
+                .unwrap_or(property)
+        } else {
+            property
+        }
     }
     fn visual(
         &self,
@@ -365,6 +423,9 @@ impl Graph {
         result.id = map.node(d, node.id);
         result.owner = node.owner.map(|n| map.node(d, n));
         result.visual_children.clear();
+        for value in &mut result.defaults {
+            value.property = self.property(current, map, d, node.id, value.property);
+        }
         self.visual(current, map, d, &mut result.visual)?;
         if let Some(reference) = &mut result.reference {
             let target = reference.definition;
@@ -444,16 +505,44 @@ impl Graph {
                     definition: map.definition(old.id),
                     name: old.name.clone(),
                     root: self.node(current, &map, old.id, root)?,
+                    properties: old.properties.clone(),
+                    next_property: old.next_property,
                 }));
             }
         }
         for old in &self.definitions {
-            if self.deleted_definitions.contains(&old.id) {
+            if !self.deleted_definitions.contains(&old.id) {
                 for descriptor in &old.properties {
+                    if !self.recreates_property(old.id, descriptor.id) {
+                        continue;
+                    }
+                    let mut descriptor = descriptor.clone();
+                    descriptor.id = map.properties[&(old.id, descriptor.id)];
                     result.push(DocumentEdit::Definition(DefinitionEdit::SetProperty {
                         definition: map.definition(old.id),
-                        descriptor: descriptor.clone(),
+                        descriptor,
                     }));
+                }
+                let root = old
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == old.root)
+                    .ok_or("Missing history root")?;
+                for value in &root.defaults {
+                    if self.recreates_property(old.id, value.property) {
+                        result.push(DocumentEdit::Definition(DefinitionEdit::SetDefault {
+                            definition: old.id,
+                            node: old.root,
+                            property: self.property(
+                                current,
+                                &map,
+                                old.id,
+                                old.root,
+                                value.property,
+                            ),
+                            value: value.value.clone(),
+                        }));
+                    }
                 }
             }
         }
@@ -523,17 +612,19 @@ impl Graph {
                     }));
                 }
             }
-            if self.deleted_definitions.contains(&d.id) {
-                if !d.slots.is_empty() {
-                    result.push(DocumentEdit::Definition(DefinitionEdit::SetSlots {
-                        definition: map.definition(d.id),
-                        slots: self.slots(current, &map, d.id, &d.slots)?,
-                    }));
-                }
-                for exposed in &d.exposed {
+            if self.deleted_definitions.contains(&d.id) && !d.slots.is_empty() {
+                result.push(DocumentEdit::Definition(DefinitionEdit::SetSlots {
+                    definition: map.definition(d.id),
+                    slots: self.slots(current, &map, d.id, &d.slots)?,
+                }));
+            }
+            for exposed in &d.exposed {
+                if self.deleted_definitions.contains(&d.id)
+                    || self.recreates_property(d.id, exposed.property)
+                {
                     result.push(DocumentEdit::Definition(DefinitionEdit::Expose {
                         definition: map.definition(d.id),
-                        property: exposed.property,
+                        property: self.property(current, &map, d.id, d.root, exposed.property),
                         targets: exposed
                             .targets
                             .iter()
@@ -666,7 +757,26 @@ impl Graph {
         let mut op = op.clone();
         match &mut op {
             DocumentEdit::Definition(edit) => match edit {
-                DefinitionEdit::SetProperty { definition, .. } => {
+                DefinitionEdit::SetProperty {
+                    definition,
+                    descriptor,
+                } => {
+                    descriptor.id = map
+                        .properties
+                        .get(&(*definition, descriptor.id))
+                        .copied()
+                        .unwrap_or(descriptor.id);
+                    *definition = map.definition(*definition);
+                }
+                DefinitionEdit::DeleteProperty {
+                    definition,
+                    property,
+                } => {
+                    *property = map
+                        .properties
+                        .get(&(*definition, *property))
+                        .copied()
+                        .unwrap_or(*property);
                     *definition = map.definition(*definition);
                 }
                 DefinitionEdit::SetSlots {
@@ -678,12 +788,17 @@ impl Graph {
                 }
                 DefinitionEdit::Expose {
                     definition: d,
+                    property,
                     targets,
-                    ..
                 } => {
                     for p in targets {
                         *p = self.path(current, map, *d, p)?;
                     }
+                    *property = map
+                        .properties
+                        .get(&(*d, *property))
+                        .copied()
+                        .unwrap_or(*property);
                     *d = map.definition(*d);
                 }
                 DefinitionEdit::ConnectReference {
@@ -717,14 +832,19 @@ impl Graph {
                 DefinitionEdit::SetDefault {
                     definition: d,
                     node,
+                    property,
                     ..
                 }
                 | DefinitionEdit::ClearDefault {
                     definition: d,
                     node,
-                    ..
+                    property,
+                } => {
+                    *property = self.property(current, map, *d, *node, *property);
+                    *node = map.node(*d, *node);
+                    *d = map.definition(*d);
                 }
-                | DefinitionEdit::RenameNode {
+                DefinitionEdit::RenameNode {
                     definition: d,
                     node,
                     ..
@@ -764,7 +884,22 @@ impl Graph {
                 *preset = map.presets.get(preset).copied().unwrap_or(*preset)
             }
             DocumentEdit::Hierarchy(edit) => match edit {
-                HierarchyEdit::Connect { object, .. } => {
+                HierarchyEdit::Connect {
+                    object, property, ..
+                } => {
+                    let origin = self.origin(current, object.instance)?;
+                    *property = self
+                        .path(
+                            current,
+                            map,
+                            origin,
+                            &PropertyPath {
+                                references: object.references.clone(),
+                                node: object.node,
+                                property: *property,
+                            },
+                        )?
+                        .property;
                     *object = self.object(current, map, object)?
                 }
                 HierarchyEdit::Insert {
@@ -884,7 +1019,7 @@ impl Graph {
             } => Ok(PropertyAddress::Definition {
                 definition: map.definition(*d),
                 node: map.node(*d, *n),
-                property: *property,
+                property: self.property(current, map, *d, *n, *property),
             }),
             PropertyAddress::Occurrence { instance, path } => {
                 let d = self.origin(current, *instance)?;

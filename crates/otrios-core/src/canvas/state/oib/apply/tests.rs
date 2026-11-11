@@ -2,6 +2,9 @@
 use super::*;
 use crate::test_support::oib_designer as app;
 use otrios_interfaces::oib::authoring::*;
+use otrios_interfaces::oib::designer::{
+    DefinitionId, InstanceId, NodeId, PropertyAddress, PropertyDescriptor, PropertyId, PropertyPath,
+};
 #[allow(dead_code)]
 #[path = "../../../../../tests/support/oib_library_fixture.rs"]
 mod imported_fixture;
@@ -122,6 +125,8 @@ fn interleaved_creation(replica: &StateAdapter, implicit: bool) -> Apply {
             definition: DefinitionId(next),
             name: "LabelledSlider".into(),
             root,
+            properties: vec![],
+            next_property: 0,
         }),
         DocumentEdit::Definition(DefinitionEdit::CreateNode {
             definition: DefinitionId(next),
@@ -287,6 +292,957 @@ fn settle(authority: &mut Document, replica: &mut StateAdapter, session: &mut Se
     }
     panic!("Apply receipt did not settle");
 }
+
+fn endpoint_descriptor(
+    replica: &StateAdapter,
+    definition: DefinitionId,
+    offset: u64,
+    name: &str,
+) -> PropertyDescriptor {
+    let seed = replica.doc.oib_resolved_seed().unwrap();
+    let metadata = seed.designer.as_ref().unwrap();
+    let component = metadata
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let mut descriptor = metadata
+        .classes
+        .iter()
+        .flat_map(|class| &class.properties)
+        .find(|p| p.policy.live_literal && matches!(p.default, Value::Text(_)))
+        .unwrap()
+        .clone();
+    descriptor.id = PropertyId(
+        crate::canvas::oib::document::next_property_id(metadata, component).unwrap() + offset,
+    );
+    descriptor.name = name.into();
+    descriptor.label = name.into();
+    descriptor.default = Value::Text(format!("{name} fallback"));
+    descriptor.policy.app_binding = false;
+    descriptor
+}
+
+fn endpoint_apply(
+    authority: &mut Document,
+    replica: &mut StateAdapter,
+    session: &mut Session,
+    operations: Vec<DocumentEdit>,
+) {
+    let mut apply = replica.oib_apply_base().unwrap();
+    apply.operations = operations;
+    replica.preview_oib_apply(&apply).unwrap();
+    assert!(replica.apply_oib(apply).unwrap());
+    settle(authority, replica, session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Accepted { .. }
+    ));
+}
+
+#[test]
+fn endpoint_contract_removal_keeps_nodes_cursor_holes_and_retires_late_writes() {
+    let (mut authority, mut replica, mut session) = fixture();
+    let definition = DefinitionId(10);
+    let first = endpoint_descriptor(&replica, definition, 0, "caption");
+    let second = endpoint_descriptor(&replica, definition, 1, "description");
+    let root = replica
+        .oib_history_source()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap()
+        .root;
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![
+            DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                definition,
+                descriptor: first.clone(),
+            }),
+            DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                definition,
+                descriptor: second.clone(),
+            }),
+            DocumentEdit::Definition(DefinitionEdit::SetDefault {
+                definition,
+                node: root,
+                property: first.id,
+                value: Value::Text("Authored caption".into()),
+            }),
+            DocumentEdit::Definition(DefinitionEdit::Expose {
+                definition,
+                property: first.id,
+                targets: vec![PropertyPath {
+                    references: vec![],
+                    node: root,
+                    property: second.id,
+                }],
+            }),
+        ],
+    );
+    let shared = PropertyAddress::Definition {
+        definition,
+        node: root,
+        property: first.id,
+    };
+    let occurrence = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: PropertyPath {
+            references: vec![],
+            node: root,
+            property: first.id,
+        },
+    };
+    let stale: Vec<_> = [&shared, &occurrence]
+        .into_iter()
+        .map(|address| {
+            replica
+                .oib_capture_change(address, Some(Value::Text("Delayed write".into())))
+                .unwrap()
+        })
+        .collect();
+    let before = replica.oib_history_source().unwrap();
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+            definition,
+            property: first.id,
+        })],
+    );
+    let after = replica.oib_history_source().unwrap();
+    let mut expected = before
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap()
+        .clone();
+    expected.properties.retain(|p| p.id != first.id);
+    expected
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == root)
+        .unwrap()
+        .defaults
+        .retain(|p| p.property != first.id);
+    expected.exposed.retain(|p| p.property != first.id);
+    assert_eq!(
+        after
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap(),
+        &expected,
+        "removal changes only the declared endpoint and its owned fallback/forwarding row"
+    );
+    assert_eq!(after.next_identity, before.next_identity);
+    assert_eq!(expected.next_property, second.id.0 + 1);
+    assert_eq!(
+        expected.properties.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![second.id]
+    );
+    assert!(replica.oib_property_register(&shared).is_err());
+    assert!(replica.oib_property_register(&occurrence).is_err());
+    let committed = authority.save().unwrap();
+    authority.oib_write([82; 16], &stale).unwrap();
+    assert_eq!(
+        authority.save().unwrap(),
+        committed,
+        "ordinary delayed writes cannot recreate retired leaves while the node remains live"
+    );
+    let mut late_apply = replica.oib_apply_base().unwrap();
+    late_apply.changes = stale.clone();
+    assert!(
+        replica
+            .preview_oib_apply(&late_apply)
+            .err()
+            .unwrap()
+            .contains("removed")
+    );
+    assert!(replica.apply_oib(late_apply).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(
+        matches!(replica.oib_apply_result().unwrap().unwrap().result,ApplyResult::Rejected {message} if message.contains("removed"))
+    );
+    assert_eq!(authority.oib_source().unwrap(), after);
+    let mut reuse = replica.oib_apply_base().unwrap();
+    reuse
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition,
+            descriptor: first.clone(),
+        }));
+    assert!(replica.preview_oib_apply(&reuse).is_err());
+    assert!(replica.apply_oib(reuse).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Rejected { .. }
+    ));
+    assert_eq!(
+        authority.oib_source().unwrap(),
+        after,
+        "SetProperty cannot reclaim a retired local ID"
+    );
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+            definition,
+            property: second.id,
+        })],
+    );
+    let empty = replica.oib_history_source().unwrap();
+    let component = empty
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert!(component.properties.is_empty());
+    assert_eq!(
+        component.next_property,
+        second.id.0 + 1,
+        "deleting the last endpoint retains the high-water mark"
+    );
+    let third = endpoint_descriptor(&replica, definition, 0, "new_caption");
+    assert_eq!(third.id.0, component.next_property);
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition,
+            descriptor: third.clone(),
+        })],
+    );
+    assert!(third.id > second.id);
+    let committed = authority.save().unwrap();
+    authority.oib_write([83; 16], &stale).unwrap();
+    assert_eq!(
+        authority.save().unwrap(),
+        committed,
+        "a later declaration does not reopen the old semantic address"
+    );
+    assert!(replica.oib_property_register(&shared).is_err());
+    assert!(replica.oib_property_register(&occurrence).is_err());
+}
+
+#[test]
+fn endpoint_contract_inherited_and_incoming_uses_require_explicit_repair() {
+    let (mut authority, mut replica, mut session) = fixture();
+    let definition = DefinitionId(10);
+    let target = endpoint_descriptor(&replica, definition, 0, "caption");
+    let forwarding = endpoint_descriptor(&replica, definition, 1, "public_caption");
+    let root = replica
+        .oib_history_source()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap()
+        .root;
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![
+            DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                definition,
+                descriptor: target.clone(),
+            }),
+            DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                definition,
+                descriptor: forwarding.clone(),
+            }),
+            DocumentEdit::Definition(DefinitionEdit::Expose {
+                definition,
+                property: forwarding.id,
+                targets: vec![PropertyPath {
+                    references: vec![],
+                    node: root,
+                    property: target.id,
+                }],
+            }),
+        ],
+    );
+    let before = authority.oib_source().unwrap();
+    let seed = replica.doc.oib_resolved_seed().unwrap();
+    let metadata = seed.designer.as_ref().unwrap();
+    let component = metadata
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let root_class = component
+        .nodes
+        .iter()
+        .find(|node| node.id == root)
+        .unwrap()
+        .class;
+    let inherited = crate::canvas::oib::document::class_descriptors(&metadata.classes, root_class)
+        .unwrap()[0]
+        .id;
+    for property in [target.id, inherited] {
+        let mut apply = replica.oib_apply_base().unwrap();
+        apply
+            .operations
+            .push(DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                definition,
+                property,
+            }));
+        let preview = replica.preview_oib_apply(&apply);
+        assert!(
+            preview.is_err(),
+            "Unexpected removable property {property:?}; preview {:?}",
+            preview.as_ref().map(|p| {
+                let source = p.oib_history_source().unwrap();
+                let d = source
+                    .definitions
+                    .iter()
+                    .find(|d| d.id == definition)
+                    .unwrap();
+                (
+                    d.properties.clone(),
+                    d.exposed.clone(),
+                    p.doc.oib_status().unwrap().error,
+                )
+            })
+        );
+        assert!(replica.apply_oib(apply).unwrap());
+        settle(&mut authority, &mut replica, &mut session);
+        assert!(matches!(
+            replica.oib_apply_result().unwrap().unwrap().result,
+            ApplyResult::Rejected { .. }
+        ));
+        assert_eq!(authority.oib_source().unwrap(), before);
+    }
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![
+            DocumentEdit::Definition(DefinitionEdit::Expose {
+                definition,
+                property: forwarding.id,
+                targets: vec![],
+            }),
+            DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                definition,
+                property: target.id,
+            }),
+        ],
+    );
+    let after = authority.oib_source().unwrap();
+    let component = after
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert_eq!(
+        component
+            .properties
+            .iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>(),
+        vec![forwarding.id]
+    );
+    assert_eq!(
+        component
+            .exposed
+            .iter()
+            .find(|p| p.property == forwarding.id)
+            .unwrap()
+            .targets,
+        vec![]
+    );
+}
+
+#[test]
+fn endpoint_contract_unused_visual_reader_blocks_removal_until_explicit_repair() {
+    use otrios_interfaces::{
+        canvas::Projection,
+        layout::{Expr, Shape},
+        oib::{designer::DefinitionNode, graph},
+    };
+    let (mut authority, mut replica, mut session) = fixture();
+    let descriptor = endpoint_descriptor(&replica, DefinitionId(10), 0, "caption");
+    let source = replica.oib_history_source().unwrap();
+    let existing = source
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap();
+    let class = existing
+        .nodes
+        .iter()
+        .find(|node| node.id == existing.root)
+        .unwrap()
+        .class;
+    let next = source.next_identity;
+    let definition = DefinitionId(next);
+    let root = NodeId(next + 1);
+    let visual = graph::Visual {
+        layout: None,
+        frame: [0., 0., 320., 48.].map(|n| Expr::Literal(Value::Number(n))),
+        resize: None,
+        visible: Expr::Literal(Value::Boolean(true)),
+        shape: Shape::Canvas { clip: true },
+        semantics: None,
+        action: None,
+        // The dependency belongs to authored source even though this Canvas
+        // does not consume the parameter and no preset ever instantiates it.
+        parameters: vec![graph::Parameter {
+            local: 1,
+            source: graph::ParameterSource::Property(PropertyPath {
+                references: vec![],
+                node: root,
+                property: descriptor.id,
+            }),
+            projection: Projection::Identity,
+        }],
+    };
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
+            definition,
+            name: "Unused reader".into(),
+            root: DefinitionNode {
+                id: root,
+                name: "Panel".into(),
+                class,
+                owner: None,
+                visual_children: vec![],
+                defaults: vec![],
+                reference: None,
+                visual: Some(visual.clone()),
+            },
+            properties: vec![descriptor.clone()],
+            next_property: descriptor.id.0 + 1,
+        })],
+    );
+    let before = authority.oib_source().unwrap();
+    assert!(
+        !before
+            .presets
+            .iter()
+            .any(|preset| preset.definition == definition)
+    );
+    assert!(
+        !before
+            .instances
+            .iter()
+            .any(|instance| instance.component == definition.0)
+    );
+    let mut removal = replica.oib_apply_base().unwrap();
+    removal
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+            definition,
+            property: descriptor.id,
+        }));
+    assert!(
+        replica.preview_oib_apply(&removal).is_err(),
+        "unused visual property paths must be admitted, not skipped with renderer expansion"
+    );
+    assert!(replica.apply_oib(removal).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Rejected { .. }
+    ));
+    assert_eq!(authority.oib_source().unwrap(), before);
+    let mut repaired_visual = visual;
+    repaired_visual.parameters.clear();
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![
+            DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+                definition,
+                property: descriptor.id,
+            }),
+            DocumentEdit::Definition(DefinitionEdit::SetVisual {
+                definition,
+                node: root,
+                visual: Some(repaired_visual.clone()),
+            }),
+        ],
+    );
+    let after = authority.oib_source().unwrap();
+    let component = after
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert!(component.properties.is_empty());
+    assert_eq!(component.next_property, descriptor.id.0 + 1);
+    assert_eq!(
+        component
+            .nodes
+            .iter()
+            .find(|node| node.id == root)
+            .unwrap()
+            .visual
+            .as_ref(),
+        Some(&repaired_visual)
+    );
+    assert_eq!(after.next_identity, before.next_identity);
+}
+
+#[test]
+fn endpoint_contract_sparse_initial_namespace_requires_fresh_global_definition_identity() {
+    use otrios_interfaces::{
+        layout::{Expr, Shape},
+        oib::{designer::DefinitionNode, graph},
+    };
+    let (mut authority, mut replica, mut session) = fixture();
+    let first = endpoint_descriptor(&replica, DefinitionId(10), 0, "caption");
+    let second = endpoint_descriptor(&replica, DefinitionId(10), 2, "description");
+    let next = replica.oib_history_source().unwrap().next_identity;
+    let definition = DefinitionId(next);
+    let root_class = replica
+        .oib_history_source()
+        .unwrap()
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.owner.is_none())
+        .unwrap()
+        .class;
+    let create = DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
+        definition,
+        name: "Sparse endpoint component".into(),
+        root: DefinitionNode {
+            id: NodeId(next + 1),
+            name: "Panel".into(),
+            class: root_class,
+            owner: None,
+            visual_children: vec![],
+            defaults: vec![],
+            reference: None,
+            visual: Some(graph::Visual {
+                layout: None,
+                frame: [0., 0., 320., 48.].map(|n| Expr::Literal(Value::Number(n))),
+                resize: None,
+                visible: Expr::Literal(Value::Boolean(true)),
+                shape: Shape::Canvas { clip: true },
+                semantics: None,
+                action: None,
+                parameters: vec![],
+            }),
+        },
+        properties: vec![first.clone(), second.clone()],
+        next_property: second.id.0 + 3,
+    });
+    let preset = DocumentEdit::Preset(PresetEdit::Create {
+        preset: graph::Preset {
+            id: next + 2,
+            name: "Sparse endpoint component".into(),
+            definition,
+            assignments: vec![],
+            frame: None,
+            palette: true,
+        },
+    });
+    let mut malformed = replica.oib_apply_base().unwrap();
+    malformed.operations = vec![create.clone(), preset.clone()];
+    if let DocumentEdit::Definition(DefinitionEdit::CreateDefinition { next_property, .. }) =
+        &mut malformed.operations[0]
+    {
+        *next_property = second.id.0;
+    }
+    assert!(
+        replica.preview_oib_apply(&malformed).is_err(),
+        "every live ID must be below the cursor"
+    );
+    assert!(replica.apply_oib(malformed).unwrap());
+    settle(&mut authority, &mut replica, &mut session);
+    assert!(matches!(
+        replica.oib_apply_result().unwrap().unwrap().result,
+        ApplyResult::Rejected { .. }
+    ));
+    assert_eq!(authority.oib_source().unwrap().next_identity, next);
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![create.clone(), preset],
+    );
+    let source = authority.oib_source().unwrap();
+    let component = source
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert_eq!(component.properties, vec![first, second.clone()]);
+    assert_eq!(component.next_property, second.id.0 + 3);
+    assert_eq!(source.next_identity, next + 3);
+    for removed in [false, true] {
+        if removed {
+            endpoint_apply(
+                &mut authority,
+                &mut replica,
+                &mut session,
+                vec![
+                    DocumentEdit::Definition(DefinitionEdit::DeleteDefinition { definition }),
+                    DocumentEdit::Preset(PresetEdit::Delete { preset: next + 2 }),
+                ],
+            );
+        }
+        let before = authority.oib_source().unwrap();
+        let mut reuse = replica.oib_apply_base().unwrap();
+        reuse.operations = vec![create.clone()];
+        assert!(replica.preview_oib_apply(&reuse).is_err());
+        assert!(replica.apply_oib(reuse).unwrap());
+        settle(&mut authority, &mut replica, &mut session);
+        assert!(matches!(
+            replica.oib_apply_result().unwrap().unwrap().result,
+            ApplyResult::Rejected { .. }
+        ));
+        assert_eq!(
+            authority.oib_source().unwrap(),
+            before,
+            "existing and retired global definition IDs cannot initialize a namespace again"
+        );
+    }
+}
+
+#[test]
+fn endpoint_contract_reset_of_empty_baseline_preserves_retired_cursor() {
+    let (mut authority, mut replica, mut session) = fixture();
+    let definition = DefinitionId(10);
+    let descriptor = endpoint_descriptor(&replica, definition, 0, "temporary_caption");
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition,
+            descriptor: descriptor.clone(),
+        })],
+    );
+    let source = authority.oib_source().unwrap();
+    let component = source
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let root = component.root;
+    let cursor = component.next_property;
+    let address = PropertyAddress::Definition {
+        definition,
+        node: root,
+        property: descriptor.id,
+    };
+    let delayed = replica
+        .oib_capture_change(&address, Some(Value::Text("Old caption".into())))
+        .unwrap();
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+            definition,
+            property: descriptor.id,
+        })],
+    );
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Restore { defaults: true }],
+    );
+    let restored = authority.oib_source().unwrap();
+    let component = restored
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert_eq!(component.root, root);
+    assert!(component.properties.is_empty());
+    assert_eq!(
+        component.next_property, cursor,
+        "Reset must not reopen a surviving definition's retired property interval"
+    );
+    let committed = authority.save().unwrap();
+    authority.oib_write([82; 16], &[delayed]).unwrap();
+    assert_eq!(authority.save().unwrap(), committed);
+    let next = endpoint_descriptor(&replica, definition, 0, "new_caption");
+    assert_eq!(next.id.0, cursor);
+    assert!(next.id > descriptor.id);
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition,
+            descriptor: next,
+        })],
+    );
+    assert!(replica.oib_property_register(&address).is_err());
+}
+
+#[test]
+fn endpoint_contract_reset_restores_signed_property_at_fresh_id_and_remaps_uses() {
+    use otrios_interfaces::{
+        canvas::Projection,
+        oib::{
+            designer::{ExposedProperty, PropertyDefault},
+            graph,
+        },
+    };
+    let (_, template, _) = fixture();
+    let definition = DefinitionId(10);
+    let first = endpoint_descriptor(&template, definition, 0, "baseline_caption");
+    let second = endpoint_descriptor(&template, definition, 1, "baseline_description");
+    let mut ui = app::ui(&[]);
+    let graph = imported_fixture::seed_mut(&mut ui).graph.as_mut().unwrap();
+    let component = graph
+        .definitions
+        .iter_mut()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let root = component.root;
+    let path = PropertyPath {
+        references: vec![],
+        node: root,
+        property: first.id,
+    };
+    component.properties = vec![first.clone(), second.clone()];
+    component.next_property = second.id.0 + 1;
+    component.exposed.push(ExposedProperty {
+        property: first.id,
+        targets: vec![PropertyPath {
+            references: vec![],
+            node: root,
+            property: second.id,
+        }],
+    });
+    component.exposed.sort_by_key(|p| p.property);
+    let root_node = component
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == root)
+        .unwrap();
+    root_node.defaults.push(PropertyDefault {
+        property: first.id,
+        value: Value::Text("Signed root fallback".into()),
+    });
+    root_node.defaults.sort_by_key(|p| p.property);
+    let visual = root_node.visual.as_mut().unwrap();
+    let local = visual.parameters.iter().map(|p| p.local).max().unwrap_or(0) + 1;
+    visual.parameters.push(graph::Parameter {
+        local,
+        source: graph::ParameterSource::Property(path.clone()),
+        projection: Projection::Identity,
+    });
+    for preset in graph
+        .presets
+        .iter_mut()
+        .filter(|p| p.definition == definition)
+    {
+        preset.assignments.push(graph::Assignment {
+            target: path.clone(),
+            source: graph::Source::Literal(Value::Text("Signed preset caption".into())),
+        });
+        preset.assignments.sort_by(|a, b| a.target.cmp(&b.target));
+    }
+    let (mut authority, mut replica, mut session) = fixture_ui(imported_fixture::admit(&ui));
+    let shared = PropertyAddress::Definition {
+        definition,
+        node: root,
+        property: first.id,
+    };
+    let occurrence = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: path.clone(),
+    };
+    let delayed: Vec<_> = [&shared, &occurrence]
+        .into_iter()
+        .map(|address| {
+            replica
+                .oib_capture_change(address, Some(Value::Text("Old signed address".into())))
+                .unwrap()
+        })
+        .collect();
+    let original = authority.oib_source().unwrap();
+    let component = original
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let mut repaired_visual = component
+        .nodes
+        .iter()
+        .find(|node| node.id == root)
+        .unwrap()
+        .visual
+        .clone()
+        .unwrap();
+    repaired_visual.parameters.retain(|p| p.local != local);
+    let mut repair = vec![
+        DocumentEdit::Definition(DefinitionEdit::DeleteProperty {
+            definition,
+            property: first.id,
+        }),
+        DocumentEdit::Definition(DefinitionEdit::SetVisual {
+            definition,
+            node: root,
+            visual: Some(repaired_visual),
+        }),
+    ];
+    for preset in original
+        .presets
+        .iter()
+        .filter(|p| p.definition == definition)
+    {
+        let mut preset = preset.clone();
+        preset.assignments.retain(|a| a.target != path);
+        repair.push(DocumentEdit::Preset(PresetEdit::Update { preset }));
+    }
+    endpoint_apply(&mut authority, &mut replica, &mut session, repair);
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Restore { defaults: true }],
+    );
+    let restored = authority.oib_source().unwrap();
+    let component = restored
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    let fresh = component
+        .properties
+        .iter()
+        .find(|p| p.name == first.name)
+        .unwrap()
+        .id;
+    assert_eq!(
+        fresh.0,
+        original
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .next_property
+    );
+    assert!(fresh > second.id);
+    assert_eq!(component.next_property, fresh.0 + 1);
+    assert_eq!(component.root, root);
+    assert!(restored.baseline.contains(&BaselineIdentity::Property {
+        definition,
+        source: first.id,
+        current: fresh
+    }));
+    let root_node = component.nodes.iter().find(|node| node.id == root).unwrap();
+    assert!(
+        root_node
+            .defaults
+            .iter()
+            .any(|p| p.property == fresh && p.value == Value::Text("Signed root fallback".into()))
+    );
+    let fresh_path = PropertyPath {
+        references: vec![],
+        node: root,
+        property: fresh,
+    };
+    assert_eq!(
+        component
+            .exposed
+            .iter()
+            .find(|p| p.property == fresh)
+            .unwrap()
+            .targets,
+        vec![PropertyPath {
+            references: vec![],
+            node: root,
+            property: second.id
+        }]
+    );
+    assert!(
+        root_node
+            .visual
+            .as_ref()
+            .unwrap()
+            .parameters
+            .iter()
+            .any(|p| p.local == local
+                && p.source == graph::ParameterSource::Property(fresh_path.clone()))
+    );
+    assert!(
+        restored
+            .presets
+            .iter()
+            .filter(|p| p.definition == definition)
+            .all(|p| p.assignments.iter().any(|a| a.target == fresh_path))
+    );
+    let new_occurrence = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: fresh_path,
+    };
+    assert!(replica.oib_property_register(&new_occurrence).is_ok());
+    assert!(replica.oib_property_register(&shared).is_err());
+    assert!(replica.oib_property_register(&occurrence).is_err());
+    let committed = authority.save().unwrap();
+    authority.oib_write([82; 16], &delayed).unwrap();
+    assert_eq!(
+        authority.save().unwrap(),
+        committed,
+        "Reset cannot reanimate old signed definition or occurrence addresses"
+    );
+    replica
+        .edit_oib_property(&new_occurrence, Some(Value::Text("Fresh override".into())))
+        .unwrap();
+    settle(&mut authority, &mut replica, &mut session);
+    endpoint_apply(
+        &mut authority,
+        &mut replica,
+        &mut session,
+        vec![DocumentEdit::Restore { defaults: true }],
+    );
+    let repeated = authority.oib_source().unwrap();
+    let component = repeated
+        .definitions
+        .iter()
+        .find(|d| d.id == definition)
+        .unwrap();
+    assert_eq!(
+        component
+            .properties
+            .iter()
+            .find(|p| p.name == first.name)
+            .unwrap()
+            .id,
+        fresh
+    );
+    assert_eq!(
+        component.next_property,
+        fresh.0 + 1,
+        "repeated Reset preserves its live baseline role"
+    );
+    assert_eq!(
+        replica
+            .oib_property_register(&new_occurrence)
+            .unwrap()
+            .alternatives,
+        vec![None]
+    );
+}
+
 fn color_change(replica: &StateAdapter, color: [u8; 4]) -> Change {
     let seed = replica.doc.oib_resolved_seed().unwrap();
     let cell = seed
@@ -982,6 +1938,8 @@ fn atomic_apply_creation_allocates_only_on_commit_and_replay_never_duplicates() 
         DocumentEdit::Definition(DefinitionEdit::CreateDefinition {
             definition: DefinitionId(next),
             name: "Created once".into(),
+            properties: vec![],
+            next_property: 0,
             root: DefinitionNode {
                 id: NodeId(next + 1),
                 name: "Panel".into(),

@@ -18,6 +18,8 @@ struct Remap<'a> {
     resolved: &'a [ComponentDefinition],
     definitions: BTreeMap<DefinitionId, DefinitionId>,
     nodes: BTreeMap<(DefinitionId, NodeId), NodeId>,
+    properties: BTreeMap<(DefinitionId, PropertyId), PropertyId>,
+    property_cursors: BTreeMap<DefinitionId, u64>,
     slots: BTreeMap<(DefinitionId, SlotId), SlotId>,
     presets: BTreeMap<u64, u64>,
     instances: BTreeMap<InstanceId, InstanceId>,
@@ -63,8 +65,25 @@ impl Remap<'_> {
         Ok(PropertyPath {
             references,
             node: self.node(definition, path.node)?,
-            property: path.property,
+            property: self.property(definition, path.node, path.property)?,
         })
+    }
+    fn property(
+        &self,
+        definition: DefinitionId,
+        node: NodeId,
+        property: PropertyId,
+    ) -> Result<PropertyId> {
+        let component = self.definition(definition)?;
+        if node == component.root && component.properties.iter().any(|p| p.id == property) {
+            if let Some(current) = self.properties.get(&(definition, property)) {
+                return Ok(*current);
+            }
+            if self.definitions.contains_key(&definition) {
+                return Err("Missing baseline endpoint role".into());
+            }
+        }
+        Ok(property)
     }
     fn visual(&self, definition: DefinitionId, visual: &mut graph::Visual) -> Result<()> {
         for parameter in &mut visual.parameters {
@@ -81,12 +100,22 @@ impl Remap<'_> {
         let mut result = value.clone();
         result.id = self.definitions[&value.id];
         result.root = self.node(value.id, value.root)?;
+        for descriptor in &mut result.properties {
+            descriptor.id = self.properties[&(value.id, descriptor.id)];
+        }
+        result.properties.sort_by_key(|descriptor| descriptor.id);
+        result.next_property = self.property_cursors[&value.id];
         for node in &mut result.nodes {
+            let original_node = node.id;
             node.id = self.node(value.id, node.id)?;
             node.owner = node.owner.map(|id| self.node(value.id, id)).transpose()?;
             for id in &mut node.visual_children {
                 *id = self.node(value.id, *id)?;
             }
+            for default in &mut node.defaults {
+                default.property = self.property(value.id, original_node, default.property)?;
+            }
+            node.defaults.sort_by_key(|default| default.property);
             if let Some(reference) = &mut node.reference {
                 let target_definition = reference.definition;
                 reference.definition = self
@@ -100,16 +129,22 @@ impl Remap<'_> {
                         *path = self.path(value.id, path)?;
                     }
                 }
+                reference
+                    .assignments
+                    .sort_by(|a, b| a.target.cmp(&b.target));
             }
             if let Some(visual) = &mut node.visual {
                 self.visual(value.id, visual)?;
             }
         }
         for exposed in &mut result.exposed {
+            exposed.property = self.property(value.id, value.root, exposed.property)?;
             for path in &mut exposed.targets {
                 *path = self.path(value.id, path)?;
             }
+            exposed.targets.sort();
         }
+        result.exposed.sort_by_key(|exposed| exposed.property);
         for slot in &mut result.slots {
             let path = self.path(
                 value.id,
@@ -141,6 +176,7 @@ impl Remap<'_> {
                 *path = self.path(value.definition, path)?;
             }
         }
+        result.assignments.sort_by(|a, b| a.target.cmp(&b.target));
         Ok(result)
     }
 }
@@ -159,6 +195,8 @@ pub(super) fn restore(
         resolved: &resolved.definitions,
         definitions: BTreeMap::new(),
         nodes: BTreeMap::new(),
+        properties: BTreeMap::new(),
+        property_cursors: BTreeMap::new(),
         slots: BTreeMap::new(),
         presets: BTreeMap::new(),
         instances: BTreeMap::new(),
@@ -183,6 +221,37 @@ pub(super) fn restore(
                 DefinitionId(allocate(&mut next)?)
             },
         );
+        // Property IDs are local to a definition. A recreated global definition
+        // has a new namespace; a surviving one must never reopen a retired ID.
+        let mut property_cursor = present.map_or(definition.next_property, |current| {
+            current.next_property.max(definition.next_property)
+        });
+        for descriptor in &definition.properties {
+            let current = source
+                .baseline
+                .iter()
+                .find_map(|role| match role {
+                    BaselineIdentity::Property {
+                        definition: owner,
+                        source,
+                        current,
+                    } if *owner == definition.id && *source == descriptor.id => Some(*current),
+                    _ => None,
+                })
+                .unwrap_or(descriptor.id);
+            let property = if present.is_none() {
+                descriptor.id
+            } else if present
+                .is_some_and(|component| component.properties.iter().any(|p| p.id == current))
+            {
+                current
+            } else {
+                PropertyId(allocate(&mut property_cursor)?)
+            };
+            map.properties
+                .insert((definition.id, descriptor.id), property);
+        }
+        map.property_cursors.insert(definition.id, property_cursor);
         for node in &definition.nodes {
             let current = source
                 .baseline
@@ -321,6 +390,17 @@ pub(super) fn restore(
                     source: *source,
                     current: *current,
                 }),
+        )
+        .chain(
+            map.properties
+                .iter()
+                .map(
+                    |((definition, source), current)| BaselineIdentity::Property {
+                        definition: *definition,
+                        source: *source,
+                        current: *current,
+                    },
+                ),
         )
         .chain(
             map.slots

@@ -293,7 +293,9 @@ impl AppliedHistory {
             matches!(
                 operation,
                 DocumentEdit::Definition(
-                    DefinitionEdit::DeleteDefinition { .. } | DefinitionEdit::DeleteNode { .. }
+                    DefinitionEdit::DeleteDefinition { .. }
+                        | DefinitionEdit::DeleteNode { .. }
+                        | DefinitionEdit::DeleteProperty { .. }
                 ) | DocumentEdit::Hierarchy(HierarchyEdit::Remove { .. })
             )
         });

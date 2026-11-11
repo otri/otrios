@@ -496,6 +496,8 @@ fn create_and_delete_a_definition_preset_and_live_instance_validate_only_the_fin
                 definition: DefinitionId(next),
                 name: "Local component".into(),
                 root: slider_node(next + 1, None),
+                properties: vec![],
+                next_property: 0,
             }),
             DocumentEdit::Preset(PresetEdit::Create { preset }),
             DocumentEdit::Hierarchy(HierarchyEdit::Insert {

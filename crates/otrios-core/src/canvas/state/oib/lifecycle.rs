@@ -108,41 +108,78 @@ impl Document {
         use otrios_interfaces::oib::{authoring::BaselineIdentity, designer::*};
         let source = self.oib_source_shared()?;
         let current = self.oib_authored_shared()?;
-        let current = &current
+        let metadata = current
             .designer
             .as_ref()
-            .ok_or("Missing resolved metadata")?
-            .definitions;
+            .ok_or("Missing resolved metadata")?;
+        let current = &metadata.definitions;
         let first = self.oib_binding()?.identity_floor;
         let allocated = |identity| (first..source.next_identity).contains(&identity);
-        fn contains(
-            definitions: &[ComponentDefinition],
+        fn resolve<'a>(
+            definitions: &'a [ComponentDefinition],
             mut definition: DefinitionId,
             references: &[NodeId],
             node: NodeId,
-        ) -> bool {
+        ) -> Option<(&'a ComponentDefinition, &'a DefinitionNode)> {
             for boundary in references {
-                let Some(next) = definitions
+                let next = definitions
                     .iter()
                     .find(|current| current.id == definition)
                     .and_then(|current| current.nodes.iter().find(|node| node.id == *boundary))
-                    .and_then(|node| node.reference.as_ref())
-                else {
-                    return false;
-                };
+                    .and_then(|node| node.reference.as_ref())?;
                 definition = next.definition;
             }
-            definitions
+            let definition = definitions
                 .iter()
-                .find(|current| current.id == definition)
-                .is_some_and(|current| current.nodes.iter().any(|current| current.id == node))
+                .find(|current| current.id == definition)?;
+            Some((
+                definition,
+                definition.nodes.iter().find(|current| current.id == node)?,
+            ))
         }
+        let contains =
+            |definitions: &[ComponentDefinition], definition, references: &[NodeId], node| {
+                resolve(definitions, definition, references, node).is_some()
+            };
+        let retired_endpoint = |definition,
+                                references: &[NodeId],
+                                node,
+                                property: PropertyId|
+         -> Result<Option<bool>> {
+            let Some((definition, node)) = resolve(current, definition, references, node) else {
+                return Ok(None);
+            };
+            if node.id != definition.root
+                || definition.next_property == 0
+                || property.0 >= definition.next_property
+                || definition
+                    .properties
+                    .iter()
+                    .any(|descriptor| descriptor.id == property)
+            {
+                return Ok(Some(false));
+            }
+            let inherited = super::super::super::oib::document::class_descriptors(
+                &metadata.classes,
+                node.class,
+            )?;
+            Ok(Some(
+                property.0
+                    > inherited
+                        .iter()
+                        .map(|descriptor| descriptor.id.0)
+                        .max()
+                        .unwrap_or(0),
+            ))
+        };
         match address {
             PropertyAddress::Definition {
-                definition, node, ..
+                definition,
+                node,
+                property,
             } => {
-                if contains(current, *definition, &[], *node) {
-                    return Ok(false);
+                if let Some(retired) = retired_endpoint(*definition, &[], *node, *property)? {
+                    return Ok(retired);
                 }
                 let signed = self.oib_baseline_graph()?;
                 Ok(contains(&signed.definitions, *definition, &[], *node)
@@ -157,8 +194,10 @@ impl Document {
                     return Ok(false);
                 };
                 let definition = DefinitionId(root.component);
-                if contains(current, definition, &path.references, path.node) {
-                    return Ok(false);
+                if let Some(retired) =
+                    retired_endpoint(definition, &path.references, path.node, path.property)?
+                {
+                    return Ok(retired);
                 }
                 let original = source
                     .baseline

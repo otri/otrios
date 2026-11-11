@@ -705,6 +705,10 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
             .unwrap_or(0),
         prototypes,
     });
+    // Validate every admitted source path, including endpoints with no current
+    // visual consumer. Lowering reachable geometry alone cannot prove that an
+    // unused incoming forwarding route survived a structural removal.
+    document::validate(&compiler.seed)?;
     Ok(Lowering {
         seed: compiler.seed,
         selectors: compiler.selectors,

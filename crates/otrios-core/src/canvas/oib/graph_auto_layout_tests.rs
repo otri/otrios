@@ -85,7 +85,7 @@ fn auto_layout_local_wrapper_allocates_real_imported_slider_and_pinned_track() {
         let graph = seed.graph.as_mut().unwrap();
         graph.definitions.push(wrapper(width));
         graph.presets.push(source::Preset {
-            id: 900,
+            id: 901,
             name: "LabelledSlider".into(),
             definition: DefinitionId(900),
             assignments: vec![],
@@ -100,7 +100,7 @@ fn auto_layout_local_wrapper_allocates_real_imported_slider_and_pinned_track() {
                 .objects
                 .iter()
                 .find(|m| {
-                    m.address.instance == InstanceId(900)
+                    m.address.instance == InstanceId(901)
                         && m.address.references == references
                         && m.address.node == NodeId(node)
                 })
