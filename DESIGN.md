@@ -187,3 +187,11 @@ Treat this document as the visual reference and RFC 0037 as the proposed technic
 contract. Neither enables unsupported renderer features. Changes to the visual
 reference and structured library source must be reviewed together, with the
 runtime source remaining in its existing LGPL boundary.
+
+## Designer lifecycle reference
+
+The [Designer design package](docs/oib-designer/README.md) specifies the complete
+workspace and component lifecycle, with stable UX journey IDs, technical contracts,
+a representative control qualification ledger and a disposable tested prototype.
+It targets landscape Frame and desktop authoring; phone portrait is unsupported.
+The new production Designer remains proposed.

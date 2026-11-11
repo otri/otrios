@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+// Disposable UX state model. Not OTriOS runtime implementation or wire format.
+(function (g) {
+'use strict';
+const controls=['Text','Button','Toggle','Slider','TextField','NumberField','Select','Segments','Progress','Tabs','List','Dialog','Stepper','RangeSlider','Menu','Status'];
+const copy=x=>JSON.parse(JSON.stringify(x));
+const empty=()=>({id:null,name:'No component selected',empty:true,nodes:[],api:{},layout:{flow:'column',gap:8,padding:16,width:'Fixed',height:'Hug'}});
+class Designer {
+ constructor(){this.next=1;this.generation=1;this.base=1;this.mode='Dark';this.test=false;this.values={};this.overrides={};this.history=[];this.future=[];this.published=null;this.catalog={};for(const kind of controls)this.catalog[kind]={id:kind,name:kind,builtin:true,retired:false,nodes:[],layout:{flow:'column',gap:12,padding:16,width:'Fill',height:'Hug'},api:{}};this.catalog.LabelledSlider={id:'LabelledSlider',name:'LabelledSlider',nodes:[{id:'seed-label',ref:'Text',label:'Volume'},{id:'seed-slider',ref:'Slider',label:'Volume',exposed:'value'}],api:{value:{node:'seed-slider',type:'Number'}},layout:{flow:'column',gap:12,padding:16,width:'Fill',height:'Hug'}};this.committed=copy(this.catalog);this.draft=copy(this.catalog.LabelledSlider);this.selection=null;}
+ get dirty(){return !this.draft.empty && JSON.stringify(this.draft)!==JSON.stringify(this.committed[this.draft.id]);}
+ snapshot(){return copy(this.draft);}
+ change(fn){if(this.draft.empty)throw Error('Create or open a component first.');const before=this.snapshot();fn(this.draft);if(JSON.stringify(before)!==JSON.stringify(this.draft)){this.history.push(before);this.future=[];}}
+ create(name){if(this.dirty)throw Error('Apply or discard this draft before creating another component.');if(!name.trim())throw Error('Name is required.');if(Object.values(this.catalog).some(d=>d.name===name.trim()))throw Error('A component already has that name.');this.draft={id:'component-'+this.next++,name:name.trim(),nodes:[],api:{},layout:{flow:'column',gap:8,padding:16,fixedW:320,width:'Fixed',height:'Hug'}};this.base=this.generation;this.selection=null;this.history=[];this.future=[];return this.draft.id;}
+ open(id){if(this.dirty)throw Error('Apply or discard this draft before opening another component.');const d=this.catalog[id];if(!d)throw Error('Component not found.');if(d.builtin)throw Error('Built-in source is read only; insert it into a new component.');this.draft=copy(d);this.base=this.generation;this.selection=null;this.history=[];this.future=[];}
+ insert(ref){const target=this.catalog[ref];if(!target||target.retired)throw Error('Component is missing or retired.');if(this.depends(ref,this.draft.id))throw Error('Insertion would create a dependency cycle.');const id='node-'+this.next++;this.change(d=>d.nodes.push({id,ref,label:ref==='Text'?'Label':target.name}));this.selection=id;return id;}
+ depends(start,id,seen=new Set()){if(start===id)return true;if(seen.has(start))return false;seen.add(start);return (this.catalog[start]?.nodes||[]).some(n=>this.depends(n.ref,id,seen));}
+ removeNode(id){if(!this.draft.nodes.some(n=>n.id===id))throw Error('Select a node.');this.change(d=>{d.nodes=d.nodes.filter(n=>n.id!==id);for(const [k,x] of Object.entries(d.api))if(x.node===id)delete d.api[k];});this.selection=null;}
+ move(id,delta){const i=this.draft.nodes.findIndex(n=>n.id===id),j=i+delta;if(i<0||j<0||j>=this.draft.nodes.length)return;this.change(d=>{[d.nodes[i],d.nodes[j]]=[d.nodes[j],d.nodes[i]]});}
+ expose(id,name,type){if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))throw Error('Use an identifier for the property name.');const node=this.draft.nodes.find(n=>n.id===id);if(!node)throw Error('Select a node.');const expected=['Slider','NumberField','Stepper','Progress'].includes(node.ref)?'Number':node.ref==='Toggle'?'Boolean':'Text';if(type!==expected)throw Error('Property type does not match the control.');if(this.draft.api[name]&&this.draft.api[name].node!==id)throw Error('Property name already exists.');this.change(d=>{d.api[name]={node:id,type};});}
+ validate(){const d=this.draft;if(d.empty)throw Error('Create or open a component first.');if(Object.values(this.catalog).some(x=>x.id!==d.id&&x.name===d.name.trim()))throw Error('A component already has that name.');if(!d.name.trim())throw Error('Name is required.');if(d.nodes.length>32)throw Error('Prototype budget: 32 nodes.');if(!['row','column'].includes(d.layout.flow))throw Error('Unsupported flow.');if(!Number.isFinite(d.layout.gap)||d.layout.gap<0||d.layout.gap>80)throw Error('Gap must be 0–80.');for(const n of d.nodes)if(!this.catalog[n.ref])throw Error('Missing dependency: '+n.ref);return true;}
+ apply(){if(this.base!==this.generation)throw Error('Draft is stale. Reload confirmed, or explicitly rebase your draft.');this.validate();if(this.draft._delete){const uses=this.uses(this.draft.id);if(uses.length)throw Error('Definition is now in use. Refresh impact.');delete this.catalog[this.draft.id];this.draft=copy(Object.values(this.catalog).find(d=>!d.builtin)||empty());}else this.catalog[this.draft.id]=copy(this.draft);this.committed=copy(this.catalog);this.generation++;this.base=this.generation;this.history=[];this.future=[];}
+ discard(){this.draft=copy(this.catalog[this.draft.id]||Object.values(this.catalog).find(d=>!d.builtin)||empty());this.base=this.generation;this.history=[];this.future=[];this.selection=null;}
+ undo(){if(!this.history.length)return;this.future.push(this.snapshot());this.draft=this.history.pop();this.selection=null;}
+ redo(){if(!this.future.length)return;this.history.push(this.snapshot());this.draft=this.future.pop();this.selection=null;}
+ uses(id){return Object.values(this.catalog).flatMap(d=>d.nodes.filter(n=>n.ref===id).map(n=>({owner:d.id,node:n.id,name:d.name})));}
+ deleteDefinition(id){if(this.catalog[id]?.builtin)throw Error('Built-in components cannot be deleted.');if(this.dirty)throw Error('Apply or discard the draft before deleting definitions.');const uses=this.uses(id);if(uses.length)throw Error('In use by '+uses.map(x=>x.name).join(', ')+'. Replace references or retire it.');if(!this.catalog[id])throw Error('Component not found.');if(this.draft.id!==id)throw Error('Open this definition before deleting it.');this.change(x=>x._delete=true);}
+ retire(id){if(this.dirty)throw Error('Apply or discard first.');if(this.catalog[id]?.builtin)throw Error('Built-ins cannot be retired here.');if(this.draft.id!==id)throw Error('Open this definition before retiring it.');this.change(x=>x.retired=true);}
+ remoteChange(){this.generation++;}
+ rebase(){this.validate();this.base=this.generation;}
+ publish(){if(this.dirty)throw Error('Apply the draft before publishing.');if(this.base!==this.generation)throw Error('Refresh the stale draft first.');this.published={generation:this.generation,catalog:copy(this.catalog)};return this.published.generation;}
+ setValue(id,value){this.values[id]=value;}
+ setOverride(instance,field,value){this.overrides[instance]??={};this.overrides[instance][field]=value;}
+ resetOverride(instance,field){delete this.overrides[instance]?.[field];}
+ resolve(instance,field,fallback){return this.overrides[instance]?.[field]??fallback;}
+}
+const api={Designer,controls,copy};if(typeof module!=='undefined')module.exports=api;else g.OIBPrototype=api;
+})(globalThis);

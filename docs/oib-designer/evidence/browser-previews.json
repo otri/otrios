@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-11",
+  "tool": "html_preview",
+  "method": "Browser JavaScript assertions injected into the built standalone HTML; no external service or production runtime",
+  "runs": [
+    {
+      "name": "frame-1280-dark",
+      "width": 1280,
+      "contentHeight": 782,
+      "capturedHeight": 782,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":24,\"assertions\":129,\"passed\":24,\"failed\":[],\"viewport\":{\"width\":1280,\"height\":800},\"shellHeight\":765.78125,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 1280,
+        "height": 782
+      }
+    },
+    {
+      "name": "desktop-1600-light",
+      "width": 1600,
+      "contentHeight": 782,
+      "capturedHeight": 782,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":24,\"assertions\":129,\"passed\":24,\"failed\":[],\"viewport\":{\"width\":1600,\"height\":800},\"shellHeight\":765.78125,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 1600,
+        "height": 782
+      }
+    },
+    {
+      "name": "frame-1024-dark",
+      "width": 1024,
+      "contentHeight": 782,
+      "capturedHeight": 782,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"OIB_DESIGNER_BROWSER_TESTS\",\"cases\":24,\"assertions\":129,\"passed\":24,\"failed\":[],\"viewport\":{\"width\":1024,\"height\":800},\"shellHeight\":765.78125,\"overflow\":false}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 1024,
+        "height": 782
+      }
+    },
+    {
+      "name": "unsupported-375",
+      "width": 375,
+      "contentHeight": 160,
+      "capturedHeight": 160,
+      "consoleMessages": [
+        {
+          "level": "info",
+          "text": "{\"kind\":\"UNSUPPORTED_VIEWPORT\",\"width\":375,\"noticeVisible\":true,\"editorHidden\":true}"
+        }
+      ],
+      "screenshot": {
+        "mimeType": "image/png",
+        "width": 375,
+        "height": 160
+      }
+    }
+  ]
+}

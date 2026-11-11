@@ -7,6 +7,10 @@ Visual reference: [DESIGN.md](../../DESIGN.md). Builds on
 [RFC 0036](0036-upgradable-oib-component-libraries.md) and the
 [incremental presentation work](../experiments/oib-incremental-presentation-2026-11-10.md).
 
+The [complete Designer design package](../oib-designer/README.md) expands the UX,
+layout and lifecycle around this style contract. It includes a qualification ledger
+and prototype evidence; production style/runtime implementation remains proposed.
+
 ## Intent and existing boundary
 
 Provide independently publishable, coordinated control appearances without a

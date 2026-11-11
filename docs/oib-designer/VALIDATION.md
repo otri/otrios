@@ -1,0 +1,115 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Prototype validation and implementation progress
+
+Date: 2026-11-11. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
+acceptance is unchanged. This task made no live deployment or state changes.
+
+## V01. What was built
+
+A self-contained [HTML study](prototype/index.html), generated from shell.html,
+model.cjs and ui.js by build.py. No dependencies, server, credentials, network
+requests, installation, native compiler or copied third-party component source.
+The model is original disposable UX simulation under Apache-2.0; it is not the
+shared Rust runtime and contains none of its implementation.
+
+Implemented model scope: valid blank editing, insertion/removal/reorder, typed
+property exposure for simple fields, explicit Apply/discard/history, stale-base
+rejection, in-use deletion blocking, staged unused deletion/retirement, empty
+library recovery, separate publication snapshot, sample values and local overrides.
+The browser renders 16 representative specimens using native HTML controls.
+
+Prototype simplifications, not production designs:
+
+- One selected definition/root, no full nested container editor, slot routing,
+  graph extraction, multi-selection or app binding UI.
+- Source-level generation is simulated; rebase is an explicit acknowledgement
+  without a remote diff/merge engine. There are no durable receipts or CRDT tests.
+- Color pairs are editable per definition/mode; named style/variable IDs, alias
+  ownership, state recipes, contract replacement and full RFC 0037 resolver are
+  specified in docs, not implemented by the prototype.
+- Instance A is a local foreground override demonstration, not a complete second
+  linked-instance rendering/state adapter. Dependency uses cover model-local
+  component references, not all API/style/action/slot/external dependencies.
+- CSS flex sizing approximates flow; no production measurement engine, min/max
+  distribution, cycle diagnostics or transformed hit testing is implemented here.
+- Menu/select, tabs, progress, list and range widgets are deliberately simplified.
+  No IME composition, native accessibility bridge, pointer-capture/evdev or GL proof.
+- Publish snapshots RAM only. No signing, packaging, host update or external writes.
+- Frame task panels are smaller and commands use 44px native HTML targets in this
+  study. Production specifies 48 logical units and 320–360-unit task panels.
+
+## V02. Commands and results
+
+Run from the feature worktree:
+
+```sh
+python3 docs/oib-designer/prototype/build.py
+node --check docs/oib-designer/prototype/ui.js
+node --test docs/oib-designer/prototype/test-model.cjs
+python3 docs/oib-designer/validate.py
+git diff --check
+```
+
+The model suite passed **26 tests**, zero failures/skips. Its 16 per-control tests
+exercise common insertion/apply/reopen/edit/remove lifecycle. Additional cases
+exercise LabelledSlider numeric exposure, isolation/history, dependency blocking,
+retirement, deletion, cycles/types, stale Apply, invalid layout, publication/override
+reset, last-definition empty-library recovery and rename collisions. See
+[evidence/model-tests.txt](evidence/model-tests.txt).
+
+The browser suite in [browser-tests.js](prototype/browser-tests.js) was injected
+only into html_preview, not the deliverable. It passed **24 scenarios / 129
+assertions per run**, zero failures, at widths 1280, 1600 and 1024. These are
+programmatic DOM interactions and assertions, not recorded human touch gestures.
+Light/Desktop presentation was selected after the scenario suite for its final
+visual inspection; do not infer an exhaustive Light-mode interaction matrix.
+
+| Browser preview | Actual viewport | Shell height | Horizontal overflow | Outcome |
+| --- | --- | --- | --- | --- |
+| Frame / Dark | 1280×800 | 765.78px | None | Scenarios passed; presentation inspected |
+| Desktop / Light final view | 1600×800 | 765.78px | None | Scenarios passed; desktop/light presentation inspected |
+| Smaller Frame study / Dark | 1024×800 | 765.78px | None | Scenarios passed; not 1024×640 acceptance |
+| Unsupported portrait | 375px width | Editor hidden | Not authoring | Readable unsupported notice verified |
+
+See [evidence/browser-previews.json](evidence/browser-previews.json). Scenario
+assertions include complete blank→Text+Slider→Expose→Apply, flow/gap preview,
+undo/discard, Edit/Test input isolation, colors/override/reset, stale Apply,
+interaction and retained active elements across all 16 specimens, blocked delete,
+staged retirement, simulated publication and scrolling to lifecycle actions.
+
+Required production target **1920×1080** was designed but not browser-qualified by
+this tool (html_preview width is capped at 1600). Native **1280×800** is a design
+reference; this browser-size test is not a fresh physical Frame measurement.
+No broad Rust suite, ARM/Wasm builds, signed release verification, actual Frame
+input/performance or native/Web runtime acceptance was run for this docs study.
+
+## V03. Findings corrected during this iteration
+
+| Finding | Correction | Evidence |
+| --- | --- | --- |
+| Last definition removal left a phantom draft; Discard threw | Explicit empty library/no selection, New remains usable | Dedicated model regression |
+| Delete/retire bypassed shared Apply model | Stage in local draft; explicit Apply confirms | Model and browser retirement assertions |
+| Range input recreated during each sample | Update range/readout in place; clamp crossing values | Browser active-element retention assertions |
+| Other sample buttons could lose focus on rerender | Update readouts/selection in place | Retained active DOM nodes checked |
+| Create/rename had inconsistent name rules | Reject duplicate names on Apply too | Model rename-collision regression |
+| Blank minimum differed between UX/technical docs | Both now specify 48 | Documentation consistency check |
+| Initial Frame HTML exceeded 800px height | Bounded scroll panes, compact toolbar sizing | 765.78px shell, no horizontal overflow |
+
+The separate design review examined lifecycle/contract consistency and prototype
+safety. Small findings were fixed locally. No fresh independent review is claimed
+for the final corrections; the focused regressions above verify their reproductions.
+
+## V04. Production qualification goal
+
+Work through [Q01–Q16](CONTROL_MATRIX.md) in order of dependency, beginning with
+Q01/Q02/Q03/Q04 and F01 LabelledSlider. For each row, validate UX journeys, typed
+contracts, real compilation/input, styles/modes, overrides, dependency lifecycle,
+resource limits and signed update behavior. A production row stays Pending until
+its actual native/browser evidence is recorded. Share infrastructure checks where
+proved; add the distinct failure cases for each control.
+
+Next concrete task is M1 contract/measurement fixtures, followed by M2 atomic
+working-copy Apply. Finalize mixed property/structural transactions and serialized
+addresses before exposing UI promises. This package supplies the restart guide,
+journey IDs, technical gates and representative ledger needed to resume that work.

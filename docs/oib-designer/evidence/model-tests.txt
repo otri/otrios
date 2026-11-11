@@ -1,0 +1,34 @@
+✔ catalog lifecycle: Text (1.63625ms)
+✔ catalog lifecycle: Button (0.376042ms)
+✔ catalog lifecycle: Toggle (0.276292ms)
+✔ catalog lifecycle: Slider (0.1895ms)
+✔ catalog lifecycle: TextField (0.188583ms)
+✔ catalog lifecycle: NumberField (0.513833ms)
+✔ catalog lifecycle: Select (0.189333ms)
+✔ catalog lifecycle: Segments (0.196834ms)
+✔ catalog lifecycle: Progress (0.729667ms)
+✔ catalog lifecycle: Tabs (0.423042ms)
+✔ catalog lifecycle: List (0.265833ms)
+✔ catalog lifecycle: Dialog (0.1685ms)
+✔ catalog lifecycle: Stepper (0.167625ms)
+✔ catalog lifecycle: RangeSlider (0.162667ms)
+✔ catalog lifecycle: Menu (0.152875ms)
+✔ catalog lifecycle: Status (0.475458ms)
+✔ LabelledSlider from blank exposes numeric value and preserves order (0.517ms)
+✔ draft isolation, discard and undo/redo (0.131667ms)
+✔ in-use definition delete blocked, retire preserves references (0.486167ms)
+✔ remove instance then definition does not cascade (0.190125ms)
+✔ cycles and typed exposure rejected without mutation (0.168708ms)
+✔ stale Apply preserves candidate and confirmed data (0.125291ms)
+✔ invalid layout rejected before commit (0.072417ms)
+✔ publish separate from apply; local overrides reset to new baseline (0.139208ms)
+✔ last definition deletion stages, applies and leaves usable empty library (0.150958ms)
+✔ rename collision rejected; retirement requires Apply (0.098708ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 72.899292
