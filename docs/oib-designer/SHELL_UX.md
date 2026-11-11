@@ -278,3 +278,18 @@ Routine success does not require another footer message when the scene and Apply
 status already communicate it. Keep rare publication outcomes and destructive
 consequences explicit. Do not hide existing component API just because the creation
 form is contextual to a selected node. Accessible names remain mandatory.
+
+## S14. Compact spacing controls
+
+Place the compact nine-point Alignment grid on the left, with Padding and
+Distribution stacked beside it. Keep labels on the same top line and field edges
+aligned. Fine-pointer cells are 32px in this prototype; coarse-pointer cells expand
+to 44px without overlap. Native production 48-unit target qualification remains
+separate. The full Clip content label/checkbox row is one aligned click target.
+
+Use the label Padding while only uniform numeric padding is implemented. Figma
+supports uniform, horizontal/vertical and individual four-side padding; its
+[individual padding control](https://help.figma.com/hc/en-us/articles/31289464393751-Use-the-horizontal-and-vertical-flows-in-auto-layout)
+opens top/right/bottom/left fields. Our future independent-side toggle must expose
+real fields, preserve asymmetric values and define relinking explicitly. It is
+not implemented by this spacing-row change; uniform behavior is explained in Help.

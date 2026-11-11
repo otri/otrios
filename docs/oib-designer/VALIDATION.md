@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Prototype validation and implementation progress
 
-Date: 2026-11-11. Latest results: **V08 text audit** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
+Date: 2026-11-11. Latest results: **V09 compact layout controls** below. Milestone: **M0 design/prototype**. Production M1–M6 and all
 Q01–Q16 new-Designer runtime qualifications remain Pending. Existing D2/L1/L2
 acceptance is unchanged. This task made no live deployment or state changes.
 
@@ -211,3 +211,19 @@ See [evidence/copy-audit.json](evidence/copy-audit.json). JS syntax, document li
 generated artifact reproducibility and whitespace checks passed. Model contracts
 were unchanged, so the model suite was not repeated. No native build, deployment
 or production accessibility acceptance was run.
+
+## V09. Compact alignment/spacing and Clip content
+
+Alignment now uses a compact grid beside the stacked Padding/Distribution fields.
+Padding no longer says all sides; the current uniform behavior is in Help, while
+individual-side editing remains an explicit future control. Clip content is a
+single label/input row with centered baselines and a full-row click target.
+
+Focused browser checks add actual geometry assertions for the compact grid,
+side-by-side fields and checkbox/text centering, plus click-through of the complete
+Clip content row. At widths 728, 1280 and 1600 the full injected suite passed
+**33 scenarios / 233 assertions per run**, zero failures and no horizontal overflow.
+See [evidence/compact-layout-controls.json](evidence/compact-layout-controls.json).
+JS syntax, local links, reproducible artifact and whitespace checks passed. The
+unchanged model suite was not repeated. Coarse-pointer CSS expands grid targets
+to 44px, but no real touch/native Frame acceptance is claimed by these browser tests.

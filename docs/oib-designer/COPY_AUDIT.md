@@ -69,7 +69,7 @@ Do not replace meaningful visible labels with unexplained icons or hover-only he
 | Measured W … × H … · preview parent inner H 320 | Shorten to Actual W × H px | Useful resolved size; parent-fixture detail moves to Prototype details |
 | Dimension bounds | Rename Size limits | Familiar description of Min/Max W/H |
 | Min W/H; Max W/H; None | Keep | Bounds and absent-upper-bound meaning |
-| Padding · all sides | Keep qualifier | The prototype edits uniform padding, not one edge |
+| Padding · all sides | Shorten to Padding | There is no individual-side toggle yet; uniform behavior belongs in Help |
 | Distribution; Packed/Space between; Alignment | Keep | Distinct layout concepts with actual choices |
 | Clip content | Keep | Changes overflow behavior |
 | Style / panel.default | Rename Colors | No real named-style resolver exists in this prototype; avoid claiming a binding |

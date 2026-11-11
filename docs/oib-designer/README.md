@@ -8,7 +8,7 @@ foundation without rewriting those qualification records.
 
 ## Restart here after context compaction
 
-1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V08, and
+1. Read this file, then [VALIDATION.md](VALIDATION.md), especially V09, and
    [COMPLETENESS_AUDIT.md](COMPLETENESS_AUDIT.md) for actual progress and gaps.
 2. Read [DESIGN.md](../../DESIGN.md) for visual direction and
    [SHELL_UX.md](SHELL_UX.md) for workspace/inspector organization, and
