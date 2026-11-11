@@ -80,9 +80,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `ac2734a`, release
-`72101f19ef7e0360e284673648f638f6e743d8ebd1ae8a216c26d9922900399b`,
-including reviewed endpoint removal/Undo/Redo, contextual Layers, natural link
+Last verified live: code `983a3a0`, release
+`ccf6dc54a50fafa9b2cceb30cb1479ccd3a9947d47217c563f26a4671636688a`,
+including exposed Slider Value sample interaction and persistence, earlier
+reviewed endpoint removal/Undo/Redo, contextual Layers, natural link
 sizing, named literal endpoints, definition deletion/restoration and earlier B5 slices. Focused Frame/Web
 evidence and remaining UX findings are recorded at
 the end of this file. Full B4–B7 gates remain open.
@@ -1222,13 +1223,13 @@ browser snapshot). Do not claim the complete Designer goal is finished.
 
 ## Next slice restraint — 2026-11-11
 
-The user asked to keep the work from expanding. The current uncommitted slice
+The user asked to keep the work from expanding. The current slice
 is limited to exposing existing Slider Value and connecting it through existing
 binding choices. Focused bound-endpoint tests pass, including a real Wasmi guest
 writing one private sample and an outer occurrence binding under a signed grant.
-This work is not yet deployed. Additional scope navigation was set aside under
+Additional scope navigation was set aside under
 work/deferred-scope-navigation; actions, slots and broader UX changes stay queued.
-T22 records the binding rules; T21 remains the last verified live release.
+T22 records the binding rules; focused live evidence follows below.
 
 T22 local validation: the existing Designer suite passed 90 tests with one
 existing ignored timing diagnostic. Five binding-route tests pass, including
@@ -1238,4 +1239,32 @@ strict runtime-library Clippy with signed-bundles, 27 browser session tests and
 diff checks pass. The real Wasmi fixture snaps sample input 687 to 600 without
 changing app fields or emitting transport data; outer occurrence connection
 retains the existing signed field/effect checks. No navigation or new action UI
-is part of this slice. Publication/live acceptance remains pending below.
+is part of this slice. Focused live acceptance is recorded below; the outer-instance binding journey remains pending.
+
+
+## Focused live T22 acceptance — 2026-11-11
+
+Built and published code `983a3a0` through the existing live build helper
+(`python3 /tmp/otrios-designer-live-build.py`, exit 0). Native, Wasm and ARM builds
+completed; Frame and web publisher applied release
+`ccf6dc54a50fafa9b2cceb30cb1479ccd3a9947d47217c563f26a4671636688a`.
+The automatic builder was restored pinned to this source.
+
+In the existing Layout acceptance slider definition (88), selected the linked
+Slider Value and used Expose as value. In Test, a canvas click moved the sample
+from 0% to 65% through the component guest, with zero component errors, no pending
+or issued app fields, and shared generation unchanged at 51. Returning to Edit
+reset the sample to 0%. Apply saved the exposure as generation 52. Fresh browser
+reload decoded and presented generation 52, with All changes applied and Audio
+Volume 51% / Display Brightness 57% unchanged. No unconfirmed edit remained.
+
+The pinned native readiness helper returned exit 0: Frame ran the new release,
+confirmed generation 52, no pending commands and zero component errors. Its
+presented generation remained 51 for the unchanged document preview; this is
+synchronization acceptance, not native touch acceptance. The owned browser tab
+was closed.
+
+Stopped at this focused checkpoint following the user's scope restraint. The
+outer-instance app binding has focused local coverage but its live UI journey
+was not performed. No new preset/instance, navigation control, action/slot UI or
+broad qualification campaign was added. The larger Designer goal remains open.
