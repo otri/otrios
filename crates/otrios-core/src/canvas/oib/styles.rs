@@ -6,6 +6,9 @@ use otrios_interfaces::oib::{designer::ClassId, styles::*};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod mapping;
+pub use mapping::{Context, Mapped, Projection, PropertyPaint};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableUse {
     pub style: StyleRef,
@@ -418,3 +421,7 @@ pub struct Resolved {
 #[cfg(test)]
 #[path = "styles_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "styles_mapping_tests.rs"]
+mod mapping_tests;

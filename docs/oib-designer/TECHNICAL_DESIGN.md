@@ -1081,3 +1081,55 @@ catalog retains a reverse variable → style/field/patch index.
 
 These are ordered parts of B6, not substitutes for the remaining B5 action/slot
 authoring and B7/B8 qualification. No shell theme constant is replaced in B6a.
+
+
+## T25. B6b1 canonical component color-input mappings
+
+`styles::ComponentStyle` pairs a DefinitionId with an exact StyleRef and a complete
+ordered mapping of its Body fields. Each PropertyMapping has a field ID and
+nonempty, strictly sorted semantic PropertyPaths relative to that definition.
+One field may drive several properties; two fields cannot compete for one path.
+Names such as background/text/stroke remain authoring metadata, not lookup keys.
+
+Core `styles::Mapped` pins an admitted catalog and canonical Seed. It checks the
+component root class against the style contract, every target through the existing
+reference/path/type resolver, complete Body-field coverage and distinct targets.
+Only literal-capable Color properties qualify. Structural fields, numeric/Boolean
+controls, read-only endpoints, invalid paths and wrong component classes reject.
+System owners must belong to the current document or its exact resolved library
+closure. This membership check is not package signature verification; callers
+must supply an already admitted Seed.
+
+The mapping query takes an actual occurrence root ObjectAddress, allocations,
+active property values and local mode/state plus style overrides. The occurrence
+must resolve to that exact component root, including nested reference ancestry.
+The existing `document::property_sources` trace decides precedence: nonempty live
+or shared register values, authored literals/node defaults, forwarding and app
+bindings retain priority over a direct style contribution. A clear register
+reveals the current inherited source. Only class/declared-descriptor fallback
+permits the mapped style to win; its returned fallback hops are marked masked.
+Focus colors remain a separate overlay result, never ordinary body properties.
+
+This is the first **mapping/admission query** part of B6b, not active rendering.
+It changes neither the Seed nor causal values and generates no commands. It does
+not serialize mappings into DocumentSource yet, advertise a feature or allow
+styles to evade the existing binding-kind/action grants. In particular, current
+root app-binding admission does not support a Color endpoint; B6b1 does not add
+one just to exercise a test. Existing app-bound numeric controls reject as style
+color targets.
+
+### Immediate integration work after B6b1
+
+Add styles as a native fallback source in canonical property evaluation and source
+tracing, preserving explicit values/forwarding/app bindings. Evaluate all mapped
+contributions from the same source revision and receiving mode before lowering
+the scene; a forward may reach another styled source and must report that actual
+chain. Do not inject style colors into causal/live register maps or flatten styles
+into authored node defaults. Those shortcuts would misreport provenance and Reset.
+
+Then admit the catalog/use payload with DocumentSource and exact library contracts,
+aggregate all mapping/override counts before allocation, include the new semantic
+contracts in compatibility fingerprints, and synchronize the state protocol on
+that wire change. Native focus overlays, mode propagation, retained paint proof,
+Designer editing, contrast and live qualification remain the B6c/B6d gates in T24.
+Existing scene/control limits still apply jointly.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! RFC 0037 first color-only style contract; no runtime resolver or authority.
 use super::{
-    designer::{ClassId, DocumentId},
+    designer::{ClassId, DefinitionId, DocumentId, PropertyPath},
     library::{LibraryId, Revision},
 };
 use serde::{Deserialize, Serialize};
@@ -189,4 +189,22 @@ pub struct StateMask {
     pub pressed: bool,
     pub disabled: bool,
     pub focus_visible: bool,
+}
+
+/// Explicit color inputs to a component. Names are display metadata; targets
+/// use the existing semantic property paths, never renderer IDs or selectors.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropertyMapping {
+    pub field: FieldId,
+    /// Canonically sorted, distinct paths relative to ComponentStyle.definition.
+    pub targets: Vec<PropertyPath>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentStyle {
+    pub definition: DefinitionId,
+    pub style: StyleRef,
+    /// Complete Body-domain mapping. Focus remains a separate overlay contract.
+    pub fields: Vec<PropertyMapping>,
 }

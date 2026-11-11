@@ -1388,3 +1388,35 @@ T24 validation completed:
 No browser/Frame style journey was run: styles are deliberately not admitted into
 existing app/library packages yet. Next is B6b's terminal-field mapping and
 canonical source/admission integration, followed by real mode/paint/editing tests.
+
+
+## T25 / B6b1 canonical color mapping — 2026-11-11
+
+Added public ComponentStyle/PropertyMapping records and core Mapped query over
+existing canonical property paths. No new value store or binding effect was added.
+Four mapping tests use the materialized real Designer composition and its actual
+Audio/Display allocations. They prove mode-resolved fallback colors, preservation
+of node/shared/occurrence literals, sibling isolation and clear/Reset, forwarding,
+rejection of app-bound numeric controls as colors, type/path/root/class/owner
+errors and competing fields targeting one property. Seed bytes and source values
+remain unchanged by queries.
+
+The initial attempted Color app-binding fixture was rejected by the existing
+control-route admission gate. Kept that gate and tested the supported bound
+numeric route's rejection as a color target; no Color-binding capability was
+added. This is a mapping query, not native style rendering or live qualification.
+T25 identifies the immediate native source-resolver/compiler and source/package
+integration work. Existing live T23 remains active, with no protocol change.
+
+T25 validation:
+
+- `cargo test -p otrios-core --features canvas --lib canvas::oib::styles --locked --offline`: **12 passed** (eight resolver/codec plus four canonical mapping tests).
+- `cargo check --workspace --all-targets --features canvas --locked --offline`: passed.
+- `cargo clippy -p otrios-core --features signed-bundles --lib --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and diff check: passed.
+
+No browser/native style acceptance or deployment was performed: the mapping query
+is not wired into active source packages or renderer evaluation. The next concrete
+work is the native style source in canonical property evaluation/tracing, then
+compiler consumption and versioned source/package admission. Broader B5/B6/B7/B8
+requirements remain open; neither T24 nor T25 completes a representative control.

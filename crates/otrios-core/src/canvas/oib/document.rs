@@ -184,7 +184,7 @@ pub(super) fn graph_authored_literal(
         _ => None,
     })
 }
-fn path_node<'a>(
+pub(in crate::canvas) fn path_node<'a>(
     doc: &'a Document,
     start: DefinitionId,
     references: &[NodeId],
@@ -210,7 +210,7 @@ fn path_node<'a>(
         .ok_or("Unknown OIB definition node")?;
     Ok((def, n))
 }
-fn property(
+pub(in crate::canvas) fn property(
     doc: &Document,
     start: DefinitionId,
     path: &PropertyPath,
