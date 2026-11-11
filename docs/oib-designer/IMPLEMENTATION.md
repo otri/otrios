@@ -89,7 +89,10 @@ sample-adapter roles are complete, not presumed active after resuming context.
 Builds sharing the target cache run sequentially. Read known restart paths below
 and compiler-reported files rather than performing folder inventories.
 
-Last verified live: code `2c1ad1c`, release
+Latest deployment: code `17f440f`, release
+`712ee6455f1d7b23477492ca9b52ce94c6467a42b1068ad3ab104030ce2ab03c`.
+Focused native readiness passed; style source/package/UI activation remains gated.
+Last changed-UX acceptance: code `2c1ad1c`, release
 `59eca39cc6e06061a13bd78183e164e125c24143c1f2364a80212d31ab64acde`,
 including exposed Slider Value sample interaction, persisted outer app binding
 and accurate bound inspector labels, definition-to-document scope return, earlier
@@ -1468,3 +1471,31 @@ No native/browser style UI, Wasmi color-property consumption or GPU retention
 acceptance is claimed. The next source/package and mounted-client integration
 must feed one pinned style context to compilation, inspector and guest reads.
 The complete responsive Designer goal remains open.
+
+
+## Deployment of current style-engine implementation — 2026-11-11
+
+At the user's explicit request, built/published commit `17f440f` (includes native
+style engine code `57c0508`) with `python3 /tmp/otrios-designer-live-build.py`,
+exit 0. Existing native/browser/ARM builds and normal signed publisher produced
+release `712ee6455f1d7b23477492ca9b52ce94c6467a42b1068ad3ab104030ce2ab03c`.
+The Frame activation pointer and web release became current; automatic builder
+was restored pinned to `17f440f026180a38051d23cf56a5c9d3939de4ea`. Broad tests
+were not run.
+
+Focused readiness initially found the old running client blocked by an unapplied
+local Designer draft (confirmed state, no input capture, reload_ready false).
+Following the standing disposable-PoC-data direction, activated Discard via the
+existing native control. The client restarted; its readiness file was briefly
+absent during handoff. The final native readiness helper passed: runtime and UI
+release both match the new release, confirmed/stream/reload readiness true,
+active/presented generation 54/54, four instances, no pending commands and zero
+component errors. No shared revision changed.
+
+This deploys the current implementation/build and verifies deployment health.
+It does not enable style authoring, automatic style-frame construction or package
+style activation; no live styling behavior or additional browser campaign is
+claimed. The next integration must also correct serialized library style owners:
+embedding a package's own Revision in its hashed payload creates a circular hash.
+Use stable logical ownership in source with exact revisions bound separately by
+verified import admission. That correction remains unimplemented.
