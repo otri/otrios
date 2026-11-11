@@ -39,6 +39,8 @@ fn blank() -> ComponentDefinition {
                 parameters: vec![],
             }),
         }],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     }

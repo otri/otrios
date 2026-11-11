@@ -12,7 +12,7 @@ use otrios_interfaces::{
 use serde::Serialize;
 
 #[derive(Serialize)]
-struct PropertySignature {
+pub(crate) struct PropertySignature {
     id: PropertyId,
     value_type: ValueType,
     number_range: Option<[f32; 2]>,
@@ -57,16 +57,22 @@ fn grant_key(grant: &ActionGrant) -> (u16, u8, u8) {
     (grant.field, kind, operation)
 }
 
+pub(crate) fn property_signature(
+    property: &otrios_interfaces::oib::designer::PropertyDescriptor,
+) -> PropertySignature {
+    PropertySignature {
+        id: property.id,
+        value_type: property.value_type,
+        number_range: property.number_range,
+        policy: property.policy,
+    }
+}
+
 fn class_signature(class: &otrios_interfaces::oib::designer::ClassDescriptor) -> ClassSignature {
     let mut properties = class
         .properties
         .iter()
-        .map(|property| PropertySignature {
-            id: property.id,
-            value_type: property.value_type,
-            number_range: property.number_range,
-            policy: property.policy,
-        })
+        .map(property_signature)
         .collect::<Vec<_>>();
     properties.sort_unstable_by_key(|property| property.id);
     ClassSignature {

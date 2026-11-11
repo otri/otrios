@@ -19,6 +19,8 @@ fn definition(id: u64, root: u64) -> ComponentDefinition {
         name: format!("Component {id}"),
         root: NodeId(root),
         nodes: vec![node(root, None)],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     }

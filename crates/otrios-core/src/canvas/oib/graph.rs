@@ -359,7 +359,7 @@ fn paths(graph: &source::Document, start: DefinitionId) -> Result<Vec<PropertyPa
             connections: vec![],
         };
         for node in &def.nodes {
-            for property in document::descriptors(&metadata, node.class)? {
+            for property in document::node_descriptors(&metadata, def, node)? {
                 out.push(PropertyPath {
                     references: prefix.clone(),
                     node: node.id,
@@ -466,6 +466,7 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
         placements: vec![],
         connections: vec![],
     };
+    document::validate_declarations(&metadata.classes, &metadata.definitions)?;
     for value in graph.presets.iter().filter(|p| p.palette) {
         metadata
             .instances
@@ -500,7 +501,7 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
     let mut cells = vec![];
     for def in &graph.definitions {
         for node in &def.nodes {
-            for descriptor in document::descriptors(&metadata, node.class)? {
+            for descriptor in document::node_descriptors(&metadata, def, node)? {
                 if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly
                 {
                     continue;
@@ -570,10 +571,11 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
         let mut rows = vec![];
         for path in paths(&graph, p.definition)? {
             let (def, node) = terminal(&graph, p.definition, &path)?;
-            let descriptor = document::descriptors(seed.designer.as_ref().unwrap(), node.class)?
-                .into_iter()
-                .find(|d| d.id == path.property)
-                .ok_or("Unknown graph property")?;
+            let descriptor =
+                document::node_descriptors(seed.designer.as_ref().unwrap(), def, node)?
+                    .into_iter()
+                    .find(|d| d.id == path.property)
+                    .ok_or("Unknown graph property")?;
             if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
                 continue;
             }

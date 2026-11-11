@@ -334,6 +334,12 @@ pub enum DefinitionEdit {
         node: NodeId,
         visual: Option<super::graph::Visual>,
     },
+    /// Create the next definition-owned endpoint or update its descriptor in
+    /// place. Rename preserves identity; type and capability policy are fixed.
+    SetProperty {
+        definition: DefinitionId,
+        descriptor: super::designer::PropertyDescriptor,
+    },
     SetSlots {
         definition: DefinitionId,
         slots: Vec<super::designer::SlotDescriptor>,

@@ -68,6 +68,7 @@ pub fn transform(seed: &Seed, operations: &[DefinitionEdit]) -> Result<Vec<Compo
             | DefinitionEdit::CreateNode { definition, .. }
             | DefinitionEdit::DeleteNode { definition, .. }
             | DefinitionEdit::SetVisual { definition, .. }
+            | DefinitionEdit::SetProperty { definition, .. }
             | DefinitionEdit::SetSlots { definition, .. }
             | DefinitionEdit::SetDefault { definition, .. }
             | DefinitionEdit::ClearDefault { definition, .. }
@@ -132,6 +133,8 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 name: label.clone(),
                 root: root.id,
                 nodes: vec![root.clone()],
+                properties: vec![],
+                next_property: 0,
                 exposed: vec![],
                 slots: vec![],
             });
@@ -237,10 +240,14 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 .find(|current| current.id == *definition)
                 .and_then(|definition| definition.nodes.iter().find(|current| current.id == *node))
                 .ok_or("Unknown definition node")?;
-            let descriptor = super::descriptors(document, current.class)?
-                .into_iter()
-                .find(|descriptor| descriptor.id == *property)
-                .ok_or("Unknown definition property")?;
+            let descriptor = super::node_descriptors(
+                document,
+                self::definition(document, *definition)?,
+                current,
+            )?
+            .into_iter()
+            .find(|descriptor| descriptor.id == *property)
+            .ok_or("Unknown definition property")?;
             if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
                 return Err("OIB property is read-only".into());
             }
@@ -276,10 +283,14 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 .find(|d| d.id == *definition)
                 .and_then(|d| d.nodes.iter().find(|n| n.id == *node))
                 .ok_or("Unknown definition node")?;
-            let descriptor = super::descriptors(document, current.class)?
-                .into_iter()
-                .find(|d| d.id == *property)
-                .ok_or("Unknown definition property")?;
+            let descriptor = super::node_descriptors(
+                document,
+                self::definition(document, *definition)?,
+                current,
+            )?
+            .into_iter()
+            .find(|d| d.id == *property)
+            .ok_or("Unknown definition property")?;
             if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
                 return Err("OIB property is read-only".into());
             }
@@ -379,6 +390,46 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                     .unwrap_or(children.len());
                 children.insert(index, *node);
             }
+        }
+        DefinitionEdit::SetProperty {
+            definition,
+            descriptor,
+        } => {
+            super::admission::valid_descriptor(descriptor)?;
+            if !descriptor.policy.live_literal || descriptor.policy.app_binding {
+                return Err(
+                    "Declared endpoints require literal policy and cannot grant app bindings"
+                        .into(),
+                );
+            }
+            let doc = metadata(seed)?;
+            let def = self::definition(doc, *definition)?;
+            let existing = def.properties.iter().find(|p| p.id == descriptor.id);
+            let next = if let Some(previous) = existing {
+                if previous.value_type != descriptor.value_type
+                    || previous.policy != descriptor.policy
+                {
+                    return Err("Endpoint type and capability policy cannot change in place".into());
+                }
+                def.next_property
+            } else {
+                if descriptor.id.0 != next_property_id(doc, def)? {
+                    return Err("Endpoint identity is not the next declaration".into());
+                }
+                descriptor
+                    .id
+                    .0
+                    .checked_add(1)
+                    .ok_or("Property identity space exhausted")?
+            };
+            let def = definition_mut(seed, *definition)?;
+            if let Some(previous) = def.properties.iter_mut().find(|p| p.id == descriptor.id) {
+                *previous = descriptor.clone();
+            } else {
+                def.properties.push(descriptor.clone());
+                def.properties.sort_by_key(|p| p.id);
+            }
+            def.next_property = next;
         }
         DefinitionEdit::Expose {
             definition,

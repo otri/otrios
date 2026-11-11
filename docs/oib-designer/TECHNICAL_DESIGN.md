@@ -788,6 +788,9 @@ implementation record for actual tests and Frame/Web publication status.
 
 ## T19. Typed API delivery and current endpoint boundary
 
+This records the initial routing boundary; T20 below implements literal endpoint
+declarations while deletion, behavior bindings, slots and actions remain open.
+
 The current canonical `Expose` operation routes an existing admitted root property;
 it cannot create or rename a property descriptor. Do not treat routing a Panel's
 existing Color property as qualification of LabelledSlider's new `label`, `value`,
@@ -836,3 +839,71 @@ remain typed action identity. Existing 8192-pixel panel and 512-node/128-control
 scene ceilings remain admission gates; this slice does not raise them or add a
 second API/property engine. Candidate projection runs only while disclosed and
 uses shared descriptor lookup and final source admission.
+
+## T20. Definition-owned literal endpoints (state protocol v35)
+
+T19's existing-descriptor limitation is now being replaced by a concrete canonical
+record: `ComponentDefinition.properties` plus `next_property`. Class descriptors
+remain signed and unchanged. A declared endpoint belongs only to the definition
+root; inherited class properties and declared properties share that root's lookup,
+so identity/name collisions are rejected. Child and referenced-component lookup
+uses the terminal definition, not the containing definition's namespace.
+
+A property identity is contextual: `(definition, node/path, property)`. Allocate
+new declared IDs monotonically after the root's inherited IDs and declaration
+cursor. Rename keeps that ID; existing declarations keep their type and capability
+policy. Updates do not rewind the cursor. Recreating a removed component uses a
+fresh definition/root identity and can retain its contextual declared property IDs.
+Do not reserve these IDs as global definition/node/slot identities or remap class
+property IDs by a coincidentally equal global object ID.
+
+`SetProperty` creates the next declaration or updates an existing one. It carries
+the complete typed descriptor. The initial qualified policy is a writable literal
+endpoint with no app-binding permission. Scalar descriptor/default/range/editor
+validation is shared with class descriptors. The combined class + declaration
+budget remains 64; all existing source, cell, expansion and Apply limits remain.
+Shared lowering and full admission both validate declaration ordering, inherited
+name/ID collisions, cursor and policy; materialization must not skip these checks.
+The ordinary source resolver, causal registers, reference/preset paths, forwarding
+and property inspector all use the combined root descriptor lookup. Definition
+fallbacks are traced as DefinitionDefault, distinct from signed ClassDefault.
+
+The child-property chooser offers **Expose as <name>** for admitted literal
+properties. It creates the declaration and forwarding edge in one private command.
+Choose a descriptive lower-case name; avoid introducing the legacy generic Accent
+name. Resolve a collision with a bounded suffix, then let the author edit Property
+name in the root inspector through the normal local text/draft/Undo/Apply route.
+A typed StructuralTarget::Property identifies that declaration; changing its name
+never changes its ID. Values continue through the existing property fields and
+causal overrides rather than a new side store. Read-only behavior values remain
+unavailable here and explicitly require their declared binding contract.
+
+History captures descriptor updates with exact guards. New component creation
+Undo/Redo and whole-component deletion restoration reconstruct its declarations
+before edges/defaults need them, then restore property values at fresh component
+addresses. A standalone new endpoint on an existing component currently reports
+an unavailable inverse: endpoint deletion/contract impact and fresh-endpoint
+restoration are not implemented. Do not simulate deletion by resetting a value or
+silently remove dependent forwarding/bindings. Endpoint remove/type replacement,
+full binding/action contracts, slot editing and complete LabelledSlider behavior
+remain required follow-ups.
+
+The state payload gained declarations, an edit variant and a structural target;
+therefore native/server, browser and publisher declare **otrios-canvas-sync-v35**.
+Release-control v1 stays unchanged. Empty declaration fields/cursor omit their
+serde representation, but this is still a state-protocol cutover. Existing release
+discovery and incompatible-state rejection must work before state decoding.
+
+
+T20 review corrections: until endpoint removal and hole-aware reconstruction are
+qualified, declarations must occupy the contiguous local interval after inherited
+IDs, with the exact next cursor (or no declarations/cursor zero). Sparse signed
+or manual declarations reject rather than advertise an inverse that cannot
+reconstruct them. Library validation shares the same declaration rules. Export
+contracts include declared IDs, types, ranges and policies using the same semantic
+signature as class properties; names, valid defaults and editor hints remain body
+data. Empty declaration lists omit this signature field so existing empty-library
+contracts remain unchanged. Library sealing orders descriptors, and behavior path
+lookup recognizes declared root properties. Definition deletion confirmation also
+discards its own raw name/property buffers; Cancel keeps them and unrelated dirty
+buffers remain the author's responsibility before Apply.

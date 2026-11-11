@@ -167,6 +167,16 @@ impl WorkingCopy {
     fn replace_key(old: &DocumentEdit, next: &DocumentEdit) -> bool {
         match (old, next) {
             (
+                DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                    definition: a,
+                    descriptor: b,
+                }),
+                DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                    definition: c,
+                    descriptor: d,
+                }),
+            ) => a == c && b.id == d.id,
+            (
                 DocumentEdit::Definition(DefinitionEdit::SetVisual {
                     definition: a,
                     node: b,

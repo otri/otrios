@@ -462,8 +462,13 @@ impl Client {
                     let state = m.design_doc();
                     let report = query(state, target)?;
                     let changed = m.stage_structure(candidate(state, &report)?)?;
-                    if changed && report.instance() {
-                        m.discard_removed_occurrence_drafts(&report.removal_order)?;
+                    if changed {
+                        match report.target {
+                            Target::Instance(_) => {
+                                m.discard_removed_occurrence_drafts(&report.removal_order)?
+                            }
+                            Target::Definition(id) => m.discard_removed_definition_drafts(id)?,
+                        }
                     }
                     Ok::<_, String>(changed)
                 })();

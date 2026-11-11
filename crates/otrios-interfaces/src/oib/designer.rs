@@ -102,6 +102,10 @@ pub enum PropertyAddress {
 #[serde(deny_unknown_fields)]
 pub enum StructuralTarget {
     Definition(DefinitionId),
+    Property {
+        definition: DefinitionId,
+        property: PropertyId,
+    },
     Node {
         definition: DefinitionId,
         node: NodeId,
@@ -271,6 +275,12 @@ pub struct ComponentDefinition {
     pub name: String,
     pub root: NodeId,
     pub nodes: Vec<DefinitionNode>,
+    /// Definition-owned root endpoints, in the definition's property namespace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<PropertyDescriptor>,
+    /// Monotonic local allocation cursor; zero means no endpoints declared yet.
+    #[serde(default, skip_serializing_if = "zero_property_cursor")]
+    pub next_property: u64,
     pub exposed: Vec<ExposedProperty>,
     pub slots: Vec<SlotDescriptor>,
 }
@@ -476,4 +486,8 @@ mod tests {
             ClassKind::deserialize("O2DTextArea".into_deserializer());
         assert!(class.is_err());
     }
+}
+
+fn zero_property_cursor(value: &u64) -> bool {
+    *value == 0
 }

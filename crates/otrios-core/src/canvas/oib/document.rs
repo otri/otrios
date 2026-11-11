@@ -63,6 +63,12 @@ pub(in crate::canvas) fn descriptors(
     doc: &Document,
     id: ClassId,
 ) -> Result<Vec<PropertyDescriptor>> {
+    class_descriptors(&doc.classes, id)
+}
+pub(crate) fn class_descriptors(
+    classes: &[ClassDescriptor],
+    id: ClassId,
+) -> Result<Vec<PropertyDescriptor>> {
     let mut result = Vec::new();
     let mut current = Some(id);
     let mut seen = BTreeSet::new();
@@ -70,7 +76,10 @@ pub(in crate::canvas) fn descriptors(
         if !seen.insert(id) || seen.len() > 16 {
             return Err("Cyclic OIB class ancestry".into());
         }
-        let c = class(doc, id)?;
+        let c = classes
+            .iter()
+            .find(|c| c.id == id)
+            .ok_or("Unknown OIB class")?;
         result.extend(c.properties.iter().cloned());
         current = c.base;
     }
@@ -80,6 +89,48 @@ pub(in crate::canvas) fn descriptors(
     }
     Ok(result)
 }
+/// Class properties plus definition-owned endpoints on this definition's root.
+pub(in crate::canvas) fn node_descriptors(
+    doc: &Document,
+    def: &ComponentDefinition,
+    node: &DefinitionNode,
+) -> Result<Vec<PropertyDescriptor>> {
+    let mut result = descriptors(doc, node.class)?;
+    if node.id == def.root {
+        result.extend(def.properties.iter().cloned());
+    }
+    result.sort_by_key(|p| p.id);
+    if result.windows(2).any(|p| p[0].id == p[1].id) {
+        return Err("Definition endpoint collides with an inherited property".into());
+    }
+    Ok(result)
+}
+pub(in crate::canvas) fn next_property_id(
+    doc: &Document,
+    def: &ComponentDefinition,
+) -> Result<u64> {
+    let root = def
+        .nodes
+        .iter()
+        .find(|n| n.id == def.root)
+        .ok_or("Missing endpoint root")?;
+    let first = descriptors(doc, root.class)?
+        .iter()
+        .map(|p| p.id.0)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or("Property identity space exhausted")?;
+    Ok(first.max(def.next_property))
+}
+
+pub(crate) fn validate_declarations(
+    classes: &[ClassDescriptor],
+    definitions: &[ComponentDefinition],
+) -> Result<()> {
+    admission::declarations(classes, definitions)
+}
+
 pub(super) fn graph_property(
     seed: &Seed,
     root: InstanceId,
@@ -155,8 +206,8 @@ fn property(
     start: DefinitionId,
     path: &PropertyPath,
 ) -> Result<PropertyDescriptor> {
-    let (_, node) = path_node(doc, start, &path.references, path.node)?;
-    descriptors(doc, node.class)?
+    let (def, node) = path_node(doc, start, &path.references, path.node)?;
+    node_descriptors(doc, def, node)?
         .into_iter()
         .find(|p| p.id == path.property)
         .ok_or_else(|| "Unknown OIB property descriptor".into())
@@ -833,6 +884,16 @@ pub fn properties(
         let mut fields = c.properties.clone();
         fields.sort_by_key(|p| (p.group as u8, p.id));
         presented.extend(fields);
+    }
+    if let Some((id, node, occurrence)) = scope {
+        let (def, current) = if let Some(address) = occurrence {
+            path_node(doc, id, &address.references, node)?
+        } else {
+            (definition(doc, id)?, path_node(doc, id, &[], node)?.1)
+        };
+        if current.id == def.root {
+            presented.extend(def.properties.iter().cloned());
+        }
     }
     let exposed = scope.and_then(|(def, node, occurrence)| {
         let def = if let Some(a) = occurrence {

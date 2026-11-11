@@ -6313,7 +6313,7 @@ fn component_api_exposes_no_numeric_source_and_imported_definitions_stay_readonl
     let numeric = model
         .fields
         .iter()
-        .find(|f| f.descriptor.value_type == ValueType::Number)
+        .find(|f| f.descriptor.id == PropertyId(4))
         .unwrap()
         .path
         .clone();
@@ -6327,8 +6327,11 @@ fn component_api_exposes_no_numeric_source_and_imported_definitions_stay_readonl
     .unwrap()
     .unwrap();
     assert!(
-        model.choices.is_empty(),
-        "Color root never supplies a Number endpoint"
+        model
+            .choices
+            .iter()
+            .all(|c| c.operation.is_none() && !c.label.starts_with("Forward from")),
+        "Color root never supplies a Number endpoint, and readonly behavior endpoints require their declared binding contract"
     );
     let path = PropertyPath {
         references: vec![NodeId(7)],
@@ -6370,4 +6373,449 @@ fn component_api_exposes_no_numeric_source_and_imported_definitions_stay_readonl
             .is_none()
     );
     assert_eq!(authority.save().unwrap(), before);
+}
+
+#[test]
+fn component_api_named_label_is_real_and_rename_and_graph_history_preserve_identity() {
+    use otrios_interfaces::oib::designer::{StructuralProperty, StructuralTarget};
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_ui(
+        true,
+        0,
+        library_fixture::admit(&library_fixture::imported()),
+    );
+    let before = authority.save().unwrap();
+    client.designer_new_component().unwrap();
+    let Selection::Definition(id) = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+    else {
+        panic!("new definition")
+    };
+    activate_studio_tool(&mut client, "Link Slider");
+    let source = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_history_source()
+        .unwrap();
+    let definition = source.definitions.iter().find(|d| d.id == id).unwrap();
+    let root = definition.root;
+    let child = definition.nodes.iter().find(|n| n.id != root).unwrap().id;
+    client
+        .inspect_oib_selection(Selection::DefinitionNode {
+            definition: id,
+            node: child,
+        })
+        .unwrap();
+    activate_api_control(&mut client, "> Component API");
+    activate_api_control(&mut client, "> Label · Text");
+    activate_api_control(&mut client, "Expose as label");
+    let source = client
+        .active
+        .as_ref()
+        .unwrap()
+        .design_doc()
+        .oib_history_source()
+        .unwrap();
+    let definition = source.definitions.iter().find(|d| d.id == id).unwrap();
+    let endpoint = definition.properties[0].id;
+    assert_eq!(definition.properties[0].name, "label");
+    assert_eq!(definition.next_property, endpoint.0 + 1);
+    assert_eq!(definition.exposed[0].targets[0].references, vec![child]);
+    assert_eq!(
+        authority.save().unwrap(),
+        before,
+        "declaration remains private"
+    );
+    client
+        .inspect_oib_selection(Selection::Definition(id))
+        .unwrap();
+    let name = PropertyAddress::Structural {
+        target: StructuralTarget::Property {
+            definition: id,
+            property: endpoint,
+        },
+        property: StructuralProperty::Name,
+    };
+    let field = focus_address(&mut client, name.clone());
+    client
+        .edit_text_input(
+            client.epoch(),
+            field,
+            &Edit::Replace {
+                text: "caption".into(),
+                cursor: 7,
+                anchor: 7,
+                selection_only: false,
+            },
+        )
+        .unwrap();
+    client
+        .edit_text_input(client.epoch(), field, &Edit::Enter)
+        .unwrap();
+    let address = PropertyAddress::Definition {
+        definition: id,
+        node: root,
+        property: endpoint,
+    };
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .stage_property(&address, Some(Value::Text("Named endpoint works".into())))
+        .unwrap();
+    let m = client.active.as_ref().unwrap();
+    let source = m.design_doc().oib_history_source().unwrap();
+    let definition = source.definitions.iter().find(|d| d.id == id).unwrap();
+    assert_eq!(definition.properties[0].id, endpoint);
+    assert_eq!(definition.properties[0].name, "caption");
+    let preview = &m.definition_presentation.as_ref().unwrap().preview;
+    fn has_text(node: &otrios_interfaces::layout::TemplateNode, expected: &str) -> bool {
+        matches!(&node.shape, otrios_interfaces::layout::Shape::Text { value: otrios_interfaces::layout::Expr::Literal(Value::Text(value)), .. } if value == expected)
+            || node.children.iter().any(|n| has_text(n, expected))
+    }
+    assert!(
+        preview
+            .layout
+            .blueprint()
+            .templates
+            .iter()
+            .any(|t| has_text(&t.root, "Named endpoint works")),
+        "the shared compiled preview renders the forwarded value"
+    );
+    assert_eq!(authority.save().unwrap(), before);
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(client.designer_history(false).unwrap());
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|d| d.id == id)
+    );
+    assert!(client.designer_history(true).unwrap());
+    let m = client.active.as_ref().unwrap();
+    let Selection::Definition(fresh) = m.designer.as_ref().unwrap().selection else {
+        panic!("restored selection")
+    };
+    assert_ne!(fresh, id);
+    let source = m.design_doc().oib_history_source().unwrap();
+    let restored = source.definitions.iter().find(|d| d.id == fresh).unwrap();
+    assert_eq!(
+        restored.properties[0].id, endpoint,
+        "property identity is scoped by the fresh definition"
+    );
+    assert_eq!(restored.properties[0].name, "caption");
+    assert_eq!(
+        m.design_doc()
+            .oib_property_register(&PropertyAddress::Definition {
+                definition: fresh,
+                node: restored.root,
+                property: endpoint
+            })
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Named endpoint works".into()))]
+    );
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+}
+
+#[test]
+fn component_api_declaration_rejects_identity_name_type_and_capability_escalation() {
+    use otrios_interfaces::oib::authoring::{DefinitionEdit, DocumentEdit};
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    let state = &client.active.as_ref().unwrap().doc;
+    let seed = state.oib_authoring_seed().unwrap();
+    let metadata = seed.designer.as_ref().unwrap();
+    let definition = metadata
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap();
+    let root = definition
+        .nodes
+        .iter()
+        .find(|n| n.id == definition.root)
+        .unwrap();
+    let mut descriptor = crate::canvas::oib::document::node_descriptors(metadata, definition, root)
+        .unwrap()[0]
+        .clone();
+    let inherited_name = descriptor.name.clone();
+    descriptor.id =
+        PropertyId(crate::canvas::oib::document::next_property_id(metadata, definition).unwrap());
+    descriptor.name = "background".into();
+    descriptor.label = "Background".into();
+    let mut invalid = vec![];
+    let mut d = descriptor.clone();
+    d.id = PropertyId(1);
+    invalid.push(d);
+    let mut d = descriptor.clone();
+    d.id.0 += 1;
+    invalid.push(d);
+    let mut d = descriptor.clone();
+    d.name = inherited_name;
+    invalid.push(d);
+    let mut d = descriptor.clone();
+    d.policy.app_binding = true;
+    invalid.push(d);
+    let mut d = descriptor.clone();
+    d.value_type = ValueType::Text;
+    invalid.push(d);
+    let mut d = descriptor.clone();
+    d.number_range = Some([0., 1000.]);
+    invalid.push(d);
+    let before = authority.save().unwrap();
+    for descriptor in invalid {
+        let mut apply = state.oib_apply_base().unwrap();
+        apply
+            .operations
+            .push(DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                definition: definition.id,
+                descriptor: descriptor.clone(),
+            }));
+        assert!(
+            state.preview_oib_apply(&apply).is_err(),
+            "Unexpected admitted descriptor: {descriptor:?}"
+        );
+        assert_eq!(authority.save().unwrap(), before);
+    }
+    let m = client.active.as_mut().unwrap();
+    m.stage_structure(otrios_interfaces::oib::InstanceOperation {
+        generation: m.design_doc().oib_structural_generation().unwrap(),
+        operations: vec![DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition: DefinitionId(10),
+            descriptor: descriptor.clone(),
+        })],
+    })
+    .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    // Adding a single endpoint to an existing component is not yet a supported
+    // published inverse: report review rather than fabricate endpoint removal.
+    assert!(client.designer_history(false).unwrap());
+    let m = client.active.as_ref().unwrap();
+    assert!(m.working_copy.as_ref().unwrap().history_review().is_some());
+    let mut changed = descriptor;
+    changed.value_type = ValueType::Text;
+    changed.default = Value::Text("changed type".into());
+    changed.editor = PropertyEditor::TextSuggestions;
+    let mut apply = m.doc.oib_apply_base().unwrap();
+    apply
+        .operations
+        .push(DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition: DefinitionId(10),
+            descriptor: changed,
+        }));
+    assert!(
+        m.doc.preview_oib_apply(&apply).is_err(),
+        "published endpoint type cannot change under the same identity"
+    );
+    assert!(client.back().unwrap());
+    let rename = PropertyAddress::Structural {
+        target: StructuralTarget::Property {
+            definition: DefinitionId(10),
+            property: PropertyId(2),
+        },
+        property: StructuralProperty::Name,
+    };
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .stage_property(&rename, Some(Value::Text("surface".into())))
+        .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(client.designer_history(false).unwrap());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .working_copy
+            .as_ref()
+            .unwrap()
+            .history_review()
+            .is_none()
+    );
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let source = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_history_source()
+        .unwrap();
+    let restored = &source
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(10))
+        .unwrap()
+        .properties[0];
+    assert_eq!(restored.id, PropertyId(2));
+    assert_eq!(restored.name, "background");
+}
+
+#[test]
+fn component_api_definition_delete_cancels_owned_name_buffers_only_after_confirmation() {
+    use otrios_interfaces::oib::{
+        authoring::{DefinitionEdit, DocumentEdit},
+        designer::{StructuralProperty, StructuralTarget},
+    };
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    client.designer_new_component().unwrap();
+    let Selection::Definition(id) = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+    else {
+        panic!("new component")
+    };
+    let m = client.active.as_mut().unwrap();
+    let seed = m.design_doc().oib_authoring_seed().unwrap();
+    let metadata = seed.designer.as_ref().unwrap();
+    let slider = metadata
+        .definitions
+        .iter()
+        .find(|d| d.id == DefinitionId(12))
+        .unwrap();
+    let root = slider.nodes.iter().find(|n| n.id == slider.root).unwrap();
+    let mut descriptor = crate::canvas::oib::document::node_descriptors(metadata, slider, root)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.value_type == ValueType::Text)
+        .unwrap();
+    descriptor.id = PropertyId(2);
+    descriptor.name = "caption".into();
+    descriptor.label = "Caption".into();
+    m.stage_structure(otrios_interfaces::oib::InstanceOperation {
+        generation: m.design_doc().oib_structural_generation().unwrap(),
+        operations: vec![DocumentEdit::Definition(DefinitionEdit::SetProperty {
+            definition: id,
+            descriptor,
+        })],
+    })
+    .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let before = authority.save().unwrap();
+    let unrelated = editor_address(2);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let field = focus_address(&mut client, unrelated.clone());
+    client
+        .edit_text_input(
+            client.epoch(),
+            field,
+            &Edit::Replace {
+                text: "oops".into(),
+                cursor: 4,
+                anchor: 4,
+                selection_only: false,
+            },
+        )
+        .unwrap();
+    client
+        .inspect_oib_selection(Selection::Definition(id))
+        .unwrap();
+    let name = PropertyAddress::Structural {
+        target: StructuralTarget::Property {
+            definition: id,
+            property: PropertyId(2),
+        },
+        property: StructuralProperty::Name,
+    };
+    let field = focus_address(&mut client, name.clone());
+    client
+        .edit_text_input(
+            client.epoch(),
+            field,
+            &Edit::Replace {
+                text: "".into(),
+                cursor: 0,
+                anchor: 0,
+                selection_only: false,
+            },
+        )
+        .unwrap();
+    client.designer_review_delete(id).unwrap();
+    assert!(client.back().unwrap());
+    let m = client.active.as_ref().unwrap();
+    assert!(
+        m.designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .draft(&name)
+            .unwrap()
+            .dirty
+    );
+    assert!(
+        m.designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .draft(&unrelated)
+            .unwrap()
+            .dirty
+    );
+    assert_eq!(authority.save().unwrap(), before);
+    client.designer_review_delete(id).unwrap();
+    let (delete, _) = studio_scene_control(&client, "Delete component");
+    assert!(client.activate(client.epoch(), delete).unwrap());
+    let m = client.active.as_ref().unwrap();
+    assert!(m.designer.as_ref().unwrap().drafts.draft(&name).is_none());
+    assert!(
+        m.designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .draft(&unrelated)
+            .unwrap()
+            .dirty
+    );
+    assert!(
+        !client.designer_apply_working_copy().unwrap(),
+        "unrelated invalid input remains the author's responsibility"
+    );
+    client.designer_discard_property(&unrelated).unwrap();
+    assert!(client.designer_apply_working_copy().unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_history_source()
+            .unwrap()
+            .definitions
+            .iter()
+            .any(|d| d.id == id)
+    );
 }

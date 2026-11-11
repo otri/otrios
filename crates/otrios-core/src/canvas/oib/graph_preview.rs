@@ -301,13 +301,14 @@ fn compile_preview(
         let Some(Some(value)) = values.get(&address) else {
             continue;
         };
-        let descriptor = document::descriptors(
+        let descriptor = document::node_descriptors(
             baseline
                 .seed
                 .designer
                 .as_ref()
                 .ok_or("Missing preview metadata")?,
-            node.class,
+            definition,
+            node,
         )?
         .into_iter()
         .find(|descriptor| descriptor.id == path.property)
@@ -344,14 +345,15 @@ fn compile_preview(
     let mut assignments = projected;
     let mut grants = vec![];
     for path in paths(&effective, selected)? {
-        let (_, node) = terminal(&effective, selected, &path)?;
-        let descriptor = document::descriptors(
+        let (definition, node) = terminal(&effective, selected, &path)?;
+        let descriptor = document::node_descriptors(
             baseline
                 .seed
                 .designer
                 .as_ref()
                 .ok_or("Missing preview metadata")?,
-            node.class,
+            definition,
+            node,
         )?
         .into_iter()
         .find(|descriptor| descriptor.id == path.property)

@@ -83,6 +83,8 @@ fn graph() -> Graph {
                     }],
                 }),
             }],
+            properties: vec![],
+            next_property: 0,
             exposed: vec![],
             slots: vec![],
         }],
@@ -492,4 +494,88 @@ fn auto_layout_requires_explicit_library_feature() {
     info.required_features.sort();
     assert!(inspect(&pack(&info, &graph).unwrap()).is_ok());
     assert!(pack(&info, &self::graph()).is_ok());
+}
+
+#[test]
+fn named_endpoint_signature_and_cursor_are_part_of_library_admission() {
+    let original = graph();
+    let mut candidate = original.clone();
+    let mut descriptor = candidate.required_classes[0].properties[0].clone();
+    descriptor.id = PropertyId(2);
+    descriptor.name = "background".into();
+    candidate.definitions[0].properties.push(descriptor);
+    candidate.definitions[0].next_property = 3;
+    let sealed = seal_graph(candidate).unwrap();
+    assert_ne!(
+        sealed.exports[0].contract, original.exports[0].contract,
+        "adding a declared endpoint changes the export contract"
+    );
+    assert_eq!(
+        behavior_property(
+            &sealed,
+            DefinitionId(10),
+            &PropertyPath {
+                references: vec![],
+                node: NodeId(1),
+                property: PropertyId(2)
+            }
+        )
+        .unwrap()
+        .name,
+        "background"
+    );
+    let mut body = sealed.clone();
+    body.definitions[0].properties[0].default = Value::Color([1, 2, 3, 255]);
+    body.definitions[0].properties[0].name = "surface".into();
+    assert_eq!(
+        seal_graph(body).unwrap().exports[0].contract,
+        sealed.exports[0].contract,
+        "names and valid defaults remain body data, consistent with class contracts"
+    );
+    let mut changed = sealed.clone();
+    changed.definitions[0].properties[0].value_type = ValueType::Text;
+    changed.definitions[0].properties[0].default = Value::Text("caption".into());
+    changed.definitions[0].properties[0].editor = PropertyEditor::TextSuggestions;
+    assert_ne!(
+        seal_graph(changed).unwrap().exports[0].contract,
+        sealed.exports[0].contract
+    );
+    for cursor in [0, 2, 4] {
+        let mut invalid = sealed.clone();
+        invalid.definitions[0].next_property = cursor;
+        assert!(seal_graph(invalid).is_err());
+    }
+    let mut invalid = sealed.clone();
+    invalid.definitions[0].properties[0].id = PropertyId(5);
+    invalid.definitions[0].next_property = 6;
+    assert!(
+        seal_graph(invalid).is_err(),
+        "sparse declarations are gated until hole-aware endpoint restoration exists"
+    );
+    let mut invalid = sealed.clone();
+    invalid.definitions[0].properties[0].policy.app_binding = true;
+    assert!(seal_graph(invalid).is_err());
+    let mut invalid = sealed;
+    invalid.definitions[0].properties[0].name = "Accent".into();
+    assert!(seal_graph(invalid).is_err());
+}
+
+#[test]
+fn an_exhausted_class_property_namespace_keeps_existing_library_admission() {
+    let mut candidate = graph();
+    candidate.required_classes[0].properties[0].id = PropertyId(u64::MAX);
+    candidate.definitions[0].nodes[0].defaults[0].property = PropertyId(u64::MAX);
+    if let graph::ParameterSource::Property(path) = &mut candidate.definitions[0].nodes[0]
+        .visual
+        .as_mut()
+        .unwrap()
+        .parameters[0]
+        .source
+    {
+        path.property = PropertyId(u64::MAX);
+    }
+    assert!(
+        seal_graph(candidate).is_ok(),
+        "an empty declaration table requires no successor allocation"
+    );
 }

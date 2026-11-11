@@ -37,7 +37,8 @@ pub(super) fn sources(
 pub(super) fn selection(address: &PropertyAddress) -> Selection {
     match address {
         PropertyAddress::Structural { target, .. } => match target {
-            otrios_interfaces::oib::designer::StructuralTarget::Definition(definition) => {
+            otrios_interfaces::oib::designer::StructuralTarget::Definition(definition)
+            | otrios_interfaces::oib::designer::StructuralTarget::Property { definition, .. } => {
                 Selection::Definition(*definition)
             }
             otrios_interfaces::oib::designer::StructuralTarget::Node { definition, node } => {

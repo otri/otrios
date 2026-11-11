@@ -17,6 +17,8 @@ fn definition() -> ComponentDefinition {
             reference: None,
             visual: None,
         }],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     }

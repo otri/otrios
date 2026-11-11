@@ -31,6 +31,7 @@ pub enum SourceRole {
     AppBinding(Binding),
     SharedRegister,
     NodeDefault,
+    DefinitionDefault,
     ClassDefault,
 }
 
@@ -120,7 +121,11 @@ fn defaults(
     }
     hops.push(SourceHop {
         address,
-        role: SourceRole::ClassDefault,
+        role: if node.id == def.root && def.properties.iter().any(|p| p.id == path.property) {
+            SourceRole::DefinitionDefault
+        } else {
+            SourceRole::ClassDefault
+        },
         cell: None,
         value: Some(property(doc, start, path)?.default),
         masked: masked || authored.is_some(),

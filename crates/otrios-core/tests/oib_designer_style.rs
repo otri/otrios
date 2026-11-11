@@ -15,7 +15,7 @@ use otrios_interfaces::{
     theme::{BG, BRASS, CARD, LINE, TEXT},
 };
 use std::sync::Arc;
-use style::{resize_surface, set_surface_fill, surface};
+use style::{resize_surface, set_surface_fill, surface_with_outline};
 
 fn shape(node: &SceneNode) -> (Color, f32) {
     let Primitive::Superellipse {
@@ -36,7 +36,7 @@ fn admit(node: SceneNode) -> Scene {
 
 #[test]
 fn authored_outline_and_inset_survive_resize_and_fill_updates() {
-    let mut node = surface([10, 11, 12], 100., 40., CARD, 12.);
+    let mut node = surface_with_outline([10, 11, 12], 100., 40., CARD, LINE, 12.);
     assert_eq!(node.frame, Rect::new(0., 0., 100., 40.));
     assert_eq!(node.primitive, Primitive::Canvas { clip: true });
     assert_eq!(node.children[0].frame, Rect::new(0., 0., 100., 40.));
@@ -82,7 +82,7 @@ fn finite_positive_geometry_and_radii_are_admitted_at_boundaries() {
         (1., 1.),
     ] {
         for r in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -10., 0., 10000.] {
-            let mut node = surface([10, 11, 12], w, h, CARD, r);
+            let mut node = surface_with_outline([10, 11, 12], w, h, CARD, LINE, r);
             admit(node.clone());
             for (width, height) in [(0.01, 0.02), (8192., 8192.), (3., 3.), (80., 40.)] {
                 resize_surface(&mut node, width, height).unwrap();
@@ -118,7 +118,7 @@ fn plain_flat_rows_preserve_identity_position_input_and_exponent() {
 
 #[test]
 fn unsupported_or_malformed_nodes_and_invalid_sizes_are_atomic_errors() {
-    let good = surface([10, 11, 12], 100., 40., CARD, 12.);
+    let good = surface_with_outline([10, 11, 12], 100., 40., CARD, LINE, 12.);
     let mut malformed = vec![
         canvas(20, Rect::new(0., 0., 100., 40.), vec![]),
         text(21, Rect::new(0., 0., 100., 40.), "label", 2, TEXT),
@@ -139,7 +139,7 @@ fn unsupported_or_malformed_nodes_and_invalid_sizes_are_atomic_errors() {
                 node.children[0].primitive = Primitive::Superellipse {
                     color: BRASS,
                     radius: 12.,
-                    exponent: 4.,
+                    exponent: 1.,
                 }
             }
             8 => {
@@ -173,7 +173,7 @@ fn unsupported_or_malformed_nodes_and_invalid_sizes_are_atomic_errors() {
 fn decoration_exposes_siblings_and_parent_whole_view_hits_respect_clipping() {
     let mut underlying = canvas(1, Rect::new(0., 0., 100., 40.), vec![]);
     underlying.responder = Some(TouchResponder::Activate(Action::AppEvent(1)));
-    let decoration = surface([10, 11, 12], 100., 40., CARD, 16.);
+    let decoration = surface_with_outline([10, 11, 12], 100., 40., CARD, LINE, 16.);
     let scene = Scene::new(canvas(
         0,
         Rect::new(0., 0., 100., 40.),

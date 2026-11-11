@@ -3124,10 +3124,27 @@ impl Mount {
         &mut self,
         instances: &[otrios_interfaces::oib::designer::InstanceId],
     ) -> Result<()> {
+        self.discard_removed_designer_drafts(|address| matches!(editing::selection(address), Selection::Object(object) if instances.contains(&object.instance)))
+    }
+    pub(super) fn discard_removed_definition_drafts(
+        &mut self,
+        definition: otrios_interfaces::oib::designer::DefinitionId,
+    ) -> Result<()> {
+        self.discard_removed_designer_drafts(|address| matches!(editing::selection(address),
+            Selection::Definition(id) | Selection::DefinitionNode { definition: id, .. } if id == definition))
+    }
+    fn discard_removed_designer_drafts(
+        &mut self,
+        removed: impl Fn(&PropertyAddress) -> bool,
+    ) -> Result<()> {
         let d = self.designer.as_mut().ok_or("Missing designer")?;
-        let removed: Vec<_> = d.drafts.drafts().iter().filter(|draft|
-            matches!(editing::selection(&draft.address), Selection::Object(object) if instances.contains(&object.instance)))
-            .map(|draft| draft.address.clone()).collect();
+        let removed: Vec<_> = d
+            .drafts
+            .drafts()
+            .iter()
+            .filter(|draft| removed(&draft.address))
+            .map(|draft| draft.address.clone())
+            .collect();
         for address in removed {
             d.drafts.cancel(&address);
         }

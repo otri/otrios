@@ -904,3 +904,111 @@ Restart: `client/oib_designer/api_editor.rs`, its parent refresh/disclosure rout
 `client/oib_designer_tests.rs`, shared `oib/document.rs::descriptors` and T19 above.
 Continue definition-owned endpoint contracts and slots, alongside the remaining
 history/replacement gates and B6/B7; do not close the full objective on these tests.
+
+## B5 named literal endpoints — local implementation, pending publication
+
+T20 implements the declaration part of T19: definition-owned descriptors and a
+monotonic contextual property cursor; canonical SetProperty; combined root lookup
+through lowering, preview, causal cells, source trace and Inspector; and a real
+Expose as <name> command for admitted literal child endpoints. Root Property name
+fields use the standard local text editor and typed structural target. Rename
+preserves identity. Descriptor updates have guarded history; new-component graph
+history reconstructs declarations at fresh definition/root addresses.
+
+Read-only behavior endpoints do not become literal controls. App binding remains
+false for these declarations and a named `value` behavior route still needs its
+qualified binding/action contract. The combined class/declaration count stays 64;
+source/cell/scene/Apply ceilings remain unchanged. No dependencies were added.
+
+The new canonical payload requires state protocol v35. Native/server, browser,
+publisher and directly affected protocol fixtures now agree. Release-control v1
+is unchanged. A scoped protocol-consistency session test passes all 15 cases,
+including incompatible-state release discovery and rejection before state traffic.
+This is not a deployment or Linux IPC claim.
+
+Focused same-process evidence:
+
+- The real Designer creates a blank component, links an exact imported Slider,
+  exposes its literal Label as a new `label` endpoint, renames it to `caption`,
+  and edits its value privately. The compiled shared preview contains the new
+  forwarded label text, not merely a source-model assertion. Apply followed by
+  component Undo/Apply/Redo restores a fresh definition with the endpoint name,
+  contextual ID, cursor, edge and authored value intact.
+- Invalid inherited/future IDs, inherited-name collisions, type/default mismatch,
+  numeric range on Color and app-binding escalation reject without authority
+  mutation. Existing endpoint type changes reject. A standalone endpoint creation
+  on an existing component reports the explicit missing inverse; a subsequent
+  rename can be applied and conditionally undone with the same endpoint ID.
+- Existing forwarding/imported/read-only tests remain passing. Four focused
+  component_api tests pass. Final broader checks are recorded after completion.
+
+A negative test found that the fast materialization path did not execute the
+full metadata declaration check. The shared declarations validator is now called
+from lowering as well as full admission; the test now rejects the collision.
+
+Still open: endpoint deletion/repair and its standalone creation inverse,
+read-only behavior binding/action endpoints, slots, remaining history/replacement
+work and B6/B7 qualification. The label test does not qualify a complete
+LabelledSlider with externally bound value/changed behavior. Frame/Web publication
+and acceptance remain pending; no new publisher was started during this slice.
+
+
+The workspace all-target compile (`check --workspace --all-targets --features
+otrios-core/canvas --locked --offline`) passes after updating compiler-reported
+ComponentDefinition constructors. It also exposed a pre-existing style integration
+test using the removed `surface` helper; the test now calls surface_with_outline
+with its explicit LINE color. Focused runtime checks continue below. The Frame SSH
+probe timed out again; the v35 cutover has not been published or live-qualified.
+
+
+Read-only review found and corrected three additional cases:
+
+- Declared endpoints were missing from library export signatures, package
+  validation/order and behavior descriptor lookup. Shared declaration validation
+  and semantic property signatures now cover these paths. The new library test
+  verifies contract change for added/changed types, body-only name/default updates,
+  behavior lookup, rejected sparse IDs/cursors, name collisions and policy changes.
+- Sparse declarations could not be replayed by fresh-definition reconstruction.
+  They now reject under the current contiguous/cursor gate; removal and holes
+  require their own qualified contract extension.
+- Definition confirmation could retain an orphaned raw endpoint-name buffer and
+  then fail Apply. Cleanup now removes only the deleted definition's buffers.
+  A real Designer test keeps both an invalid endpoint name and an unrelated
+  invalid Width buffer through Cancel; confirmation removes only the endpoint
+  buffer, preserves the Width error, and Apply succeeds after the author explicitly
+  reverts that unrelated error. Five focused component_api tests pass.
+
+Strict runtime-library Clippy passes. The optional HTTP host probe command was
+not executed as a live test: it requires --url and returned usage; Frame SSH still
+times out. No host-probe success, deployment or live v35 acceptance is claimed.
+
+
+Final local qualification for this slice:
+
+- Workspace all-target compile passes with `--features otrios-core/canvas`.
+- Designer module: 65 pass, one existing ignored diagnostic. Core OIB: 53 pass.
+  State/OIB: 37 pass, one existing ignored diagnostic. The history name filter
+  passed 41 tests (overlaps these suites and includes incidental history cases).
+- Library module with signed-bundles enabled: eight pass, including the two new
+  declared-endpoint/cursor/namespace cases. Style integration: six pass after
+  updating the stale helper and making the malformed-exponent case independent
+  of the now-configurable outline color.
+- Browser session/protocol checks: 15 pass. UI/library update classification:
+  seven pass. Strict runtime-library Clippy with signed-bundles and diff checks
+  pass. No new dependency or resource limit was introduced.
+
+The empty declaration case preserves an exhausted inherited property namespace;
+it requires no successor ID. The API reports unavailable allocation without
+losing existing route inspection. Sequential declared IDs/cursor remain required.
+
+These are local compile/unit/Scene and same-process authority results. There is no
+new ARM/Wasm release artifact, Linux IPC acceptance or live v35 result. Existing
+Frame/Web publication must combine this cutover with the earlier pending slices
+once Frame SSH returns. Keep the full goal active; next implement endpoint
+removal/impact and its missing inverse, then binding/actions/slots and B6/B7.
+
+Restart files: `oib/document.rs`, `document/admission.rs`, `document/authoring.rs`,
+`graph.rs`, `graph_preview.rs`, `history.rs`, `history/restore.rs`,
+`client/oib_designer/api_editor.rs`, `state/oib/inspector.rs`, `library.rs`,
+`oib/contract.rs`, the focused tests and T20. Protocol v35 is declared in
+interfaces/session.rs, web/shared/session.mjs and the existing publisher.

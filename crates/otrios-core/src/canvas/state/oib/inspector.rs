@@ -194,6 +194,33 @@ impl StateAdapter {
         let signed = binding.seed.graph.as_ref().ok_or("Missing signed graph")?;
         let resolved = self.doc.oib_baseline_graph()?;
         let mut result = vec![];
+        let selected_definition = match selected {
+            Selection::Definition(id) | Selection::DefinitionNode { definition: id, .. } => {
+                Some(*id)
+            }
+            _ => None,
+        };
+        if let Some(id) = selected_definition
+            && let Some(def) = source.definitions.iter().find(|d| d.id == id)
+            && match selected {
+                Selection::Definition(_) => true,
+                Selection::DefinitionNode { node, .. } => *node == def.root,
+                _ => false,
+            }
+        {
+            for descriptor in &def.properties {
+                result.push(field(
+                    StructuralTarget::Property {
+                        definition: id,
+                        property: descriptor.id,
+                    },
+                    StructuralProperty::Name,
+                    &format!("Property name: {}", descriptor.name),
+                    Value::Text(descriptor.name.clone()),
+                    None,
+                ));
+            }
+        }
         let (definition, selected_node) = match selected {
             Selection::Definition(id) => {
                 let definition = source
@@ -361,7 +388,8 @@ impl StateAdapter {
             return Err("Not a graph source field".into());
         };
         let selected = match target {
-            StructuralTarget::Definition(id) => Selection::Definition(*id),
+            StructuralTarget::Definition(id)
+            | StructuralTarget::Property { definition: id, .. } => Selection::Definition(*id),
             StructuralTarget::Node { definition, node } => Selection::DefinitionNode {
                 definition: *definition,
                 node: *node,
@@ -389,6 +417,25 @@ impl StateAdapter {
             }
         };
         let operation = match target {
+            StructuralTarget::Property {
+                definition,
+                property: endpoint,
+            } if *property == StructuralProperty::Name => {
+                let mut descriptor = source
+                    .definitions
+                    .iter()
+                    .find(|d| d.id == *definition)
+                    .and_then(|d| d.properties.iter().find(|p| p.id == *endpoint))
+                    .ok_or("Endpoint changed")?
+                    .clone();
+                descriptor.name = name()?;
+                descriptor.label = descriptor.name.clone();
+                DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                    definition: *definition,
+                    descriptor,
+                })
+            }
+
             StructuralTarget::Definition(definition) if *property == StructuralProperty::Name => {
                 DocumentEdit::Definition(DefinitionEdit::RenameDefinition {
                     definition: *definition,

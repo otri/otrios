@@ -447,6 +447,16 @@ impl Graph {
                 }));
             }
         }
+        for old in &self.definitions {
+            if self.deleted_definitions.contains(&old.id) {
+                for descriptor in &old.properties {
+                    result.push(DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                        definition: map.definition(old.id),
+                        descriptor: descriptor.clone(),
+                    }));
+                }
+            }
+        }
         // Creation follows ownership, independent of visual order. Visual links
         // are restored after every owner exists, so the two trees need not agree.
         let mut remaining: Vec<_> = self
@@ -656,6 +666,9 @@ impl Graph {
         let mut op = op.clone();
         match &mut op {
             DocumentEdit::Definition(edit) => match edit {
+                DefinitionEdit::SetProperty { definition, .. } => {
+                    *definition = map.definition(*definition);
+                }
                 DefinitionEdit::SetSlots {
                     definition: d,
                     slots,

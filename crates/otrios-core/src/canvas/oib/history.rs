@@ -37,6 +37,7 @@ enum Key {
     NodeName(DefinitionId, NodeId),
     Visual(DefinitionId, NodeId),
     Default(DefinitionId, NodeId, PropertyId),
+    PropertyDescriptor(DefinitionId, PropertyId),
     Slots(DefinitionId),
     Exposed(DefinitionId, PropertyId),
     Reference(DefinitionId, NodeId, PropertyPath),
@@ -142,6 +143,12 @@ fn read(source: &DocumentSource, key: &Key) -> Result<Vec<u8>> {
                 .iter()
                 .find(|v| v.property == *p)
                 .map(|v| &v.value),
+        ),
+        Key::PropertyDescriptor(d, p) => encoded(
+            &definition(source, *d)?
+                .properties
+                .iter()
+                .find(|v| v.id == *p),
         ),
         Key::Slots(d) => encoded(&definition(source, *d)?.slots),
         Key::Exposed(d, p) => encoded(
@@ -302,6 +309,7 @@ impl Entry {
                         | DefinitionEdit::CreateNode { definition, .. }
                         | DefinitionEdit::DeleteNode { definition, .. }
                         | DefinitionEdit::SetVisual { definition, .. }
+                        | DefinitionEdit::SetProperty { definition, .. }
                         | DefinitionEdit::SetSlots { definition, .. }
                         | DefinitionEdit::SetDefault { definition, .. }
                         | DefinitionEdit::ClearDefault { definition, .. }
@@ -330,6 +338,22 @@ impl Entry {
                         continue;
                     }
                     let (key, inverse) = match edit {
+                        DefinitionEdit::SetProperty { descriptor, .. } => {
+                            let Some(previous) = definition(before, d)?
+                                .properties
+                                .iter()
+                                .find(|p| p.id == descriptor.id)
+                            else {
+                                return Err("Undo of a newly declared endpoint requires endpoint removal support".into());
+                            };
+                            (
+                                Key::PropertyDescriptor(d, descriptor.id),
+                                DefinitionEdit::SetProperty {
+                                    definition: d,
+                                    descriptor: previous.clone(),
+                                },
+                            )
+                        }
                         DefinitionEdit::RenameDefinition { .. } => (
                             Key::DefinitionName(d),
                             DefinitionEdit::RenameDefinition {

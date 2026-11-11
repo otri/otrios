@@ -270,6 +270,8 @@ fn repeated_nested_references_keep_ancestry_and_fuse_each_boundary() {
         name: "Shared leaf".into(),
         root: NodeId(1),
         nodes: vec![leaf],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     });
@@ -353,6 +355,8 @@ fn visual_parent_is_independent_of_owner_and_nonvisual_chains_stay_under_objects
         name: "Fixed object".into(),
         root: NodeId(1),
         nodes: vec![child],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     });
@@ -465,6 +469,8 @@ fn nonvisual_reference_navigation_follows_wrapper_owner_without_self_parenting()
         name: "Object component".into(),
         root: NodeId(1),
         nodes: vec![leaf],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     });
@@ -528,6 +534,8 @@ fn visual_attachment_to_wrapper_uses_fused_parent_key() {
         name: "Fixed shape".into(),
         root: NodeId(1),
         nodes: vec![leaf],
+        properties: vec![],
+        next_property: 0,
         exposed: vec![],
         slots: vec![],
     });

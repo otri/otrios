@@ -46,7 +46,7 @@ pub(super) fn accepts(doc: &Document, classes: &[ClassId], child: ClassId) -> Re
     }
     Ok(false)
 }
-fn valid_descriptor(p: &PropertyDescriptor) -> Result<()> {
+pub(super) fn valid_descriptor(p: &PropertyDescriptor) -> Result<()> {
     require(
         p.id.0 != 0
             && valid_text(&p.name, 64)
@@ -88,6 +88,72 @@ fn valid_descriptor(p: &PropertyDescriptor) -> Result<()> {
         "Unavailable OIB property editor",
     )
 }
+pub(super) fn declarations(
+    classes: &[ClassDescriptor],
+    definitions: &[ComponentDefinition],
+) -> Result<()> {
+    require(
+        classes.iter().map(|c| c.properties.len()).sum::<usize>()
+            + definitions
+                .iter()
+                .map(|d| d.properties.len())
+                .sum::<usize>()
+            <= 64,
+        "Definition and class property budget exceeded",
+    )?;
+    for def in definitions {
+        require(
+            def.properties.len() <= 64 && ordered(def.properties.iter().map(|p| p.id)),
+            "Invalid definition endpoint ordering/budget",
+        )?;
+        if def.properties.is_empty() {
+            require(def.next_property == 0, "Invalid definition endpoint cursor")?;
+            continue;
+        }
+        let root_class = def
+            .nodes
+            .iter()
+            .find(|n| n.id == def.root)
+            .ok_or("Missing endpoint root")?
+            .class;
+        let inherited = class_descriptors(classes, root_class)?;
+        let mut names: BTreeSet<_> = inherited.iter().map(|p| p.name.as_str()).collect();
+        let first = inherited
+            .iter()
+            .map(|p| p.id.0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or("Property identity space exhausted")?;
+        for (index, p) in def.properties.iter().enumerate() {
+            valid_descriptor(p)?;
+            require(
+                p.id.0
+                    == first
+                        .checked_add(index as u64)
+                        .ok_or("Property identity space exhausted")?
+                    && p.id.0 < def.next_property
+                    && names.insert(&p.name)
+                    && p.policy.live_literal
+                    && !p.policy.app_binding,
+                "Invalid definition endpoint identity, name or capability policy",
+            )?;
+        }
+        require(
+            if def.properties.is_empty() {
+                def.next_property == 0
+            } else {
+                def.next_property
+                    == first
+                        .checked_add(def.properties.len() as u64)
+                        .ok_or("Property identity space exhausted")?
+            },
+            "Invalid definition endpoint cursor",
+        )?;
+    }
+    Ok(())
+}
+
 fn check_assignments(
     doc: &Document,
     def: DefinitionId,
@@ -147,7 +213,7 @@ fn all_paths(
             objects.insert((prefix.to_vec(), n.id)) && objects.len() <= 512,
             "OIB expansion budget",
         )?;
-        for p in descriptors(doc, n.class)? {
+        for p in node_descriptors(doc, def, n)? {
             out.push(PropertyPath {
                 references: prefix.to_vec(),
                 node: n.id,
@@ -192,6 +258,11 @@ pub fn validate(seed: &Seed) -> Result<()> {
                 .iter()
                 .map(|c| c.properties.len())
                 .sum::<usize>()
+                + doc
+                    .definitions
+                    .iter()
+                    .map(|d| d.properties.len())
+                    .sum::<usize>()
                 <= 64
             && doc.mappings.objects.len() <= 512
             && doc.mappings.definitions.len()
@@ -282,6 +353,7 @@ pub fn validate(seed: &Seed) -> Result<()> {
             require(visual(doc, *id)?, "Nonvisual class in visual child rules")?;
         }
     }
+    declarations(&doc.classes, &doc.definitions)?;
     let mut expected_definitions = BTreeSet::new();
     for def in &doc.definitions {
         require(
@@ -340,7 +412,7 @@ pub fn validate(seed: &Seed) -> Result<()> {
                     "OIB visual class/parent rule violated",
                 )?;
             }
-            for p in descriptors(doc, n.class)? {
+            for p in node_descriptors(doc, def, n)? {
                 if p.policy.live_literal && p.editor != PropertyEditor::ReadOnly {
                     expected_definitions.insert((def.id, n.id, p.id));
                 }

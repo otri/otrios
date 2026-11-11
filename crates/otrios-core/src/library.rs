@@ -259,6 +259,7 @@ pub fn validate_graph(graph: &Graph) -> Result<()> {
     if properties > MAX_PROPERTY_DESCRIPTORS {
         return Err("Library class property budget".into());
     }
+    canvas::oib::document::validate_declarations(&graph.required_classes, &graph.definitions)?;
     for def in &graph.definitions {
         if def.id.0 == 0
             || !text(&def.name, 64)
@@ -402,6 +403,11 @@ fn behavior_property<'a>(
         .iter()
         .find(|node| node.id == path.node)
         .ok_or("Missing behavior property node")?;
+    if node.id == def.root
+        && let Some(property) = def.properties.iter().find(|p| p.id == path.property)
+    {
+        return Ok(property);
+    }
     let mut class = Some(node.class);
     while let Some(id) = class {
         let descriptor = graph
@@ -600,6 +606,8 @@ struct NodeSignature<'a> {
 #[derive(Serialize)]
 struct DefinitionSignature<'a> {
     id: DefinitionId,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    properties: Vec<canvas::oib::contract::PropertySignature>,
     root: NodeId,
     nodes: Vec<NodeSignature<'a>>,
     exposed: &'a [ExposedProperty],
@@ -672,6 +680,11 @@ pub fn export_contract(graph: &Graph, export: ExportId) -> Result<Revision> {
                 .collect();
             Ok(DefinitionSignature {
                 id: def.id,
+                properties: def
+                    .properties
+                    .iter()
+                    .map(canvas::oib::contract::property_signature)
+                    .collect(),
                 root: def.root,
                 nodes,
                 exposed: &def.exposed,
@@ -730,6 +743,7 @@ pub fn seal_graph(mut graph: Graph) -> Result<Graph> {
     }
     for def in &mut graph.definitions {
         def.nodes.sort_by_key(|n| n.id);
+        def.properties.sort_by_key(|p| p.id);
         def.exposed.sort_by_key(|e| e.property);
         def.slots.sort_by_key(|s| s.id);
         for n in &mut def.nodes {

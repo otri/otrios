@@ -75,7 +75,7 @@ pub(super) fn model(
         .find(|n| n.id == node_id)
         .ok_or("Missing API object")?;
     let root = node_id == definition.root;
-    let (target, references) = if let Some(reference) = &node.reference
+    let (target_definition, target, references) = if let Some(reference) = &node.reference
         && !root
     {
         let linked = graph
@@ -84,6 +84,7 @@ pub(super) fn model(
             .find(|d| d.id == reference.definition)
             .ok_or("Missing linked API")?;
         (
+            linked,
             linked
                 .nodes
                 .iter()
@@ -92,19 +93,20 @@ pub(super) fn model(
             vec![node.id],
         )
     } else {
-        (node, vec![])
+        (definition, node, vec![])
     };
-    let fields: Vec<_> = crate::canvas::oib::document::descriptors(metadata, target.class)?
-        .into_iter()
-        .map(|descriptor| {
-            let path = PropertyPath {
-                references: references.clone(),
-                node: target.id,
-                property: descriptor.id,
-            };
-            Field { descriptor, path }
-        })
-        .collect();
+    let fields: Vec<_> =
+        crate::canvas::oib::document::node_descriptors(metadata, target_definition, target)?
+            .into_iter()
+            .map(|descriptor| {
+                let path = PropertyPath {
+                    references: references.clone(),
+                    node: target.id,
+                    property: descriptor.id,
+                };
+                Field { descriptor, path }
+            })
+            .collect();
     let selected = selected
         .filter(|p| fields.iter().any(|f| &f.path == *p))
         .cloned();
@@ -157,10 +159,11 @@ pub(super) fn model(
                     .find(|n| n.id == target.node)
                     .ok_or("Missing forwarding object")?;
                 names.push(node.name.clone());
-                let descriptor = crate::canvas::oib::document::descriptors(metadata, node.class)?
-                    .into_iter()
-                    .find(|p| p.id == target.property)
-                    .ok_or("Missing forwarding property")?;
+                let descriptor =
+                    crate::canvas::oib::document::node_descriptors(metadata, current, node)?
+                        .into_iter()
+                        .find(|p| p.id == target.property)
+                        .ok_or("Missing forwarding property")?;
                 names.push(descriptor.name);
                 let label = format!("Disconnect {}", names.join(" / "));
                 choices.push(Choice {
@@ -176,13 +179,14 @@ pub(super) fn model(
                 .iter()
                 .find(|n| n.id == definition.root)
                 .ok_or("Missing API root")?;
-            for source in crate::canvas::oib::document::descriptors(metadata, root_node.class)?
-                .into_iter()
-                .filter(|p| {
-                    p.value_type == field.descriptor.value_type
-                        && p.policy.live_literal
-                        && p.editor != PropertyEditor::ReadOnly
-                })
+            for source in
+                crate::canvas::oib::document::node_descriptors(metadata, definition, root_node)?
+                    .into_iter()
+                    .filter(|p| {
+                        p.value_type == field.descriptor.value_type
+                            && p.policy.live_literal
+                            && p.editor != PropertyEditor::ReadOnly
+                    })
             {
                 let mut targets = definition
                     .exposed
@@ -216,6 +220,96 @@ pub(super) fn model(
                     reason: result.err(),
                 });
             }
+            let mut descriptor = field.descriptor.clone();
+            descriptor.id =
+                match crate::canvas::oib::document::next_property_id(metadata, definition) {
+                    Ok(id) => PropertyId(id),
+                    Err(reason) => {
+                        choices.push(Choice {
+                            label: "Expose as property".into(),
+                            connected: false,
+                            operation: None,
+                            reason: Some(reason),
+                        });
+                        return Ok(Some(Model {
+                            fields,
+                            selected,
+                            choices,
+                            root,
+                        }));
+                    }
+                };
+            let base: String = descriptor
+                .name
+                .to_lowercase()
+                .replace(' ', "_")
+                .chars()
+                .scan(0, |bytes, c| {
+                    *bytes += c.len_utf8();
+                    (*bytes <= 56).then_some(c)
+                })
+                .collect();
+            let base = if base == "accent" {
+                "color".to_string()
+            } else {
+                base
+            };
+            let names =
+                crate::canvas::oib::document::node_descriptors(metadata, definition, root_node)?;
+            descriptor.name = base.clone();
+            for suffix in 2..=66 {
+                if !names.iter().any(|p| p.name == descriptor.name) {
+                    break;
+                }
+                descriptor.name = format!("{base}_{suffix}");
+            }
+            descriptor.label = descriptor.name.clone();
+            descriptor.policy = PropertyPolicy {
+                live_literal: true,
+                app_binding: false,
+            };
+            descriptor.editor = match descriptor.value_type {
+                otrios_interfaces::layout::ValueType::Text => PropertyEditor::TextSuggestions,
+                otrios_interfaces::layout::ValueType::Number => PropertyEditor::NumberSuggestions,
+                otrios_interfaces::layout::ValueType::Color => PropertyEditor::Palette,
+                otrios_interfaces::layout::ValueType::Boolean => PropertyEditor::Toggle,
+                _ => PropertyEditor::ReadOnly,
+            };
+            if descriptor.value_type == otrios_interfaces::layout::ValueType::Number {
+                descriptor.number_range = Some(descriptor.number_range.unwrap_or([0., 1000.]));
+                descriptor.number_step = Some(descriptor.number_step.unwrap_or(1.));
+            }
+            let label = format!("Expose as {}", descriptor.name);
+            let result = if !field.descriptor.policy.live_literal
+                || field.descriptor.editor == PropertyEditor::ReadOnly
+            {
+                Err("This endpoint requires a declared binding contract".into())
+            } else if writable && !imported {
+                let mut apply = state.oib_apply_base()?;
+                apply.operations = vec![
+                    DocumentEdit::Definition(DefinitionEdit::SetProperty {
+                        definition: id,
+                        descriptor: descriptor.clone(),
+                    }),
+                    DocumentEdit::Definition(DefinitionEdit::Expose {
+                        definition: id,
+                        property: descriptor.id,
+                        targets: vec![path.clone()],
+                    }),
+                ];
+                state.preview_oib_apply(&apply).map(|_| InstanceOperation {
+                    generation: apply.generation,
+                    operations: apply.operations,
+                })
+            } else {
+                Err("Read-only component".into())
+            };
+            choices.push(Choice {
+                label,
+                connected: false,
+                operation: result.as_ref().ok().cloned(),
+                reason: result.err(),
+            });
         }
     }
     Ok(Some(Model {

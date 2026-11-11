@@ -28,7 +28,11 @@ pub(super) fn property_selection(
 }
 pub(super) fn selection(s: &DocumentSource, key: &Key) -> Option<Selection> {
     match key {
-        Key::Definition(d) | Key::DefinitionName(d) | Key::Slots(d) | Key::Exposed(d, _)
+        Key::Definition(d)
+        | Key::DefinitionName(d)
+        | Key::PropertyDescriptor(d, _)
+        | Key::Slots(d)
+        | Key::Exposed(d, _)
             if definition(s, *d).is_ok() =>
         {
             Some(Selection::Definition(*d))
@@ -231,6 +235,9 @@ pub(super) fn label(s: &DocumentSource, key: &Key) -> String {
                 _ => "Reference binding",
             }
         ),
+        Key::PropertyDescriptor(d, p) => {
+            format!("{} / Property {} declaration", definition_name(s, *d), p.0)
+        }
         Key::Slots(d) => format!("{} / Content slots", definition_name(s, *d)),
         Key::Exposed(d, p) => format!("{} / Outlet {}", definition_name(s, *d), p.0),
         Key::Preset(p) => s
@@ -286,6 +293,18 @@ pub(super) fn source_text(s: &DocumentSource, key: &Key) -> String {
             .and_then(|v| v.defaults.iter().find(|v| v.property == *p))
             .map(|v| value_text(&Some(v.value.clone())))
             .unwrap_or_else(|| "Inherited".into()),
+        Key::PropertyDescriptor(d, p) => definition(s, *d)
+            .ok()
+            .and_then(|d| d.properties.iter().find(|v| v.id == *p))
+            .map(|p| {
+                format!(
+                    "{} · {:?}; default {}",
+                    p.name,
+                    p.value_type,
+                    value_text(&Some(p.default.clone()))
+                )
+            })
+            .unwrap_or_else(absent),
         Key::Slots(d) => definition(s, *d)
             .map(|v| {
                 v.slots
