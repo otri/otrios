@@ -1034,7 +1034,7 @@ fn mounted_fixture_session_with_count(
 ) -> (Client, crate::canvas::Document, Session) {
     mounted_fixture_session_with_ui(focus, extra, fixture_ui())
 }
-fn mounted_fixture_session_with_ui(
+pub(in crate::canvas::client) fn mounted_fixture_session_with_ui(
     focus: bool,
     extra: usize,
     ui: Ui,
@@ -3876,7 +3876,7 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
             .alternatives,
         vec![Some(Value::Text("Main power".into()))]
     );
-    let (delete, point) = studio_scene_control(&client, "Delete component");
+    let (delete, point) = studio_scene_control(&client, "Remove instance...");
     let generation = client.active.as_ref().unwrap().doc.oib_generation();
     assert!(
         client
@@ -3938,6 +3938,7 @@ fn responsive_workspace_visible_component_management_edits_and_deletes_inserted_
             .any(|i| i.id == power.id && i.active)
     );
     assert!(client.activate(client.epoch(), delete).unwrap());
+    confirm_instance_removal(&mut client);
     if client
         .active
         .as_ref()
@@ -4026,7 +4027,7 @@ fn responsive_workspace_component_management_respects_test_readonly_and_fixed_ow
             p.node
                 .semantics
                 .as_ref()
-                .is_some_and(|s| s.label == "Delete component")
+                .is_some_and(|s| s.label == "Remove instance...")
         })
     };
     for selection in [
@@ -4147,7 +4148,7 @@ fn responsive_workspace_delete_release_after_remote_removal_keeps_replacement_sa
         Selection::Object(a) => a.instance.0,
         _ => panic!("fixture selects a resident descendant"),
     };
-    let (delete, point) = studio_scene_control(&client, "Delete component");
+    let (delete, point) = studio_scene_control(&client, "Remove instance...");
     let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
     assert!(
         client
@@ -4344,8 +4345,9 @@ fn responsive_workspace_delete_discards_own_dirty_draft_and_retains_unrelated_dr
         .doc
         .oib_generation()
         .unwrap();
-    let (delete, _) = studio_scene_control(&client, "Delete component");
+    let (delete, _) = studio_scene_control(&client, "Remove instance...");
     assert!(client.activate(client.epoch(), delete).unwrap());
+    confirm_instance_removal(&mut client);
     assert!(!client.keyboard_visible());
     settle_editor(&mut client, &mut authority, &mut session);
     let m = client.active.as_ref().unwrap();
@@ -6050,7 +6052,7 @@ fn working_copy_instance_delete_undo_redo_reopens_fresh_root_and_keeps_label() {
     client.designer_apply_working_copy().unwrap();
     settle_editor(&mut client, &mut authority, &mut session);
     activate_studio_root(&mut client, 20);
-    let (_, point) = studio_scene_control(&client, "Delete component");
+    let (_, point) = studio_scene_control(&client, "Remove instance...");
     for phase in [PointerPhase::Down, PointerPhase::Up] {
         assert!(
             client
@@ -6066,6 +6068,7 @@ fn working_copy_instance_delete_undo_redo_reopens_fresh_root_and_keeps_label() {
                 .unwrap()
         );
     }
+    confirm_instance_removal(&mut client);
     assert!(
         client
             .active
@@ -6130,4 +6133,10 @@ fn working_copy_instance_delete_undo_redo_reopens_fresh_root_and_keeps_label() {
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(authority.oib_allocations().unwrap().len(), 1);
     assert!(client.scene().unwrap().controls().len() <= 128);
+}
+
+fn confirm_instance_removal(client: &mut Client) {
+    let (id, _) = studio_scene_control(client, "Remove instance");
+    assert!(client.activate(client.epoch(), id).unwrap());
+    assert!(client.active.as_ref().unwrap().delete_review.is_none());
 }

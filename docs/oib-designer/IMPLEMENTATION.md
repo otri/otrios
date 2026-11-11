@@ -807,3 +807,53 @@ Restart files: `canvas/oib/history/restore.rs`, `history/occurrence_tests.rs`,
 `client/oib_designer_tests.rs`; property/receipt capture still uses the existing
 manager and state adapter paths recorded above. Frame reachability and live
 acceptance must be rechecked before claiming this batch deployed.
+
+
+## B5 owned-instance removal review — local implementation, pending publication
+
+The management action now says **Remove...**, distinct from Library's component
+definition deletion. A typed occurrence report follows allocated slot ownership,
+checks exact source/import/path/prototype identity, and lists selected/owned
+instances, removed explicit connections, retained parents and reusable definitions.
+Fixed signed instances and incomplete evidence block removal. An allocated local
+instance of an imported definition remains removable. Children precede owners in
+source sibling order; numeric IDs do not define ownership order.
+
+The existing dependency modal now supports both typed targets. Opening/Cancel
+preserve authored and private state. Confirmation rechecks live and candidate
+roots, rebuilds the report and runs ordinary final admission before staging one
+private batch. Only the removed closure's raw drafts and staged occurrence
+literals are discarded; unrelated edits and shared definitions remain. Global
+Apply still publishes. Local Undo restores the prior candidate; published Undo
+uses the existing guarded fresh-ID reconstruction. No wire/dependency/limit change.
+
+Focused evidence (same-process authority, not Linux IPC):
+
+- Seven `instance_impact` tests pass: owned children with older IDs/source ordering,
+  retained external parent, reusable definitions, imported bodies, fixed ownership,
+  missing prototypes/roots, mismatched candidates, cycles and invalid slot paths.
+- Six `canvas::client::oib_delete::tests` pass. The new owned-subtree case checks
+  real modal scenes at 800×480, 1280×800 and 1920×1080, Cancel preserving all private
+  edits, confirmation pruning only closure values, local Undo/Redo, Apply and
+  published Undo/Apply. The stale-review case now runs for both definition and
+  instance targets, clean and dirty, including a held pointer during remote edit.
+- The final Designer module passes 60 tests with one existing ignored diagnostic,
+  including explicit confirmation through the renamed Remove... management action.
+- The `history` filter passes 40 tests, covering the relevant OIB planner,
+  manager, review and causal-state cases plus incidental matched history tests.
+- Strict core library Clippy passes. An attempted `--all-targets` strict run also
+  encounters duplicate test-fixture module declarations in the existing fixture
+  pattern; that broader run is not passing. One new collapsible-if finding was
+  corrected. `git diff --check` passes.
+
+Frame SSH timed out again; no publisher was started and none is being waited on.
+These changes and the preceding pending lifecycle commits are **not verified live**.
+The last verified release above remains the live evidence baseline. Publish and
+qualify the combined slice when the existing Frame connection returns. No full
+preflight or cross-platform release qualification was run for this slice.
+
+Remaining: exact causal reanchoring of earlier history across recreated IDs,
+mixed replacement staging capacity, typed API/slot authoring, app-bound graph
+reconstruction and replacement/retirement; B6 styles/modes and B7 controls/flows.
+Restart in `canvas/oib/instance_impact.rs`, `client/oib_delete.rs`,
+`client/oib_designer.rs`, `client/oib_working_copy.rs` and their focused tests.

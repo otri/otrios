@@ -764,8 +764,24 @@ This never weakens property/source guards. Earlier history entries still naming
 retired identities require an exact causal-version remapping before they can be
 reanchored. Equal restored values alone cannot establish that proof.
 
-The existing simple instance Delete command is qualified through private removal,
-Apply, fresh-ID Undo and Redo. A complete owned-subtree impact/confirmation UI and
-the broader replacement/retirement journey remain separate work; implementing the
-inverse planner is not evidence of those controls. See the latest implementation
-record for actual tests and Frame/Web publication status.
+Instance removal uses a typed occurrence target, distinct from component-definition
+deletion. The management action is Remove..., with a Remove instance? review that
+names the selected occurrence, all allocated owned descendants, their explicit
+app connections and retained reusable definitions. Compute the closure from exact
+slot ownership paths; remove descendants before owners, preserving source sibling
+order independently of numeric IDs. Missing, cyclic or ambiguous source and fixed
+signed occurrences block confirmation. An imported definition does not make an
+otherwise editable allocated occurrence fixed. Final candidate admission checks
+slot cardinality, grants, layout and unchanged operation/byte limits.
+
+Opening or cancelling the review changes no authored values or private buffers.
+Confirmation rechecks both current live and private source roots, recomputes impact
+and admission, then stages one private removal batch. Discard raw editor buffers
+and staged literal changes only for the removed closure; preserve unrelated edits,
+definitions, styles and app field values. Local Undo restores the prior candidate,
+including its staged values. Published Undo restores the removed confirmed state
+with fresh identities under the guards above. The shared T17 modal capture,
+staleness, explicit rescan, navigation and scrolling rules apply to this review.
+
+The broader replacement/retirement journey remains open. See the latest
+implementation record for actual tests and Frame/Web publication status.

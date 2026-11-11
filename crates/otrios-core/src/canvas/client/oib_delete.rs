@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Document-scoped deletion review; confirmation stages one private candidate.
 use super::*;
-use crate::canvas::oib::impact::{self, Kind, Report};
+use crate::canvas::oib::{
+    impact::{self, Kind},
+    instance_impact,
+};
 use oib_workspace::{
     MODAL_ACTION_START, MODAL_CONTENT, MODAL_LINK_START, Modal, ModalAction, ModalLink,
 };
 use otrios_interfaces::oib::{
     authoring::*,
-    designer::{DefinitionId, Selection},
+    designer::{DefinitionId, InstanceId, Selection},
 };
 use std::ops::Range;
 
@@ -16,6 +19,70 @@ const DELETE: u32 = MODAL_ACTION_START + 6;
 const REFRESH: u32 = MODAL_ACTION_START + 7;
 const PREVIOUS: u32 = MODAL_ACTION_START + 8;
 const NEXT: u32 = MODAL_ACTION_START + 9;
+
+#[derive(Clone, Copy)]
+enum Target {
+    Definition(DefinitionId),
+    Instance(InstanceId),
+}
+struct Report {
+    target: Target,
+    name: String,
+    scope: &'static str,
+    complete: bool,
+    readonly: bool,
+    items: Vec<impact::Use>,
+    blockers: Vec<String>,
+    removable_presets: Vec<u64>,
+    removal_order: Vec<InstanceId>,
+    removable: bool,
+}
+impl Report {
+    fn can_delete(&self) -> bool {
+        self.removable
+    }
+    fn instance(&self) -> bool {
+        matches!(self.target, Target::Instance(_))
+    }
+}
+fn query(state: &StateAdapter, target: Target) -> Result<Report> {
+    let source = state.oib_history_source()?;
+    let seed = state.oib_authoring_seed()?;
+    Ok(match target {
+        Target::Definition(id) => {
+            let r = impact::component(&seed, &source, id);
+            let removable = r.can_delete();
+            Report {
+                target: Target::Definition(r.target),
+                removable,
+                name: r.name,
+                scope: r.scope,
+                complete: r.complete,
+                readonly: r.readonly,
+                items: r.items,
+                blockers: r.blockers,
+                removable_presets: r.removable_presets,
+                removal_order: vec![],
+            }
+        }
+        Target::Instance(id) => {
+            let r = instance_impact::instance(&seed, &source, id);
+            let removable = r.can_remove();
+            Report {
+                target: Target::Instance(r.target),
+                removable,
+                name: r.name,
+                scope: r.scope,
+                complete: r.complete,
+                readonly: r.readonly,
+                items: r.items,
+                blockers: r.blockers,
+                removable_presets: vec![],
+                removal_order: r.removal_order,
+            }
+        }
+    })
+}
 
 pub(super) struct Pending {
     report: Report,
@@ -57,9 +124,14 @@ impl Pending {
             if !self.report.complete {
                 "Cannot delete: some dependencies could not be checked.".into()
             } else if self.report.readonly {
-                "This component belongs to an imported library.".into()
+                if self.report.instance() {
+                    "This instance is fixed by the host."
+                } else {
+                    "This component belongs to an imported library."
+                }
+                .into()
             } else if self.report.can_delete() {
-                "Deletion removes this component and the listed palette presets.".into()
+                if self.report.instance() { "Removes this instance, its owned children and their connections. The component remains in the library." } else { "Deletion removes this component and the listed palette presets." }.into()
             } else {
                 "Cannot delete while in use. Open a use to inspect it.".into()
             },
@@ -114,7 +186,12 @@ impl Pending {
         let mut actions = vec![
             ModalAction {
                 id: CLOSE,
-                label: "Keep component".into(),
+                label: if self.report.instance() {
+                    "Keep instance"
+                } else {
+                    "Keep component"
+                }
+                .into(),
                 enabled: true,
             },
             ModalAction {
@@ -124,7 +201,12 @@ impl Pending {
             },
             ModalAction {
                 id: DELETE,
-                label: "Delete component".into(),
+                label: if self.report.instance() {
+                    "Remove instance"
+                } else {
+                    "Delete component"
+                }
+                .into(),
                 enabled: current && self.can_stage,
             },
         ];
@@ -141,7 +223,12 @@ impl Pending {
             });
         }
         Modal {
-            title: "Delete component?".into(),
+            title: if self.report.instance() {
+                "Remove instance?"
+            } else {
+                "Delete component?"
+            }
+            .into(),
             lines,
             links,
             actions,
@@ -201,17 +288,29 @@ fn candidate(state: &StateAdapter, report: &Report) -> Result<EditBatch> {
         return Err("Component dependencies must be repaired before deletion".into());
     }
     let mut apply = state.oib_apply_base()?;
-    apply
-        .operations
-        .push(DocumentEdit::Definition(DefinitionEdit::DeleteDefinition {
-            definition: report.target,
-        }));
-    apply.operations.extend(
-        report
-            .removable_presets
-            .iter()
-            .map(|id| DocumentEdit::Preset(PresetEdit::Delete { preset: *id })),
-    );
+    match report.target {
+        Target::Definition(definition) => {
+            apply
+                .operations
+                .push(DocumentEdit::Definition(DefinitionEdit::DeleteDefinition {
+                    definition,
+                }));
+            apply.operations.extend(
+                report
+                    .removable_presets
+                    .iter()
+                    .map(|id| DocumentEdit::Preset(PresetEdit::Delete { preset: *id })),
+            );
+        }
+        Target::Instance(_) => {
+            for instance in &report.removal_order {
+                apply.operations.extend(
+                    otrios_interfaces::oib::InstanceOperation::remove(apply.generation, instance.0)
+                        .operations,
+                );
+            }
+        }
+    }
     // Run the same final authority admission locally. No app/transport write.
     state.preview_oib_apply(&apply)?;
     Ok(EditBatch {
@@ -231,6 +330,12 @@ impl Mount {
 }
 impl Client {
     pub(super) fn designer_review_delete(&mut self, definition: DefinitionId) -> Result<bool> {
+        self.review_delete(Target::Definition(definition))
+    }
+    pub(super) fn designer_review_instance_delete(&mut self, instance: InstanceId) -> Result<bool> {
+        self.review_delete(Target::Instance(instance))
+    }
+    fn review_delete(&mut self, target: Target) -> Result<bool> {
         let Some(m) = self.active.as_mut() else {
             return Ok(false);
         };
@@ -238,9 +343,7 @@ impl Client {
             return Ok(false);
         }
         m.sync_working_copy()?;
-        let source = m.design_doc().oib_history_source()?;
-        let seed = m.design_doc().oib_authoring_seed()?;
-        let report = impact::component(&seed, &source, definition);
+        let report = query(m.design_doc(), target)?;
         let writable = m.binding.as_ref().is_none_or(|b| b.ui_editable)
             && m.designer_editing()
             && m.doc.confirmed()
@@ -321,7 +424,7 @@ impl Client {
             REFRESH => {
                 let m = self.active.as_mut().unwrap();
                 m.delete_review = None;
-                self.designer_review_delete(target)?;
+                self.review_delete(target)?;
             }
             PREVIOUS | NEXT => {
                 let m = self.active.as_mut().unwrap();
@@ -357,10 +460,12 @@ impl Client {
                         return Err("Local changes use older source. Review or discard them before deleting.".into());
                     }
                     let state = m.design_doc();
-                    let source = state.oib_history_source()?;
-                    let seed = state.oib_authoring_seed()?;
-                    let report = impact::component(&seed, &source, target);
-                    m.stage_structure(candidate(state, &report)?)
+                    let report = query(state, target)?;
+                    let changed = m.stage_structure(candidate(state, &report)?)?;
+                    if changed && report.instance() {
+                        m.discard_removed_occurrence_drafts(&report.removal_order)?;
+                    }
+                    Ok::<_, String>(changed)
                 })();
                 match result {
                     Ok(_) => {

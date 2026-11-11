@@ -294,7 +294,7 @@ fn deletion_used_component_is_visible_blocked_and_links_to_named_dependencies() 
 }
 #[test]
 fn deletion_stale_review_keeps_capture_and_requires_explicit_rescan() {
-    for dirty in [false, true] {
+    for (dirty, instance) in [(false, false), (true, false), (false, true), (true, true)] {
         let (mut client, mut authority, mut session, definition, ui) = created();
         if dirty {
             client
@@ -307,7 +307,13 @@ fn deletion_stale_review_keeps_capture_and_requires_explicit_rescan() {
                 )
                 .unwrap();
         }
-        client.designer_review_delete(definition).unwrap();
+        if instance {
+            client
+                .designer_review_instance_delete(InstanceId(20))
+                .unwrap();
+        } else {
+            client.designer_review_delete(definition).unwrap();
+        }
         let at = point(&client.scene().unwrap(), DELETE);
         pointer(&mut client, PointerPhase::Down, at);
         let mut rival = StateAdapter::for_ui(&ui, "designer-mount", &[], [121; 16]).unwrap();
@@ -383,7 +389,9 @@ fn deletion_stale_review_keeps_capture_and_requires_explicit_rescan() {
                 vec![Some(Value::Text("Retained private edit".into()))]
             );
         } else {
-            assert_eq!(review.report.name, "Latest component");
+            if !instance {
+                assert_eq!(review.report.name, "Latest component");
+            }
             assert!(review.can_stage);
         }
         assert!(client.back().unwrap());
@@ -477,4 +485,222 @@ fn deletion_dependency_scroll_retains_layout_and_pages_only_at_existing_limits()
         review.link_selection(modal.links[0].id),
         review.report.items[1].selection
     );
+}
+
+#[test]
+fn instance_removal_reviews_owned_children_and_preserves_private_edits_until_confirmation() {
+    use otrios_interfaces::oib::authoring::{Destination, HierarchyBatch, HierarchyEdit};
+    use otrios_interfaces::oib::designer::{ObjectAddress, PropertyAddress, SlotId};
+    let ui = oib_working_copy::applied_history_tests::owned_slot_ui();
+    let (mut client, mut authority, mut session) =
+        oib_designer::tests::mounted_fixture_session_with_ui(true, 0, ui);
+    let original = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_history_source()
+        .unwrap();
+    let parent = original.instances.iter().find(|i| i.id == 20).unwrap();
+    let root = original
+        .definitions
+        .iter()
+        .find(|d| d.id.0 == parent.component)
+        .unwrap()
+        .root;
+    let child = InstanceId(original.next_identity);
+    let m = client.active.as_mut().unwrap();
+    m.stage_structure(EditBatch::hierarchy(HierarchyBatch {
+        generation: m.design_doc().oib_structural_generation().unwrap(),
+        operations: vec![HierarchyEdit::Insert {
+            prototype: InstanceId(parent.prototype),
+            name: Some("Owned child".into()),
+            destination: Destination::Slot {
+                component: ObjectAddress {
+                    instance: InstanceId(20),
+                    references: vec![],
+                    node: root,
+                },
+                slot: SlotId(1000),
+            },
+            before: None,
+            frame: Some([8., 8., 200., 80.]),
+        }],
+    }))
+    .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let child_control = ObjectAddress {
+        instance: child,
+        references: vec![otrios_interfaces::oib::designer::NodeId(7)],
+        node: otrios_interfaces::oib::designer::NodeId(1),
+    };
+    let m = client.active.as_mut().unwrap();
+    let metadata = crate::canvas::oib::document::expanded_metadata(
+        &m.design_doc().oib_authoring_seed().unwrap(),
+        &m.design_doc().oib_allocations().unwrap(),
+    )
+    .unwrap();
+    let source = crate::canvas::oib::document::connections::choices(
+        &m.ui,
+        &metadata,
+        &child_control,
+        otrios_interfaces::oib::designer::PropertyId(4),
+    )
+    .unwrap()
+    .into_iter()
+    .find(|(_, source)| source.field == 2)
+    .unwrap()
+    .1;
+    m.stage_structure(EditBatch::hierarchy(HierarchyBatch {
+        generation: m.design_doc().oib_structural_generation().unwrap(),
+        operations: vec![HierarchyEdit::Connect {
+            object: child_control,
+            property: otrios_interfaces::oib::designer::PropertyId(4),
+            source: Some(source),
+        }],
+    }))
+    .unwrap();
+    client.designer_apply_working_copy().unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let before = authority.save().unwrap();
+    let parent_label = editor_address(3);
+    let child_label = match parent_label.clone() {
+        PropertyAddress::Occurrence { path, .. } => PropertyAddress::Occurrence {
+            instance: child,
+            path,
+        },
+        _ => unreachable!(),
+    };
+    let other_label = match parent_label.clone() {
+        PropertyAddress::Occurrence { path, .. } => PropertyAddress::Occurrence {
+            instance: InstanceId(30),
+            path,
+        },
+        _ => unreachable!(),
+    };
+    for (address, text) in [
+        (&parent_label, "Private parent"),
+        (&child_label, "Private child"),
+        (&other_label, "Private survivor"),
+    ] {
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .stage_property(address, Some(Value::Text(text.into())))
+            .unwrap();
+    }
+    client
+        .designer_review_instance_delete(InstanceId(20))
+        .unwrap();
+    let m = client.active.as_ref().unwrap();
+    let review = m.delete_review.as_ref().unwrap();
+    assert_eq!(review.report.removal_order, vec![child, InstanceId(20)]);
+    assert!(review.can_stage);
+    assert!(
+        review
+            .report
+            .items
+            .iter()
+            .any(|item| item.kind == Kind::Api && item.detail.contains("field 2"))
+    );
+    assert!(
+        review
+            .modal(m)
+            .lines
+            .iter()
+            .any(|line| line.contains("Owned child"))
+    );
+    for viewport in [[800., 480.], [1280., 800.], [1920., 1080.]] {
+        client.set_viewport(viewport).unwrap();
+        let scene = client.scene().unwrap();
+        assert!(scene.controls().len() <= 128);
+        assert!(scene.path(DELETE).is_some());
+    }
+    tap(&mut client, CLOSE);
+    let m = client.active.as_ref().unwrap();
+    assert!(m.delete_review.is_none());
+    assert_eq!(
+        m.working_copy
+            .as_ref()
+            .unwrap()
+            .candidate
+            .oib_history_source()
+            .unwrap()
+            .instances
+            .len(),
+        3
+    );
+    for address in [&parent_label, &child_label, &other_label] {
+        assert!(
+            m.working_copy
+                .as_ref()
+                .unwrap()
+                .apply
+                .changes
+                .iter()
+                .any(|c| &c.address == address)
+        );
+    }
+    assert_eq!(authority.save().unwrap(), before);
+    client
+        .designer_review_instance_delete(InstanceId(20))
+        .unwrap();
+    tap(&mut client, DELETE);
+    let m = client.active.as_ref().unwrap();
+    assert!(m.delete_review.is_none());
+    assert_eq!(
+        m.design_doc().oib_history_source().unwrap().instances.len(),
+        1
+    );
+    assert_eq!(
+        m.design_doc().oib_history_source().unwrap().definitions,
+        original.definitions
+    );
+    assert_eq!(m.working_copy.as_ref().unwrap().apply.changes.len(), 1);
+    assert_eq!(
+        m.working_copy.as_ref().unwrap().apply.changes[0].address,
+        other_label
+    );
+    assert_eq!(
+        authority.save().unwrap(),
+        before,
+        "confirmation only stages removal"
+    );
+    assert!(
+        client
+            .activate(client.epoch(), oib_workspace::UNDO)
+            .unwrap()
+    );
+    let m = client.active.as_ref().unwrap();
+    assert_eq!(
+        m.design_doc().oib_history_source().unwrap().instances.len(),
+        3
+    );
+    assert_eq!(m.working_copy.as_ref().unwrap().apply.changes.len(), 3);
+    assert!(
+        client
+            .activate(client.epoch(), oib_workspace::REDO)
+            .unwrap()
+    );
+    client.designer_apply_working_copy().unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_allocations().unwrap().len(), 1);
+    // The unpublished parent/child edits were discarded at confirmation, so
+    // published Undo restores confirmed defaults rather than those private edits.
+    assert!(
+        client
+            .activate(client.epoch(), oib_workspace::UNDO)
+            .unwrap()
+    );
+    let m = client.active.as_ref().unwrap();
+    assert_eq!(
+        m.design_doc().oib_history_source().unwrap().instances.len(),
+        3
+    );
+    assert_eq!(m.doc.oib_allocations().unwrap().len(), 1);
+    client.designer_apply_working_copy().unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.oib_allocations().unwrap().len(), 3);
 }

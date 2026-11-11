@@ -4,8 +4,8 @@ use super::*;
 use otrios_interfaces::oib::{
     Change,
     authoring::{
-        Apply, ApplyResult, DefinitionEdit, DocumentEdit, EditBatch, MAX_BATCH_BYTES,
-        MAX_OPERATIONS, PresetEdit,
+        Apply, ApplyResult, DefinitionEdit, DocumentEdit, EditBatch, HierarchyEdit,
+        MAX_BATCH_BYTES, MAX_OPERATIONS, PresetEdit,
     },
     designer::{PropertyAddress, Selection},
 };
@@ -333,6 +333,14 @@ impl WorkingCopy {
                     )
                 });
             }
+            if let DocumentEdit::Hierarchy(HierarchyEdit::Remove { instance }) = &op {
+                // Remove only this occurrence's private literals. Local Undo
+                // retains the complete prior candidate through set().
+                next.changes.retain(|change| {
+                    !matches!(&change.address,
+                    PropertyAddress::Occurrence { instance: owner, .. } if owner == instance)
+                });
+            }
             if let Some(i) = next
                 .operations
                 .iter()
@@ -560,4 +568,4 @@ impl WorkingCopy {
 
 #[cfg(test)]
 #[path = "oib_applied_history_tests.rs"]
-mod applied_history_tests;
+pub(super) mod applied_history_tests;

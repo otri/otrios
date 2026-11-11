@@ -530,14 +530,14 @@ impl Designer {
                 164.,
                 0.,
                 156.,
-                "Delete",
+                "Remove...",
                 LocalAction::DeleteComponent(target.instance),
             )?;
             delete
                 .semantics
                 .as_mut()
                 .ok_or("Missing Delete semantics")?
-                .label = "Delete component".into();
+                .label = "Remove instance...".into();
             let mut nodes = vec![edit, delete];
             retain_inspector_ids(
                 &previous_management,
@@ -2252,35 +2252,15 @@ impl Client {
             .oib_instances()?
             .iter()
             .any(|i| i.id == instance && i.active);
-        let changed = if live {
-            let generation = m
-                .design_doc()
-                .oib_structural_generation()
-                .ok_or("Missing generation")?;
-            m.stage_structure(otrios_interfaces::oib::InstanceOperation::remove(
-                generation, instance,
-            ))?
-        } else {
-            false
-        };
-        if changed || !live {
-            let d = m.designer.as_mut().ok_or("Missing designer")?;
-            // Deleting this occurrence discards only its own unpublished editor
-            // buffers. Other occurrences' dirty drafts and confirmed data survive.
-            let removed: Vec<_> = d.drafts.drafts().iter().filter(|draft| matches!(editing::selection(&draft.address), Selection::Object(object) if object.instance.0 == instance)).map(|draft| draft.address.clone()).collect();
-            for address in removed {
-                d.drafts.cancel(&address);
-            }
-            if !d.editor_focused() {
-                m.keyboard.hide();
-            }
-            d.details = None;
-            d.pending_source = None;
-            d.pending_selection = None;
-            m.refresh()?;
-            m.invalidate();
+        if live {
+            return self.designer_review_instance_delete(
+                otrios_interfaces::oib::designer::InstanceId(instance),
+            );
         }
-        Ok(changed)
+        m.discard_removed_occurrence_drafts(&[otrios_interfaces::oib::designer::InstanceId(
+            instance,
+        )])?;
+        Ok(false)
     }
     /// Finish a field before hiding Inspect. The older general blur route keeps
     /// invalid text but clears focus, so restore that owner when Apply failed.
@@ -3072,3 +3052,27 @@ mod layout_editor_tests;
 #[cfg(test)]
 #[path = "oib_viewport_tests.rs"]
 mod viewport_tests;
+
+impl Mount {
+    pub(super) fn discard_removed_occurrence_drafts(
+        &mut self,
+        instances: &[otrios_interfaces::oib::designer::InstanceId],
+    ) -> Result<()> {
+        let d = self.designer.as_mut().ok_or("Missing designer")?;
+        let removed: Vec<_> = d.drafts.drafts().iter().filter(|draft|
+            matches!(editing::selection(&draft.address), Selection::Object(object) if instances.contains(&object.instance)))
+            .map(|draft| draft.address.clone()).collect();
+        for address in removed {
+            d.drafts.cancel(&address);
+        }
+        if !d.editor_focused() {
+            self.keyboard.hide();
+        }
+        d.details = None;
+        d.pending_source = None;
+        d.pending_selection = None;
+        self.refresh()?;
+        self.invalidate();
+        Ok(())
+    }
+}

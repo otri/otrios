@@ -97,7 +97,7 @@ fn text(live: &StateAdapter) -> String {
     value
 }
 
-fn owned_slot_ui() -> Ui {
+pub(in crate::canvas::client) fn owned_slot_ui() -> Ui {
     use otrios_interfaces::layout::{Expr, Shape};
     use otrios_interfaces::oib::designer::{DefinitionId, SlotDescriptor, SlotId, SlotLayout};
     let ui = crate::test_support::oib_designer::ui(&[]);

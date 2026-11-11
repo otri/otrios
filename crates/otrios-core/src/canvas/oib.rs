@@ -14,6 +14,7 @@ pub mod graph;
 pub(crate) mod history;
 pub(crate) mod impact;
 pub mod imports;
+pub(crate) mod instance_impact;
 pub mod instances;
 pub(crate) mod paint;
 
