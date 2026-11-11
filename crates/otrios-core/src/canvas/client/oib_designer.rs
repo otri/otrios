@@ -387,6 +387,21 @@ impl Designer {
     pub(super) fn appearance(&self) -> Appearance {
         self.appearance
     }
+    fn definition_scope(&self) -> Option<otrios_interfaces::oib::designer::DefinitionId> {
+        match self.selection {
+            Selection::Definition(id) | Selection::DefinitionNode { definition: id, .. } => {
+                Some(id)
+            }
+            _ => None,
+        }
+    }
+    fn task_scope(&self, task: Task) -> HierarchyScope {
+        if task == Task::Library || self.definition_scope().is_some() {
+            HierarchyScope::Components
+        } else {
+            HierarchyScope::Composition
+        }
+    }
     fn local_action(&self, id: u32) -> Option<LocalAction> {
         if self.focus_layout {
             let action = match id {
@@ -1727,12 +1742,24 @@ impl Mount {
                     .filter(|i| i.active)
                     .map(|i| i.id)
                     .collect();
-                let tree = super::super::oib::document::hierarchy(
+                let mut tree = super::super::oib::document::hierarchy(
                     seed,
                     &allocations,
                     &live,
                     designer.tree_scope,
                 )?;
+                if designer.workspace_task == Task::Layers
+                    && let Some(definition) = designer.definition_scope()
+                {
+                    // Keep the admitted definition's ownership/visual hierarchy,
+                    // without unrelated library roots or composition instances.
+                    tree.retain(|row| {
+                        matches!(row.selection,
+                        Some(Selection::Definition(id))
+                        | Some(Selection::DefinitionNode { definition: id, .. })
+                            if id == definition)
+                    });
+                }
                 if !designer.tree_initialized.contains(&designer.tree_scope) {
                     let mut first_panel = true;
                     for row in &tree {
@@ -1762,6 +1789,20 @@ impl Mount {
                         }
                     }
                     designer.tree_initialized.push(designer.tree_scope);
+                }
+                if designer.workspace_task == Task::Layers
+                    && designer.definition_scope().is_some()
+                    && designer.reveal_selection
+                {
+                    // A newly created definition must reveal its root and children
+                    // without borrowing the Library's collapsed-root state.
+                    for row in &tree {
+                        if matches!(row.selection, Some(Selection::Definition(_)))
+                            || row.owner.is_none()
+                        {
+                            designer.tree_closed.retain(|key| key != &row.key);
+                        }
+                    }
                 }
                 if designer.reveal_selection {
                     let mut parent = tree
@@ -2438,11 +2479,7 @@ impl Client {
                 let d = m.designer.as_mut().ok_or("Missing designer")?;
                 d.workspace_task = location.task;
                 if location.task != Task::Inspect {
-                    d.tree_scope = if location.task == Task::Library {
-                        HierarchyScope::Components
-                    } else {
-                        HierarchyScope::Composition
-                    };
+                    d.tree_scope = d.task_scope(location.task);
                 }
                 d.revision = None;
                 m.refresh()?;
@@ -2689,11 +2726,8 @@ impl Client {
                 }
                 d.workspace_task = task;
                 if task != Task::Inspect {
-                    d.tree_scope = if task == Task::Library {
-                        HierarchyScope::Components
-                    } else {
-                        HierarchyScope::Composition
-                    };
+                    d.tree_scope = d.task_scope(task);
+                    d.reveal_selection = task == Task::Layers;
                 }
                 d.revision = None;
                 d.invalidate_bounds();

@@ -75,7 +75,7 @@ export class TextInputs {
     for(const d of frame.inputs){
       const key=`${frame.epoch}:${d.id}`;let s=this.fields.get(key);
       if(!s){s=this.create(d,frame.epoch,labels.get(d.id)||'Text');this.fields.set(key,s);}
-      const input=s.input;Object.assign(input.style,semanticBounds(d.bounds,frame.extent));
+      const input=s.input;input.setAttribute('aria-label',labels.get(d.id)||'Text');Object.assign(input.style,semanticBounds(d.bounds,frame.extent));
       // Keep the computed font at its logical size (>=16px), then scale the
       // complete editor with the scene. This avoids iOS focus auto-zoom without
       // disabling the user's pinch zoom or changing shared font metrics.

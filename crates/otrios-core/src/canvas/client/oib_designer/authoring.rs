@@ -43,6 +43,32 @@ fn blank_visual() -> graph::Visual {
     });
     root
 }
+fn linked_visual(parent: &DefinitionNode) -> graph::Visual {
+    use otrios_interfaces::layout::{AxisSizing, NodeLayout, Sizing};
+    let width = if parent
+        .visual
+        .as_ref()
+        .and_then(|v| v.layout.as_ref())
+        .is_some_and(|layout| layout.container.is_some() && layout.width.mode != Sizing::Hug)
+    {
+        Sizing::Fill
+    } else {
+        Sizing::Hug
+    };
+    let mut wrapper = visual(Shape::Canvas { clip: true }, 160., 100.);
+    wrapper.layout = Some(NodeLayout {
+        width: AxisSizing {
+            mode: width,
+            ..Default::default()
+        },
+        height: AxisSizing {
+            mode: Sizing::Hug,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    wrapper
+}
 fn node(
     id: u64,
     name: &str,
@@ -348,10 +374,10 @@ pub(super) fn tools(
                         "Linked component",
                         wrapper.id,
                         Some(parent.id),
-                        visual(Shape::Canvas { clip: true }, 160., 100.),
+                        linked_visual(parent),
                     );
-                    // Wrapper geometry is a safe viewport, independent of the
-                    // referenced definition's parameter namespace.
+                    // The linked root supplies intrinsic metrics in its own
+                    // parameter namespace; the local wrapper owns allocation.
                     reference.reference = Some(ComponentReference {
                         definition: linked.id,
                         assignments: vec![],

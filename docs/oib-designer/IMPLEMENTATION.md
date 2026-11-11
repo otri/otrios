@@ -1062,3 +1062,31 @@ Concrete live UX findings to fix before final qualification:
 Endpoint-removal impact files remain an uncompiled, uncommitted follow-up. The
 next lifecycle slice still needs removal/history support, followed by bindings,
 actions, slots, styles and representative catalog acceptance.
+
+## Follow-up: definition Layers and initial link sizing — 2026-11-11
+
+Layers now chooses the selected definition's admitted hierarchy when editing a
+definition/root/child, filtering out unrelated definitions and app occurrences.
+Entering Layers reveals that definition's root and children; subsequent explicit
+disclosure still controls collapse. Library retains its document-wide definition
+list, and composition selection retains the composition tree. History task
+restoration uses the same scope rule. A real semantic-control test creates a
+component, adds text, navigates Layers and selects that child, then checks
+responsive scene budgets and unchanged authority bytes.
+
+The stale endpoint-name accessible label originated in the browser TextInputs
+adapter, which only assigned labels when creating a field. Accepted projections
+now refresh labels while preserving the existing DOM field, focus, composition,
+raw text and selection. All 18 text-input adapter tests pass, including a retained
+field rename during composition.
+
+New linked components use canonical item sizing instead of a fixed 160×100
+viewport: Fill width in a definite-width Auto Layout parent, Hug width otherwise,
+and Hug height. Imported intrinsic expressions stay in their original namespace.
+The existing blank-root policy remains Fixed width 320 and Hug height. The real
+verified-export composition test checks 288-wide allocation, 112-high linked
+content and a 180-high parent with text/gap/padding, before and after Apply.
+The Designer suite passed 84 tests with one existing ignored timing diagnostic
+before the additional Hug-parent regression was added. Live acceptance for these
+follow-ups is pending publication; the preceding release remains the last live
+record until the result below is added.

@@ -5763,6 +5763,59 @@ fn working_copy_history_restores_origin_task_and_reopens_created_component() {
 }
 
 #[test]
+fn linked_control_hugs_intrinsic_width_when_parent_hugs_without_a_fill_cycle() {
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let (mut client, _, _) = mounted_fixture_session_with_ui(true, 0, ui);
+    client.designer_new_component().unwrap();
+    activate_api_control(&mut client, "Width Hug");
+    activate_studio_tool(&mut client, "Link Slider");
+    let m = client.active.as_ref().unwrap();
+    let preview = &m.definition_presentation.as_ref().unwrap().preview;
+    let source = m.design_doc().oib_history_source().unwrap();
+    let definition = source
+        .definitions
+        .iter()
+        .find(|d| d.id == preview.definition)
+        .unwrap();
+    let reference = definition
+        .nodes
+        .iter()
+        .find(|node| node.reference.is_some())
+        .unwrap();
+    assert_eq!(
+        reference
+            .visual
+            .as_ref()
+            .unwrap()
+            .layout
+            .as_ref()
+            .unwrap()
+            .width
+            .mode,
+        otrios_interfaces::layout::Sizing::Hug
+    );
+    let scene = client.scene().unwrap();
+    let frame = |node| {
+        let mapping = preview
+            .objects
+            .iter()
+            .find(|object| object.address.node == node && object.address.references.is_empty())
+            .unwrap();
+        scene
+            .path(u32::from(mapping.layout_node.unwrap()))
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+    };
+    assert_eq!(frame(reference.id).width, 440.);
+    assert_eq!(frame(reference.id).height, 112.);
+    assert_eq!(frame(definition.root).width, 472.);
+    assert_eq!(frame(definition.root).height, 144.);
+}
+
+#[test]
 fn working_copy_labelled_slider_links_verified_export_then_applies_one_composition() {
     let ui = library_fixture::admit(&library_fixture::imported());
     let original_libraries = super::super::super::oib::seed(&ui)
@@ -5798,6 +5851,14 @@ fn working_copy_labelled_slider_links_verified_export_then_applies_one_compositi
         .find(|d| d.id == id)
         .unwrap();
     assert_eq!(component.nodes.len(), 3);
+    let linked = component
+        .nodes
+        .iter()
+        .find(|node| node.reference.is_some())
+        .unwrap();
+    let policy = linked.visual.as_ref().unwrap().layout.as_ref().unwrap();
+    assert_eq!(policy.width.mode, otrios_interfaces::layout::Sizing::Fill);
+    assert_eq!(policy.height.mode, otrios_interfaces::layout::Sizing::Hug);
     assert!(component.nodes.iter().any(|n| {
         n.reference
             .as_ref()
@@ -5819,6 +5880,67 @@ fn working_copy_labelled_slider_links_verified_export_then_applies_one_compositi
         "composition remains private until global Apply"
     );
     assert!(m.definition_presentation.is_some());
+    fn assert_fitting_link(client: &Client) {
+        let m = client.active.as_ref().unwrap();
+        let preview = &m.definition_presentation.as_ref().unwrap().preview;
+        let scene = client.scene().unwrap();
+        let source = m.design_doc().oib_history_source().unwrap();
+        let root_id = source
+            .definitions
+            .iter()
+            .find(|definition| definition.id == preview.definition)
+            .unwrap()
+            .root;
+        let root = preview
+            .objects
+            .iter()
+            .find(|object| object.address.references.is_empty() && object.address.node == root_id)
+            .unwrap();
+        let outer = preview
+            .objects
+            .iter()
+            .find(|object| {
+                object.address.references.is_empty()
+                    && object.address.node != root.address.node
+                    && preview
+                        .objects
+                        .iter()
+                        .any(|inner| inner.address.references == vec![object.address.node])
+            })
+            .unwrap();
+        let inner = preview
+            .objects
+            .iter()
+            .find(|object| {
+                object.address.references == vec![outer.address.node]
+                    && object.address.node == NodeId(1)
+            })
+            .unwrap();
+        let frame = |object: &otrios_interfaces::oib::designer::ObjectMapping| {
+            scene
+                .path(u32::from(object.layout_node.unwrap()))
+                .unwrap()
+                .last()
+                .unwrap()
+                .node
+                .frame
+        };
+        assert_eq!(frame(root).width, 320.);
+        assert_eq!(frame(outer).width, 288.);
+        assert_eq!(
+            frame(outer).height,
+            112.,
+            "height comes from the imported root, not the old 100-unit viewport"
+        );
+        assert_eq!(frame(inner).width, frame(outer).width);
+        assert_eq!(frame(inner).height, frame(outer).height);
+        assert_eq!(
+            frame(root).height,
+            180.,
+            "Hug includes text, linked control, gap and padding"
+        );
+    }
+    assert_fitting_link(&client);
     assert!(client.designer_apply_working_copy().unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(
@@ -5842,6 +5964,7 @@ fn working_copy_labelled_slider_links_verified_export_then_applies_one_compositi
         original_libraries
     );
     assert!(client.scene().unwrap().controls().len() <= 128);
+    assert_fitting_link(&client);
 
     // Published creation Undo removes this graph; Redo must rebuild it with
     // fresh identities while keeping the imported component's exact owner.
@@ -6139,6 +6262,85 @@ fn confirm_instance_removal(client: &mut Client) {
     let (id, _) = studio_scene_control(client, "Remove instance");
     assert!(client.activate(client.epoch(), id).unwrap());
     assert!(client.active.as_ref().unwrap().delete_review.is_none());
+}
+
+#[test]
+fn definition_layers_reveals_only_current_component_and_selects_inserted_child() {
+    use super::super::oib_workspace::{TAB_LAYERS, TAB_LIBRARY};
+    let (mut client, authority, _session) = mounted_fixture_session_with_count(true, 0);
+    let before = authority.save().unwrap();
+    activate_studio_tool(&mut client, "New component");
+    activate_studio_tool(&mut client, "Add text");
+    let definition = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .definition_scope()
+        .unwrap();
+    assert!(client.designer_activate(TAB_LAYERS).unwrap().unwrap());
+    let (child, id, y) = {
+        let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+        assert_eq!(d.tree_scope, HierarchyScope::Components);
+        assert!(d.tree.iter().all(|row| matches!(row.selection,
+            Some(Selection::Definition(id)) | Some(Selection::DefinitionNode {definition:id, ..}) if id == definition)));
+        let child = d.tree.iter().find(|row| row.name == "Add text").unwrap();
+        let selection = child.selection.clone().unwrap();
+        let id = *d
+            .actions
+            .iter()
+            .find(|(_, action)| **action == LocalAction::Select(selection.clone()))
+            .unwrap()
+            .0;
+        let row = d.panels[0]
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .expect("new child is expanded in Layers");
+        (selection, id, row.frame.y)
+    };
+    fixture_scroll_to(&mut client, 0, y - 8.);
+    assert!(client.scene().unwrap().path(id).is_some());
+    assert!(client.activate(client.epoch(), id).unwrap());
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        child
+    );
+    for viewport in [[800., 480.], [1920., 1080.]] {
+        client.set_viewport(viewport).unwrap();
+        client.designer_activate(TAB_LAYERS).unwrap();
+        let scene = client.scene().unwrap();
+        assert!(count_nodes(scene.root()) <= 512 && scene.controls().len() <= 128);
+    }
+    client.designer_activate(TAB_LIBRARY).unwrap();
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .tree
+            .iter()
+            .any(
+                |row| matches!(row.selection, Some(Selection::Definition(id)) if id != definition)
+            )
+    );
+    assert_eq!(
+        authority.save().unwrap(),
+        before,
+        "navigation never publishes the working copy"
+    );
 }
 
 fn activate_api_control(client: &mut Client, label: &str) -> u32 {

@@ -134,6 +134,12 @@ is no second clip flag. The compiler marks expanded reference roots in layout v6
 their authored metrics supply intrinsic measure, then the caller's allocation
 sets their presented border box. Container flow belongs on a local wrapper;
 linked references expose item sizing rather than rearranging imported internals.
+New links use Hug height and Fill width when inserted into an Auto Layout parent
+whose width is definite (Fixed or Fill). Otherwise their initial width is Hug.
+This gives a blank 320-wide component a fitting linked control without a guessed
+160×100 viewport, and avoids introducing a Hug-parent/Fill-child width cycle.
+The parent retains its authored size; insertion does not silently enlarge it.
+Retained Fixed lengths remain editable independently of the active sizing mode.
 
 ### T03.2 Deterministic core algorithm
 

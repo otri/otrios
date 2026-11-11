@@ -20,6 +20,19 @@ function fixture(options={}){
   bridge.accept(frame());const field=bridge.fields.get('7:42').input;assert.equal(document.activeElement,null,'initial core focus never autofocuses');field.focus();
   return {bridge,field,sent,frame};
 }
+test('retained field refreshes its accessible name without replacing focused raw input',()=>{
+  const {bridge,field,sent,frame}=fixture({multiline:false});
+  field.value='uncommitted caption';field.setSelectionRange(3,8,'backward');
+  field.dispatchEvent(new Event('compositionstart'));
+  const updated={...frame('old caption',100),controls:[{id:42,label:'Property name: caption'}]};
+  bridge.accept(updated);
+  assert.equal(bridge.fields.get('7:42').input,field);
+  assert.equal(field.attributes['aria-label'],'Property name: caption');
+  assert.equal(document.activeElement,field);
+  assert.equal(field.value,'uncommitted caption');
+  assert.deepEqual(selection(field),{cursor:3,anchor:8});
+  assert(!sent.some(m=>m.type==='text-input'));
+});
 test('native selection preserves backward direction and UTF-16 offsets',()=>{
   const {bridge,field,sent}=fixture();field.value='a😀é';field.setSelectionRange(1,4,'backward');field.dispatchEvent(new Event('select'));
   assert.deepEqual(selection(field),{cursor:1,anchor:4});assert.equal(sent.at(-1).text,'a😀é');
