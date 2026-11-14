@@ -1775,7 +1775,8 @@ role=null and no authenticated monitoring session. Anonymous Components slider
 changed20→70 and a second independent client read70; restored20 with no pending
 fields. Anonymous Designer exposed New component; a private new component was
 applied at generation2, then Undo/Apply removed it at generation3. Both Applies
-received durable success and cleared pending fields; final presented generation3.
+received durable success and cleared pending fields. Final diagnostics reported active generation3/presented2 while the UI
+showed All changes applied; no pixel-timing qualification is claimed.
 Brass Relay automatically joined a temporary guest (admin=false, online=true),
 with Message composer and Send enabled; no test message was posted. Anonymous
 /spaces discovery excluded Operations and Monitoring. The owned tabs were closed.
