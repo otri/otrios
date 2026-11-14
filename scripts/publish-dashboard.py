@@ -20,7 +20,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
     if catalog.is_symlink():raise ValueError('Catalog symlink rejected')
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
-        names=['index.html','style.css','app.js','state-worker.js','document-transfer.mjs','presentation-transfer.mjs','app-transfers.mjs','touch-input.mjs','text-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
+        names=['favicon.svg','favicon.ico','index.html','style.css','app.js','state-worker.js','document-transfer.mjs','presentation-transfer.mjs','app-transfers.mjs','touch-input.mjs','text-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
         names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','fonts/Roboto.ttf','fonts/OFL.txt','Slug-LICENSE.txt']
         for name in names:
             source=web/name
@@ -29,7 +29,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
             if not source.exists() and name in ('fonts/Roboto.ttf','fonts/OFL.txt'):source=web.parent.parent/'assets/fonts/roboto'/pathlib.Path(name).name
             data=source.read_bytes()
             if name.endswith('.wasm') and data[:8]!=b'\0asm\x01\0\0\0':raise ValueError('Invalid Wasm artifact')
-            if name=='index.html':data=data.replace(b'href="/style.css"',b'href="./style.css"').replace(b'src="/app.js"',b'src="./app.js"')
+            if name=='index.html':data=data.replace(b'href="/style.css"',b'href="./style.css"').replace(b'src="/app.js"',b'src="./app.js"').replace(b'href="/favicon.svg"',b'href="./favicon.svg"').replace(b'href="/favicon.ico"',b'href="./favicon.ico"')
             dest=stage/'web'/name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
             assets['web/'+name]={'bytes':len(data),'sha256':digest(data)}
             # Compress once on the build host, not on every slow frame/tunnel read.

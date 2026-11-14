@@ -463,7 +463,12 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             "property=\"og:title\" content=\"OTriOS\"",
             &format!("property=\"og:title\" content=\"{escaped}\""),
         );
-    for (attribute, asset) in [("href", "style.css"), ("src", "app.js")] {
+    for (attribute, asset) in [
+        ("href", "style.css"),
+        ("src", "app.js"),
+        ("href", "favicon.svg"),
+        ("href", "favicon.ico"),
+    ] {
         for source in [format!("/{asset}"), format!("./{asset}")] {
             html = html.replace(
                 &format!("{attribute}=\"{source}\""),
@@ -491,6 +496,33 @@ async fn navigation_entry(
         *response.body_mut() = axum::body::Body::empty();
     }
     response
+}
+/// Browsers may request the conventional root icon before parsing the entry.
+/// Keep that URL mutable; entry links are pinned to the signed release below.
+async fn favicon(State(app): State<Arc<App>>, request: axum::extract::Request) -> Response {
+    refresh_release(&app).await;
+    let name = if request.uri().path() == "/favicon.svg" {
+        "favicon.svg"
+    } else {
+        "favicon.ico"
+    };
+    let release = app.release.read().await.clone();
+    let file = match (
+        &app.releases,
+        release["id"].as_str().filter(|id| valid_id(id)),
+    ) {
+        (Some(root), Some(id)) => root.join(id).join("web").join(name),
+        (Some(_), None) => {
+            return failure(StatusCode::SERVICE_UNAVAILABLE, "No valid active release");
+        }
+        (None, _) => app.web.join(name),
+    };
+    serve_file(
+        file,
+        asset_type(name).expect("Admitted favicon type"),
+        false,
+    )
+    .await
 }
 async fn current_release(State(app): State<Arc<App>>) -> Response {
     refresh_release(&app).await;
@@ -565,6 +597,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         "fonts/Roboto.ttf" | "web/fonts/Roboto.ttf" => Some("font/ttf"),
         "fonts/OFL.txt" | "web/fonts/OFL.txt" => Some("text/plain; charset=utf-8"),
         "style.css" | "web/style.css" => Some("text/css"),
+        "favicon.svg" | "web/favicon.svg" => Some("image/svg+xml"),
+        "favicon.ico" | "web/favicon.ico" => Some("image/vnd.microsoft.icon"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
             Some("application/octet-stream")
@@ -968,6 +1002,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             )
             .route("/release/events", get(session::public_control))
             .route("/", get(root))
+            .route("/favicon.ico", get(favicon))
+            .route("/favicon.svg", get(favicon))
             .route("/release", get(current_release))
             .route("/releases/{id}/{*path}", get(release_asset))
             .route("/demo/ink", get(retired))
@@ -1032,6 +1068,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .route("/demo/ink", get(retired))
         .route("/", get(root))
+        .route("/favicon.ico", get(favicon))
+        .route("/favicon.svg", get(favicon))
         .route("/health", get(health))
         .route("/release", get(current_release))
         .route("/apps/stream", get(retired))

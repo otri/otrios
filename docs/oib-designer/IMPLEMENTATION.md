@@ -1662,3 +1662,23 @@ Reused the existing `wasm_reducer_and_declarative_app_are_qualified_at_extremes`
 regression: failed with Merkle Missing before the fix, passed after (1 test).
 This covers ordinary Components, Layouts and Home event/scene refresh. No new
 suite or broad checks. Deployment/live confirmation follows after activation.
+
+The ordinary-app fix deployed successfully as release
+1e6054abf2cea0e2effdd20f980bf46c455efb3106bb5bfc4aa5c3aac2503e46,
+runtime source f3b3a55155c0db303d0165c652b613e24cfb3941. Live Components
+reload reported Live shared space with an empty error field. The old erroring tab
+remained on its old runtime until reloaded; automatic recovery of an already
+erroring old client is not claimed. A fresh authenticated browser WebSocket to
+/session?space=867c0556be77ad7e67fe67f8ec59a598 opened and received compatible=true,
+state_available=true and the current release. No data was reset. Reported lost
+connections were not reproduced as a persistent connection failure after deploy.
+
+## OTriOS favicon — 2026-11-14
+
+User selected the implied-triangle mark: a triangle larger than the circle cuts
+away its center, leaving three curved outer slices. Added the scalable SVG and
+16/32/48/64px ICO fallback. Both belong to signed release assets; HTML icon links
+pin to the current release alongside JS/CSS, and conventional /favicon.ico and
+/favicon.svg URLs serve the active release with explicit MIME admission. Frozen
+builder inputs now include SVG/ICO assets. No wire protocol or app data changes.
+Server compilation passed. Final live icon/connection acceptance follows below.
