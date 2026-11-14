@@ -1842,3 +1842,23 @@ ordinary glyphs still use caching. Web/native cache size and shader remain
 unchanged; native entry reuse also validates current quad containment. Native C
 compilation and live high-resolution rendering are covered by the ensuing host
 build/acceptance. No broad rendering campaign.
+
+Combined runtime source520c339 built native C/Rust, Wasm and ARM successfully and
+published892198f5fdf4fb96f9f6c7b194050e5b8ff91ddb730ab64f62dd4253566c0176.
+Normal publisher reported FRAME/NATIVE applied; automatic builder restored pinned
+to the source. Native readiness matched both runtime/UI release, with confirmed,
+stream and reload readiness, no pending commands or component errors. This is
+native admission/readiness evidence; no native high-DPI pixel campaign was run.
+
+Live Brass Relay at CSS1536×960/DPR2 (physical3072×1920) used effective scale2.4.
+The same read-only cache measurement checked406glyph quads with78entries, no
+ambiguous matches and597/1024shelf rows. Out-of-tile bilinear footprints dropped
+from406 to0; minimum clear margin improved from−1.3002 to+0.6998texels. Caching
+remained active, so this does not hide the issue by disabling acceleration.
+An actual browser image showed clean ordinary text and the existing message's
+thumbs-up outline, replacing .notdef. No test message or data reset was used.
+Temporary diagnostic wrapper was restored and the owned browser tab closed.
+
+Only the existing bounded font-atlas regression, the focused cache-footprint
+regression, necessary builds and this one live high-DPI check were used. Color
+emoji and joined-sequence shaping remain outside the scalar fallback coverage.
