@@ -1297,3 +1297,11 @@ DeleteData(remove=false) under the installed catalog. Bootstrap fresh Merkle dat
 do not decode/migrate old authored style data. Validate one focused imported
 update/override invariant and one short live mounted style journey. Broad suites
 and repeated platform qualification are deliberately outside this iteration.
+
+For the initial breaking style-export cutover, restart the authority against the
+new installed catalog before issuing DeleteData, so bootstrap cannot reuse its
+previous cached admission. Existing mounted clients with the old export contract
+need a fresh admission/reload. This is not the compatible color-update path.
+Mode invalidation and retained-paint eligibility must consider imported catalogs
+even when the document has no local styles; presence checks never infer ownership
+from numeric IDs or system display names.

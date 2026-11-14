@@ -1614,3 +1614,37 @@ query to include imported catalogs. Extended the same focused regression to actu
 mounted cached Dark→Light→Dark compilation; rerun passed (1 test). This observed
 failure justifies rebuilding the corrected hosts and repeating only that mode
 journey. Final deployment evidence follows after activation.
+
+### T28 final deployment and focused acceptance
+
+Final corrected runtime source a7ffd6953d28fbda4f1cedfdaa6d0323e4c22109 built and
+published successfully as release
+0d786b1ff71c878baa12fda3ed90a235c56b060e112e53904c111c4c9f4eaef7.
+Native/Wasm/ARM builds completed; normal signed publishing reported FRAME and
+NATIVE applied. Builder restored pinned to that source. The signed library stays
+at 3655d1c7cdd3c9205cdb1cddf9bf14af2e2c64c94bf126bbce0d5b1da6af5873;
+no further data reset or migration was needed for the cache correction.
+
+A current ARM Linux client mounted the live fresh collection at generation1,
+selected SettingsPanel, activated Light through the actual semantic control and
+opened oib.2d / panel.primary. The rendered scene changed from two Dark color
+occurrences / zero Light to zero Dark / two Light in definition preview; opening
+the imported inspector retained zero Dark / five Light in composition. Inspector
+showed `background: oib.2d / panel_background`, No editable properties, and no
+Delete style/variable controls. Both guest instances mounted without component
+errors. Volume40% and Brightness70% are the fresh bootstrap defaults. This is a
+live shared-client scene/control check, not a browser or GPU screenshot claim.
+
+Native readiness matched the final runtime and UI release. After opening Designer
+from Spaces using existing calibrated native input, it reported confirmed/stream/
+reload readiness, generation1/presented1, two instances, zero pending commands,
+zero component errors and no busy input. Native touch verified navigation only;
+Light/Dark rendered-scene acceptance used the ARM shared client. No additional
+browser campaign, broad suite, rollback campaign or data-preservation audit ran.
+
+Completed priority scope: stable owner references, signed style/variable payload
+and CLI export, unified namespaced import resolution with local assignment and
+property override precedence, compatible appearance updates versus changed export
+contracts, imported read-only Designer inspection/selection, and fresh-data live
+cutover. Full state-recipe/focus/subtree-mode/per-instance-style authoring and the
+larger Designer control-matrix qualification remain outside this priority goal.
