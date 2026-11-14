@@ -5,6 +5,8 @@
 pub mod clock;
 pub mod components;
 pub mod display;
+mod emoji;
+pub mod emoji_reference;
 pub mod font;
 pub mod font_reference;
 pub mod ink;

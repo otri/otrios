@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Owned, single-threaded Linux display adapter. See RFC 0001. All Rust buffers
- * are borrowed only for the duration of the call. No callbacks enter Rust.
+ * are borrowed only for the duration of the call. The owned emoji callback is
+ * invoked synchronously on this owner thread; see RFC 0001 lifetime invariants.
  */
 #define _GNU_SOURCE
 #include "platform.h"
@@ -34,7 +35,15 @@ struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_ALPHA_ENTRY_LIMIT 256
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
-struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems,*paints; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; float alpha_transform[4]; int alpha_valid,alpha_compatible,raw_dirty,cache_all; };
+#define EMOJI_SIZE 64
+#define EMOJI_CELL 68
+#define EMOJI_PAGE_SIZE 1024
+#define EMOJI_COLUMNS 15
+#define EMOJI_PAGE_SLOTS 225
+#define EMOJI_PAGES 4
+#define EMOJI_SLOTS (EMOJI_PAGE_SLOTS*EMOJI_PAGES)
+struct emoji_entry { uint32_t id; uint64_t used; };
+struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems,*paints; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; float alpha_transform[4]; int alpha_valid,alpha_compatible,raw_dirty,cache_all,has_emoji; };
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
@@ -53,6 +62,10 @@ struct ot_display {
     struct mesh meshes[OT_MAX_SCENE_SLOTS];
     struct text_mesh text[OT_MAX_SCENE_SLOTS];
     GLuint text_program,curve_texture,band_texture;
+    GLuint emoji_pages[EMOJI_PAGES],emoji_scratch;
+    struct emoji_entry emoji_entries[EMOJI_SLOTS];uint16_t emoji_lookup[65536];
+    size_t emoji_count;uint64_t emoji_clock;int emoji_failed;
+    ot_emoji_rasterizer emoji_rasterize;void *emoji_context;
     GLint text_transform,text_curve_size,text_band_size;
     uint32_t curve_width,curve_height,band_width,band_height;
     uint64_t text_hits,text_misses,cache_generation;
@@ -238,6 +251,7 @@ static int text_program(ot_display *d) {
     d->text_program=program;d->text_transform=glGetUniformLocation(program,"transform");
     d->text_curve_size=glGetUniformLocation(program,"curveSize");d->text_band_size=glGetUniformLocation(program,"bandSize");
     glUseProgram(program);glUniform1f(glGetUniformLocation(program,"linearTint"),d->linear_scene?1.f:0.f);glUniform1i(glGetUniformLocation(program,"curveTexture"),0);glUniform1i(glGetUniformLocation(program,"bandTexture"),1);
+    for(int i=0;i<EMOJI_PAGES;i++){char name[32];snprintf(name,sizeof(name),"emojiPage%d",i);glUniform1i(glGetUniformLocation(program,name),i+2);}
     return 0;
 }
 static void texture_parameters(void) {
@@ -263,7 +277,12 @@ int ot_set_font(ot_display *d,uint32_t cw,uint32_t ch,const float *curves,size_t
     if(d->band_texture)glDeleteTextures(1,&d->band_texture);
     d->cache_generation++;d->cache_dirty=1;d->glyph_cache_count=0;d->cache_x=d->cache_y=d->cache_row=0;
     d->curve_texture=textures[0];d->band_texture=textures[1];d->curve_width=cw;d->curve_height=ch;d->band_width=bw;d->band_height=bh;
+    for(int i=0;i<EMOJI_PAGES;i++){glActiveTexture(GL_TEXTURE2+(GLenum)i);glBindTexture(GL_TEXTURE_2D,d->emoji_pages[i]?d->emoji_pages[i]:d->band_texture);}
     return 0;
+}
+void ot_set_emoji_rasterizer(ot_display *d,ot_emoji_rasterizer rasterize,void *context) {
+    d->emoji_rasterize=rasterize;d->emoji_context=context;d->emoji_count=0;d->emoji_clock=0;
+    memset(d->emoji_entries,0,sizeof(d->emoji_entries));memset(d->emoji_lookup,0,sizeof(d->emoji_lookup));
 }
 int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floats,const uint32_t *draws,size_t words) {
     if(slot>=OT_MAX_SCENE_SLOTS || floats%64 || floats/16>65536 || words%3 || words>12288)return fail(d,"Invalid indexed text mesh dimensions");
@@ -294,7 +313,10 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
     if(words)memcpy(plan,draws,words*sizeof(*plan));
     // Cached draws consume only their compact UV buffer. Defer uploading the
     // larger analytic stream until a fallback actually needs it; indices grow once.
-    if(!same_vertices){m->raw_dirty=1;m->alpha_valid=0;m->cached_generation=0;free(m->ems);m->ems=NULL;}
+    if(!same_vertices){
+        m->has_emoji=0;for(size_t q=0;q<count/4;q++)if(vertices[q*64+14]==-1.f){m->has_emoji=1;break;}
+        m->raw_dirty=1;m->alpha_valid=0;m->cached_generation=0;free(m->ems);m->ems=NULL;
+    }
     // View storage is indexed by the ordered draw plan, not glyph count.
     if(words!=m->draw_words || count!=(size_t)m->count){free(m->views);m->views=NULL;if(d->stable_text)m->cached_generation=0;}
     if(grow){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(count/4*6*sizeof(*indices)),indices,GL_STATIC_DRAW);m->index_capacity=count;}
@@ -358,7 +380,7 @@ int ot_text_paints(ot_display *d,uint32_t slot,const float *paints,size_t count)
     if(count)memcpy(next,paints,count*sizeof(float));
     free(m->paints);m->paints=next;return 0;
 }
-void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
+void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0;for(int i=0;i<EMOJI_PAGES;i++)if(d->emoji_pages[i])stats[2]+=(uint64_t)EMOJI_PAGE_SIZE*EMOJI_PAGE_SIZE; }
 // Binding state belongs to one draw_slot invocation, never to the GL context.
 // Text paths use 1 (analytic) and 2 (cached); geometry has its own sentinel.
 enum { DRAW_UNBOUND=0, DRAW_GEOMETRY=3 };
@@ -404,6 +426,7 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
     glUniform1f(glGetUniformLocation(d->text_program,"coverageScale"),1.f);
     glUniform2f(d->text_curve_size,(float)d->curve_width,(float)d->curve_height);glUniform2f(d->text_band_size,(float)d->band_width,(float)d->band_height);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->curve_texture);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,d->band_texture);
+    for(int i=0;i<EMOJI_PAGES;i++){glActiveTexture(GL_TEXTURE2+(GLenum)i);glBindTexture(GL_TEXTURE_2D,d->emoji_pages[i]?d->emoji_pages[i]:d->band_texture);}
     glEnable(GL_BLEND);glBindBuffer(GL_ARRAY_BUFFER,m->vbo);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);
     if(m->raw_dirty){glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)((size_t)m->count*16*sizeof(float)),m->vertices,GL_STATIC_DRAW);m->raw_dirty=0;}
     const GLint size[]={2,2,4,4,4};const size_t offset[]={0,2,4,8,12};
@@ -415,16 +438,72 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
 }
 // Preserve painter order and culling when only part of a large-font working set
 // fits the bounded atlas. Normal all-cached runs retain one draw and bind.
+// Monochrome emoji masks are decoded only when their visible draw is reached.
+// Draw immediately after resolving a tile: later LRU reuse cannot invalidate a
+// retained mesh or an earlier draw, even when one frame exceeds all page slots.
+static int draw_emoji(ot_display *d,const float *q,const float *projection,const float *paint) {
+    uint32_t id=(uint32_t)q[12];size_t slot=d->emoji_lookup[id]?(size_t)d->emoji_lookup[id]-1:d->emoji_count;
+    if(!d->emoji_lookup[id]){
+        if(!d->emoji_rasterize)return fail(d,"Emoji rasterizer has not arrived");
+        if(d->emoji_count==EMOJI_SLOTS){slot=0;for(size_t i=1;i<EMOJI_SLOTS;i++)if(d->emoji_entries[i].used<d->emoji_entries[slot].used)slot=i;}
+        unsigned char alpha[EMOJI_SIZE*EMOJI_SIZE];
+        if(d->emoji_rasterize(d->emoji_context,id,alpha,sizeof(alpha))<0)return fail(d,"Emoji tile decoding failed");
+        // Initialize the complete transparent gutter; native GL allocations do
+        // not promise zero contents. A single-channel mask takes the text tint.
+        unsigned char cell[EMOJI_CELL*EMOJI_CELL]={0};
+        for(int y=0;y<EMOJI_SIZE;y++)memcpy(cell+(y+2)*EMOJI_CELL+2,alpha+y*EMOJI_SIZE,EMOJI_SIZE);
+        size_t page=slot/EMOJI_PAGE_SLOTS,local=slot%EMOJI_PAGE_SLOTS;
+        glActiveTexture(GL_TEXTURE2+(GLenum)page);
+        if(!d->emoji_pages[page]){
+            glGenTextures(1,&d->emoji_pages[page]);glBindTexture(GL_TEXTURE_2D,d->emoji_pages[page]);texture_parameters();
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexImage2D(GL_TEXTURE_2D,0,GL_ALPHA,EMOJI_PAGE_SIZE,EMOJI_PAGE_SIZE,0,GL_ALPHA,GL_UNSIGNED_BYTE,NULL);
+        }else glBindTexture(GL_TEXTURE_2D,d->emoji_pages[page]);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexSubImage2D(GL_TEXTURE_2D,0,(GLint)(local%EMOJI_COLUMNS)*EMOJI_CELL,(GLint)(local/EMOJI_COLUMNS)*EMOJI_CELL,EMOJI_CELL,EMOJI_CELL,GL_ALPHA,GL_UNSIGNED_BYTE,cell);
+        if(gl_ok(d,"Upload visible emoji tile")<0)return -1;
+        if(slot<d->emoji_count)d->emoji_lookup[d->emoji_entries[slot].id]=0;
+        d->emoji_entries[slot].id=id;d->emoji_lookup[id]=(uint16_t)(slot+1);if(slot==d->emoji_count)d->emoji_count++;
+    }
+    d->emoji_entries[slot].used=++d->emoji_clock;
+    size_t page=slot/EMOJI_PAGE_SLOTS,local=slot%EMOJI_PAGE_SLOTS;
+    float quad[64];memcpy(quad,q,sizeof(quad));
+    for(int i=0;i<4;i++){
+        float *v=quad+i*16;if(paint)memcpy(v+4,paint,4*sizeof(float));
+        v[8]=v[9]=(float)(EMOJI_SIZE-1)/EMOJI_PAGE_SIZE;
+        v[12]=((float)(local%EMOJI_COLUMNS)*EMOJI_CELL+2.5f)/EMOJI_PAGE_SIZE;
+        v[13]=((float)(local/EMOJI_COLUMNS)*EMOJI_CELL+2.5f)/EMOJI_PAGE_SIZE;v[15]=(float)page;
+    }
+    glUseProgram(d->text_program);glEnable(GL_BLEND);
+    glUniformMatrix3fv(d->text_transform,1,GL_FALSE,projection);
+    glUniform1f(glGetUniformLocation(d->text_program,"coverageScale"),1.f);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->curve_texture);
+    glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,d->band_texture);
+    for(int i=0;i<EMOJI_PAGES;i++){glActiveTexture(GL_TEXTURE2+(GLenum)i);glBindTexture(GL_TEXTURE_2D,d->emoji_pages[i]?d->emoji_pages[i]:d->band_texture);}
+    if(!d->emoji_scratch)glGenBuffers(1,&d->emoji_scratch);
+    glBindBuffer(GL_ARRAY_BUFFER,d->emoji_scratch);glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_STREAM_DRAW);
+    const GLint size[]={2,2,4,4,4};const size_t offset[]={0,2,4,8,12};
+    for(GLuint i=0;i<5;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,size[i],GL_FLOAT,GL_FALSE,16*sizeof(float),(void*)(offset[i]*sizeof(float)));}
+    const uint16_t indices[]={0,1,2,2,1,3};glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_SHORT,indices);
+    return gl_ok(d,"Draw visible monochrome emoji");
+}
 static int draw_text(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int bound,const float *paint) {
     if(!count)return bound;
-    if(!d->cache_ready || m->cache_all){
+    // Preserve the one-draw fast path for ordinary retained text. Only meshes
+    // containing emoji need to split draws around on-demand color tiles.
+    if(!m->has_emoji && (!d->cache_ready || m->cache_all)){
         int kind=d->cache_ready?2:1;
         draw_text_part(d,m,projection,first,count,kind==2,bound!=kind,paint);return kind;
     }
     uint32_t end=(first+count)/4;
     for(uint32_t q=first/4;q<end;){
-        int cached=m->cached_valid[q]!=0,kind=cached?2:1;uint32_t begin=q++;
-        while(q<end && (m->cached_valid[q]!=0)==cached)q++;
+        const float *quad=m->vertices+q*64;
+        if(quad[14]==-1.f){
+            if(draw_emoji(d,quad,projection,paint)<0){d->emoji_failed=1;return DRAW_UNBOUND;}
+            q++;bound=DRAW_UNBOUND;continue;
+        }
+        int cached=d->cache_ready && (m->cache_all || m->cached_valid[q]!=0),kind=cached?2:1;uint32_t begin=q++;
+        while(q<end && m->vertices[q*64+14]!=-1.f && (d->cache_ready && (m->cache_all || m->cached_valid[q]!=0))==cached)q++;
         draw_text_part(d,m,projection,begin*4,(q-begin)*4,cached,bound!=kind,paint);bound=kind;
     }
     return bound;
@@ -472,12 +551,13 @@ int ot_draw(ot_display *d,const float *projection,int animated) {
 int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,size_t count) {
     if(count>OT_MAX_SCENE_SLOTS)return fail(d,"Scene draw-list limit");
     for(size_t i=0;i<count;i++)if(slots[i]>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid draw-list slot");
+    d->emoji_failed=0;
     if(prepare_glyph_cache(d,projection,slots,count)<0)return -1;
     glBindFramebuffer(GL_FRAMEBUFFER,d->linear_scene?d->scene_fbo:0);glViewport(0,0,d->width,d->height);
     if(d->linear_scene)glClearColor(0.0051815167f,0.0116122452f,0.0221738848f,1);
     else glClearColor(16.f/255,28.f/255,41.f/255,1);
     glClear(GL_COLOR_BUFFER_BIT);
-    for(size_t i=0;i<count;i++)draw_slot(d,slots[i],projection);
+    for(size_t i=0;i<count;i++){draw_slot(d,slots[i],projection);if(d->emoji_failed)return -1;}
     if(!d->linear_scene)return gl_ok(d,"Draw direct cached glyphs and primitives");
     glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,d->width,d->height);
     glUseProgram(d->resolve_program);glDisable(GL_BLEND);
@@ -773,6 +853,7 @@ emit_sampled:
     return 0;
 }
 static int cache_quad(ot_display *d,const float *q,const float *projection,struct cached_vertex *out,int retained,float declared_em) {
+    if(q[14]==-1.f)return 1;
     return d->atlas_scale?cache_quad_sampled(d,q,out,retained,declared_em):cache_quad_exact(d,q,projection,out);
 }
 static uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;}
@@ -792,6 +873,7 @@ static int mesh_accepts_alpha(ot_display *d,const struct text_mesh *m) {
     const float *p=d->sampled_pixel_transform;
         for(int glyph=0;glyph<m->count/4;glyph++){
             const float *q=m->vertices+glyph*64;
+            if(q[14]==-1.f)continue;
             float du=q[18]-q[2],dv=q[35]-q[3];
             if(du==0 || dv==0 || q[8]==0 || q[9]==0)continue;
             float dx=q[16]-q[0],dy=q[17]-q[1];
@@ -964,6 +1046,7 @@ void ot_close(ot_display *d) {
             if(d->text_program)glDeleteProgram(d->text_program);
             if(d->curve_texture)glDeleteTextures(1,&d->curve_texture);
             if(d->band_texture)glDeleteTextures(1,&d->band_texture);
+            glDeleteTextures(EMOJI_PAGES,d->emoji_pages);glDeleteBuffers(1,&d->emoji_scratch);
             if(d->program)glDeleteProgram(d->program);
             if(d->resolve_program)glDeleteProgram(d->resolve_program);
             if(d->cache_program)glDeleteProgram(d->cache_program);

@@ -206,23 +206,28 @@ impl Mesh {
         let em_size = factor * f32::from(font.metrics().units_per_em);
         let baseline = r.y + font.metrics().baseline_from_top(scale);
         let mut pen = r.x;
-        for ch in value.chars() {
-            let glyph = font.glyph(ch);
-            if glyph.curve_count != 0 && self.glyph_vertices.len() / 16 + 4 <= 65536 {
+        for glyph in font.text_glyphs(value) {
+            if glyph.drawable() && self.glyph_vertices.len() / 16 + 4 <= 65536 {
                 let b = glyph.ink_bounds;
-                let left = (pen + b[0] * factor - 1.).max(clip.left);
-                let right = (pen + b[2] * factor + 1.).min(clip.right);
-                let top = (baseline - b[3] * factor - 1.).max(clip.top);
-                let bottom = (baseline - b[1] * factor + 1.).min(clip.bottom);
+                let margin = if glyph.emoji_id.is_some() { 0. } else { 1. };
+                let left = (pen + b[0] * factor - margin).max(clip.left);
+                let right = (pen + b[2] * factor + margin).min(clip.right);
+                let top = (baseline - b[3] * factor - margin).max(clip.top);
+                let bottom = (baseline - b[1] * factor + margin).min(clip.bottom);
                 if left < right && top < bottom {
                     let first = (self.glyph_vertices.len() / 16) as u32;
                     for (x, y) in [(left, top), (right, top), (left, bottom), (right, bottom)] {
-                        self.glyph_vertices.extend([
-                            x,
-                            y,
-                            (x - pen) / em_size,
-                            (baseline - y) / em_size,
-                        ]);
+                        let uv = if glyph.emoji_id.is_some() {
+                            [
+                                ((x - pen - b[0] * factor) / ((b[2] - b[0]) * factor))
+                                    .clamp(0., 1.),
+                                ((y - baseline + b[3] * factor) / ((b[3] - b[1]) * factor))
+                                    .clamp(0., 1.),
+                            ]
+                        } else {
+                            [(x - pen) / em_size, (baseline - y) / em_size]
+                        };
+                        self.glyph_vertices.extend([x, y, uv[0], uv[1]]);
                         self.glyph_vertices.extend(c.map(|v| f32::from(v) / 255.));
                         self.glyph_vertices.extend(glyph.band_transform);
                         self.glyph_vertices.extend(glyph.band_data());

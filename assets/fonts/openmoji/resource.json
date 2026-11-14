@@ -1,0 +1,24 @@
+{
+  "compression": "zstd level 3 per tile",
+  "emojiTestSha256": "1d8a944f88d7952f7ef7c5167fef3c67995bcae24543949710231b03a201acda",
+  "format": "OTEMO002",
+  "generator": "Pillow 11.3.0 / python-zstandard 0.24.0",
+  "glyphCount": 1918,
+  "license": "CC-BY-SA-4.0",
+  "omittedStandaloneSkinToneComponents": 5,
+  "pixelFormat": "alpha8",
+  "resourceBytes": 2005832,
+  "resourceSha256": "c7a0cf62bbb937be9a611d738befcbfc915737a53724e43018fa8018c165a147",
+  "sequenceCount": 5220,
+  "sequencesByQualification": {
+    "component": 4,
+    "fully-qualified": 3944,
+    "minimally-qualified": 1029,
+    "unqualified": 243
+  },
+  "source": "OpenMoji 17.0.0 black PNG",
+  "sourceSha256": "b025bc2de99018c1438d6542a94541d537f9c8fd06f88b1d565c667056cbad4e",
+  "tileHeight": 64,
+  "tileWidth": 64,
+  "unicodeVersion": "17.0"
+}

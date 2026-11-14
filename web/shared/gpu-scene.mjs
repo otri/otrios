@@ -39,6 +39,33 @@ function program(gl,vertex,fragment){
 function required(gl,p,name){const value=gl.getUniformLocation(p,name);if(value===null)throw Error(`Missing GPU uniform ${name}`);return value;}
 function attribute(gl,p,name){const value=gl.getAttribLocation(p,name);if(value<0)throw Error(`Missing GPU attribute ${name}`);return value;}
 const ATLAS_SIZE=1024,MAX_CACHE_ENTRIES=4096;
+// Emoji alpha masks occupy independently populated pages, never the analytic cache.
+// A slot may be evicted only immediately before its replacement is drawn. No
+// retained vertex buffer stores atlas UVs, so recycling cannot stale a frame.
+export class EmojiAtlas {
+  constructor(gl,raster,tileSize=64){
+    if(typeof raster!=='function'||!Number.isInteger(tileSize)||tileSize<16||tileSize>256)throw Error('Invalid emoji raster provider');
+    this.gl=gl;this.raster=raster;this.tileSize=tileSize;this.cell=tileSize+4;this.columns=Math.floor(ATLAS_SIZE/this.cell);this.pageSlots=this.columns**2;this.pages=[];this.entries=new Map();this.capacity=this.pageSlots*4;this.stats={hits:0,misses:0,evictions:0,bytes:0};
+  }
+  get(id){
+    if(!Number.isInteger(id)||id<0)throw Error('Invalid emoji glyph ID');
+    if(this.entries.has(id)){const tile=this.entries.get(id);this.entries.delete(id);this.entries.set(id,tile);this.stats.hits++;return tile;}
+    const pixels=this.raster(id),size=this.tileSize;if(!(pixels instanceof Uint8Array)||pixels.length!==size*size)throw Error('Invalid emoji raster payload');
+    let tile;
+    if(this.entries.size===this.capacity){const oldest=this.entries.keys().next().value;tile=this.entries.get(oldest);this.entries.delete(oldest);this.stats.evictions++;}
+    else{const slot=this.entries.size,page=Math.floor(slot/this.pageSlots),local=slot%this.pageSlots;tile={page,x:local%this.columns*this.cell,y:Math.floor(local/this.columns)*this.cell};}
+    const gl=this.gl;
+    if(!this.pages[tile.page]){const texture=gl.createTexture();if(!texture)throw Error('Unable to allocate an emoji atlas page');gl.activeTexture(gl.TEXTURE0+2+tile.page);gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.ALPHA,ATLAS_SIZE,ATLAS_SIZE,0,gl.ALPHA,gl.UNSIGNED_BYTE,null);this.pages[tile.page]=texture;this.stats.bytes+=ATLAS_SIZE*ATLAS_SIZE;}
+    // Coverage alone shares the text tint and opacity. Transparent gutters
+    // isolate neighboring masks under bilinear filtering.
+    const upload=new Uint8Array(this.cell*this.cell);
+    for(let y=0;y<size;y++)upload.set(pixels.subarray(y*size,(y+1)*size),(y+2)*this.cell+2);
+    gl.activeTexture(gl.TEXTURE0+2+tile.page);gl.bindTexture(gl.TEXTURE_2D,this.pages[tile.page]);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);gl.texSubImage2D(gl.TEXTURE_2D,0,tile.x,tile.y,this.cell,this.cell,gl.ALPHA,gl.UNSIGNED_BYTE,upload);gl.pixelStorei(gl.UNPACK_ALIGNMENT,4);
+    if(gl.getError()!==gl.NO_ERROR)throw Error('GPU rejected the emoji atlas tile');
+    this.entries.set(id,tile);this.stats.misses++;return tile;
+  }
+  dispose(){for(const page of this.pages)this.gl.deleteTexture(page);this.pages=[];this.entries.clear();this.stats.bytes=0;}
+}
 function cacheGlyphExact(vertices,offset,scaleX=1,scaleY=1){
   let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
   for(let i=0;i<4;i++){left=Math.min(left,vertices[offset+i*16]*scaleX);right=Math.max(right,vertices[offset+i*16]*scaleX);top=Math.min(top,vertices[offset+i*16+1]*scaleY);bottom=Math.max(bottom,vertices[offset+i*16+1]*scaleY);}
@@ -49,6 +76,7 @@ function cacheGlyphExact(vertices,offset,scaleX=1,scaleY=1){
   return {key:key.join(','),x,y,width,height,offset};
 }
 function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false,declaredEm=0,guard=2){
+  if(vertices[offset+14]<0)return null;
   if(!sampling)return cacheGlyphExact(vertices,offset,scaleX,scaleY);
   const q=vertices.subarray(offset,offset+64),du=q[18]-q[2],dv=q[35]-q[3];
   for(let i=1;i<4;i++)for(let j=4;j<16;j++)if(q[i*16+j]!==q[j])return null;
@@ -93,7 +121,7 @@ export class SceneRenderer {
     this.geometryAttributes=[attribute(gl,this.geometry,'position'),attribute(gl,this.geometry,'color')];
     this.textAttributes=['position','renderCoord','color','bandTransform','glyph'].map(name=>attribute(gl,this.text,name));
     this.geometryTransform=required(gl,this.geometry,'transform');
-    this.textUniforms=Object.fromEntries(['transform','curveTexture','bandTexture','curveSize','bandSize','linearTint','coverageScale'].map(name=>[name,required(gl,this.text,name)]));
+    this.textUniforms=Object.fromEntries(['transform','curveTexture','bandTexture','curveSize','bandSize','linearTint','coverageScale','emojiPage0','emojiPage1','emojiPage2','emojiPage3'].map(name=>[name,required(gl,this.text,name)]));
     this.indices=gl.createBuffer();if(!this.indices)throw Error('Unable to allocate glyph indices');this.indexGlyphs=0;
     const snapDeclarations=this.stableTextQuads?'uniform vec2 snapViewport;uniform mat2 snapUv;':'',snapVertex=this.stableTextQuads?'if(snapViewport.x>0.0){vec2 pixel=(p.xy+1.0)*snapViewport*0.5;vec2 snapped=ceil(pixel-0.5);texcoord+=snapUv*(snapped-pixel);p.xy=snapped*2.0/snapViewport-1.0;}':'';
     this.cacheProgram=program(gl,'attribute vec2 position;attribute vec2 uv;attribute vec4 color;uniform mat3 transform;'+snapDeclarations+'varying highp vec2 texcoord;varying mediump vec4 tint;'+decode+'void main(){vec3 p=transform*vec3(position,1.0);texcoord=uv;'+snapVertex+'gl_Position=vec4(p.xy,0.0,1.0);tint=vec4('+tintExpression+'*color.a,color.a);}','precision mediump float;uniform sampler2D atlas;varying highp vec2 texcoord;varying mediump vec4 tint;void main(){gl_FragColor=tint*texture2D(atlas,texcoord);}');
@@ -124,9 +152,11 @@ export class SceneRenderer {
     floats(packet.curves,4,'font curves');
     if(packet.curves.length!==packet.curveWidth*packet.curveHeight*4||!(packet.bands instanceof Uint8Array)||packet.bands.length!==packet.bandWidth*packet.bandHeight*4)throw Error('Invalid font texture payload');
     const texture=(unit,width,height,type,data)=>{const t=gl.createTexture();if(!t)throw Error('Unable to allocate a font texture');gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,type,data);return t;};
+    if(packet.emojiRaster!==undefined&&typeof packet.emojiRaster!=='function')throw Error('Invalid emoji raster provider');
     let curves,bands;
     try{curves=texture(0,packet.curveWidth,packet.curveHeight,this.curveTextureType,this.curveTextureType===gl.FLOAT?packet.curves:halfFloats(packet.curves));bands=texture(1,packet.bandWidth,packet.bandHeight,gl.UNSIGNED_BYTE,packet.bands);if(gl.getError()!==gl.NO_ERROR)throw Error('GPU rejected the analytic font resource');this.font={curves,bands,curveSize:[packet.curveWidth,packet.curveHeight],bandSize:[packet.bandWidth,packet.bandHeight]};}
     catch(error){if(curves)gl.deleteTexture(curves);if(bands)gl.deleteTexture(bands);throw error;}
+    if(packet.emojiRaster)this.emoji=new EmojiAtlas(gl,packet.emojiRaster,packet.emojiTileSize??64);
   }
   useAttributes(values){const wanted=new Set(values);for(const old of this.activeAttributes)if(!wanted.has(old))this.gl.disableVertexAttribArray(old);for(const value of wanted)if(!this.activeAttributes.has(value))this.gl.enableVertexAttribArray(value);this.activeAttributes=wanted;}
   ensureIndices(glyphs){
@@ -142,7 +172,18 @@ export class SceneRenderer {
   }
   bindText(buffer,transform=this.transform,coverageScale=1){
     const gl=this.gl,u=this.textUniforms,f=this.font;if(!f)throw Error('The verified font resource has not arrived');
-    gl.useProgram(this.text);gl.uniformMatrix3fv(u.transform,false,transform);gl.uniform1f(u.linearTint,this.linearLight?1:0);gl.uniform1f(u.coverageScale,coverageScale);gl.uniform1i(u.curveTexture,0);gl.uniform1i(u.bandTexture,1);gl.uniform2fv(u.curveSize,f.curveSize);gl.uniform2fv(u.bandSize,f.bandSize);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,f.curves);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,f.bands);this.useAttributes(this.textAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,buffer);for(const [j,size,offset] of [[0,2,0],[1,2,8],[2,4,16],[3,4,32],[4,4,48]])gl.vertexAttribPointer(this.textAttributes[j],size,gl.FLOAT,false,64,offset);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);
+    gl.useProgram(this.text);gl.uniformMatrix3fv(u.transform,false,transform);gl.uniform1f(u.linearTint,this.linearLight?1:0);gl.uniform1f(u.coverageScale,coverageScale);gl.uniform1i(u.curveTexture,0);gl.uniform1i(u.bandTexture,1);gl.uniform2fv(u.curveSize,f.curveSize);gl.uniform2fv(u.bandSize,f.bandSize);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,f.curves);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,f.bands);for(let page=0;page<4;page++){gl.uniform1i(u[`emojiPage${page}`],2+page);gl.activeTexture(gl.TEXTURE0+2+page);gl.bindTexture(gl.TEXTURE_2D,this.emoji?.pages[page]||f.bands);}this.useAttributes(this.textAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,buffer);for(const [j,size,offset] of [[0,2,0],[1,2,8],[2,4,16],[3,4,32],[4,4,48]])gl.vertexAttribPointer(this.textAttributes[j],size,gl.FLOAT,false,64,offset);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);
+  }
+  drawTextRange(layer,first,count,transform,paint){
+    const gl=this.gl,vertices=layer.glyphVertices;
+    const bind=buffer=>{this.bindText(buffer,transform);if(paint){const a=this.textAttributes[2];gl.disableVertexAttribArray(a);this.activeAttributes.delete(a);gl.vertexAttrib4fv(a,paint);}};
+    for(let vertex=first,end=first+count;vertex<end;){
+      if(vertices[vertex*16+14]>=0){const start=vertex;do{vertex+=4;}while(vertex<end&&vertices[vertex*16+14]>=0);bind(layer.text);gl.drawElements(gl.TRIANGLES,(vertex-start)/4*6,gl.UNSIGNED_SHORT,start/4*12);continue;}
+      if(!this.emoji)throw Error('The verified emoji resource has not arrived');
+      const tile=this.emoji.get(vertices[vertex*16+12]),q=vertices.slice(vertex*16,vertex*16+64),span=(this.emoji.tileSize-1)/ATLAS_SIZE;
+      for(let i=0;i<4;i++){const o=i*16;q[o+8]=span;q[o+9]=span;q[o+12]=(tile.x+2+.5)/ATLAS_SIZE;q[o+13]=(tile.y+2+.5)/ATLAS_SIZE;q[o+15]=tile.page;}
+      gl.bindBuffer(gl.ARRAY_BUFFER,this.scratch);gl.bufferData(gl.ARRAY_BUFFER,q,gl.STREAM_DRAW);bind(this.scratch);gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);vertex+=4;
+    }
   }
   rasterGlyph(layer,glyph,tile){
     const gl=this.gl,vertices=layer.glyphVertices.slice(glyph.offset,glyph.offset+64);for(let i=0;i<4;i++){
@@ -166,7 +207,7 @@ export class SceneRenderer {
         for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,layer.textStyles[i/3]||0,this.stableTextQuads?3:2);let tile=glyph&&this.cache.get(glyph.key);
           if(tile)this.cacheStats.hits++;
           else if(glyph){tile=this.allocateGlyph(glyph);if(tile){if(!bound){bound=true;gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.viewport(0,0,ATLAS_SIZE,ATLAS_SIZE);gl.enable(gl.SCISSOR_TEST);gl.clearColor(0,0,0,0);}this.rasterGlyph(layer,glyph,tile);this.cache.set(glyph.key,tile);this.cacheStats.misses++;}}
-          if(!tile){appendRun(runs,1,vertex,4,groups,i/3,vertex);this.cacheStats.fallbacks++;continue;}
+          if(!tile){appendRun(runs,1,vertex,4,groups,i/3,vertex);if(layer.glyphVertices[vertex*16+14]>=0)this.cacheStats.fallbacks++;continue;}
           const color=layer.glyphVertices.subarray(vertex*16+4,vertex*16+8),start=cached.length/8;
           const points=glyph.sampling?[0,1,3,2].map(i=>{const q=vertex*16+i*16;return [layer.glyphVertices[q]*this.scaleX,layer.glyphVertices[q+1]*this.scaleY,(tile.x+glyph.pad+(layer.glyphVertices[q+2]-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-layer.glyphVertices[q+3])*glyph.sy*glyph.sampling)/ATLAS_SIZE];}):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
           for(const corner of [0,1,2,0,2,3]){const [x,y,u,v]=points[corner];cached.push(x/this.scaleX,y/this.scaleY,u,v,...color);}appendRun(runs,2,start,6,groups,i/3,vertex);
@@ -226,10 +267,10 @@ export class SceneRenderer {
       for(let i=0;i<layers.length;i++)layers[i].preparedGeneration=generations[i];gammaLayer?.dispose();this.beginFrame();for(const layer of layers)layer.draw();this.endFrame();
     }
   }
-  contextLost(){this.lost=true;this.font=null;this.activeAttributes.clear();for(const layer of this.layers)layer.invalid=true;}
+  contextLost(){this.lost=true;this.font=null;if(this.emoji){this.emoji.pages=[];this.emoji.entries.clear();this.emoji.stats.bytes=0;}this.activeAttributes.clear();for(const layer of this.layers)layer.invalid=true;}
   dispose(){
     const gl=this.gl;for(const layer of [...this.layers])layer.dispose();
-    if(this.font){gl.deleteTexture(this.font.curves);gl.deleteTexture(this.font.bands);}gl.deleteBuffer(this.indices);gl.deleteBuffer(this.scratch);gl.deleteTexture(this.atlas);gl.deleteFramebuffer(this.atlasFramebuffer);if(this.linearLight){gl.deleteTexture(this.encodeTexture);gl.deleteTexture(this.linearTexture);gl.deleteFramebuffer(this.linearFramebuffer);gl.deleteBuffer(this.resolveBuffer);gl.deleteProgram(this.resolveProgram);}gl.deleteProgram(this.cacheProgram);gl.deleteProgram(this.geometry);gl.deleteProgram(this.text);this.contextLost();
+    if(this.font){gl.deleteTexture(this.font.curves);gl.deleteTexture(this.font.bands);}this.emoji?.dispose();gl.deleteBuffer(this.indices);gl.deleteBuffer(this.scratch);gl.deleteTexture(this.atlas);gl.deleteFramebuffer(this.atlasFramebuffer);if(this.linearLight){gl.deleteTexture(this.encodeTexture);gl.deleteTexture(this.linearTexture);gl.deleteFramebuffer(this.linearFramebuffer);gl.deleteBuffer(this.resolveBuffer);gl.deleteProgram(this.resolveProgram);}gl.deleteProgram(this.cacheProgram);gl.deleteProgram(this.geometry);gl.deleteProgram(this.text);this.contextLost();
   }
 }
 class SceneLayer {
@@ -261,7 +302,7 @@ class SceneLayer {
     let active=-1;
     const draws=this.preparedGeneration===owner.cacheGeneration?this.preparedDraws:this.draws;
     for(let i=0;i<draws.length;i+=3){const kind=draws[i];let first=draws[i+1],count=draws[i+2];if(!count)continue;
-      let view,sourceVertex=0,sourceDraw=i/3;
+      let view,sourceVertex=0,sourceDraw=this.preparedGeneration===owner.cacheGeneration?this.preparedGroups[i/3*2]:i/3;
       if(kind===0&&this.textViews.length){const group=this.preparedGeneration===owner.cacheGeneration?this.preparedGroups[i/3*2]:i/3;if(this.textViews[group*8+1]>0){view=this.textViews.subarray(group*8,group*8+8);first=view[0];count=view[1];}}
       if(kind!==0&&this.textViews.length){const prepared=this.preparedGeneration===owner.cacheGeneration,group=prepared?this.preparedGroups[i/3*2]:i/3,source=prepared?this.preparedGroups[i/3*2+1]:first;sourceVertex=source;sourceDraw=group;view=this.textViews.subarray(group*8,group*8+8);const ratio=kind===2?1.5:1,end=Math.min(source+count/ratio,view[0]+view[1]),start=Math.max(source,view[0]);if(end<=start||view[6]<=view[4]||view[7]<=view[5])continue;first+=(start-source)*ratio;count=(end-start)*ratio;}
 
@@ -272,6 +313,7 @@ class SceneLayer {
         else{gl.useProgram(owner.cacheProgram);gl.uniformMatrix3fv(owner.cacheTransform,false,owner.transform);gl.uniform1i(owner.cacheSampler,2);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,owner.atlas);owner.useAttributes(owner.cacheAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.cached);gl.vertexAttribPointer(owner.cacheAttributes[0],2,gl.FLOAT,false,32,0);gl.vertexAttribPointer(owner.cacheAttributes[1],2,gl.FLOAT,false,32,8);gl.vertexAttribPointer(owner.cacheAttributes[2],4,gl.FLOAT,false,32,16);}
       }
       if(this.paints.length){const group=this.preparedGeneration===owner.cacheGeneration?this.preparedGroups[i/3*2]:i/3,attribute=kind===0?owner.geometryAttributes[1]:kind===1?owner.textAttributes[2]:owner.cacheAttributes[2];gl.disableVertexAttribArray(attribute);owner.activeAttributes.delete(attribute);gl.vertexAttrib4fv(attribute,this.paints.subarray(group*4,group*4+4));}
+      let drawTransform=owner.transform;
       {
         if(kind===2&&owner.stableTextQuads){
           if(view&&owner.atlasScale){const q=this.glyphVertices.subarray(sourceVertex*16,sourceVertex*16+64),em=this.textStyles[sourceDraw]||Math.abs((q[33]-q[1])/(q[35]-q[3])),sx=Math.round(em*owner.scaleX*256)/256,sy=Math.round(em*owner.scaleY*256)/256;
@@ -280,9 +322,9 @@ class SceneLayer {
         }
         const transform=owner.transform.slice();
         if(view){transform[6]+=owner.transform[0]*view[2]+owner.transform[3]*view[3];transform[7]+=owner.transform[1]*view[2]+owner.transform[4]*view[3];const edge=(v,max)=>Math.ceil(Math.max(0,Math.min(max,v))-.5),x0=edge(view[4]*owner.scaleX,owner.width),x1=edge(view[6]*owner.scaleX,owner.width),y0=edge(owner.height-view[7]*owner.scaleY,owner.height),y1=edge(owner.height-view[5]*owner.scaleY,owner.height);if(x1<=x0||y1<=y0)continue;gl.enable(gl.SCISSOR_TEST);gl.scissor(x0,y0,x1-x0,y1-y0);}
-        gl.uniformMatrix3fv(kind===0?owner.geometryTransform:kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);
+        drawTransform=transform;gl.uniformMatrix3fv(kind===0?owner.geometryTransform:kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);
       }
-      if(kind!==1)gl.drawArrays(gl.TRIANGLES,first,count);else gl.drawElements(gl.TRIANGLES,count/4*6,gl.UNSIGNED_SHORT,first/4*12);
+      if(kind!==1)gl.drawArrays(gl.TRIANGLES,first,count);else owner.drawTextRange(this,first,count,drawTransform,this.paints.length?this.paints.subarray(sourceDraw*4,sourceDraw*4+4):null);
       if(view)gl.disable(gl.SCISSOR_TEST);
     }
   }

@@ -53,8 +53,8 @@ class SignedReleases(unittest.TestCase):
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
-        (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['fonts/Roboto.ttf','fonts/OFL.txt','app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource');(self.web/'fonts/Emoji.otemo').write_bytes(b'emoji-test-resource')
+        for name in ['fonts/Roboto.ttf','fonts/OFL.txt','fonts/Emoji-LICENSE.txt','fonts/Emoji-NOTICE.txt','app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','emoji-reference.mjs']:(self.web/name).write_text('test')
         (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
@@ -87,12 +87,28 @@ class SignedReleases(unittest.TestCase):
         dest=self.cache/id;dest.mkdir()
         for file in ['manifest.json','manifest.sig']:shutil.copyfile(self.out/id/file,dest/file)
         if (self.out/id/'apps/catalog.flex').exists():shutil.copyfile(self.out/id/'apps/catalog.flex',dest/'app-catalog.flex')
-        for name in ['fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']:
+        for name in ['fonts/Roboto-Regular.otq.zst','fonts/Emoji.otemo','fonts/Emoji-LICENSE.txt','fonts/Emoji-NOTICE.txt','Slug-LICENSE.txt']:
             if (self.out/id/'web'/name).exists():
                 (dest/name).parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/id/'web'/name,dest/name)
         for name in ['dashboard-native']:
             source=self.out/id/'native/armv7'/name
             if source.exists():shutil.copyfile(source,dest/name)
+    def test_external_emoji_resource_is_signed_cached_and_independently_bounded(self):
+        data=b'e'*(1024*1024+1)
+        (self.web/'fonts/Emoji.otemo').write_bytes(data)
+        pointer=self.publish();release=pointer['id'];folder=self.out/release
+        self.assertFalse((folder/'web/fonts/Emoji.otemo.gz').exists(),'individually compressed tiles have no redundant gzip sidecar')
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(pointer).encode()),release)
+        self.copy_cache(release)
+        self.assertEqual(agent.cached(self.cache,release,self.public,OPENSSL)[0],release)
+        manifest=json.loads((folder/'manifest.json').read_bytes())
+        for name in ['Emoji-LICENSE.txt','Emoji-NOTICE.txt']:
+            self.assertIn('web/fonts/'+name,manifest['assets'])
+            self.assertEqual((self.cache/release/'fonts'/name).read_bytes(),(self.web/'fonts'/name).read_bytes())
+        item={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+        agent.verify_font(data,item,agent.resource_limit('fonts/Emoji.otemo'))
+        with self.assertRaises(ValueError):agent.verify_font(data,item)
+        with self.assertRaises(ValueError):list(agent.resource_items({'assets':{'web/fonts/Emoji.otemo':{'bytes':32*1024*1024+1}}}))
     def test_data_only_transfer_reuses_verified_closure_and_rejects_missing_changes(self):
         package=self.root/'apps/home/package';package.mkdir(parents=True)
         (package/'app.flex').write_bytes(b'manifest');(package/'ui.flex').write_bytes(b'old-ui')

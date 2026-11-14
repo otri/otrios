@@ -51,6 +51,9 @@ pub fn validate_text_mesh(
             {
                 return Err("Invalid glyph vertex".into());
             }
+            if quad[14] == -1. && vertex[2..4].iter().any(|v| !(0. ..=1.).contains(v)) {
+                return Err("Invalid emoji texture coordinate".into());
+            }
             // Ordinary glyphs repeat tint/band metadata on all four corners.
             // Bit comparisons avoid rechecking those scalar constraints four times;
             // gradient/nonuniform attributes still take the complete validation path.
@@ -69,10 +72,19 @@ pub fn validate_text_mesh(
                 || vertex[8..12]
                     .iter()
                     .any(|v| v.to_bits() & 0x7fff_ffff > 100_000_f32.to_bits())
-                || !(0. ..=255.).contains(&vertex[12])
-                || !(0. ..=255.).contains(&vertex[13])
-                || vertex[14] != 7.
-                || vertex[15] != 7.
+                || if vertex[14] == -1. {
+                    !(1. ..=65535.).contains(&vertex[12])
+                        || vertex[12].fract() != 0.
+                        || vertex[13] != 0.
+                        || vertex[15] != 0.
+                        || vertex[2..4].iter().any(|v| !(0. ..=1.).contains(v))
+                        || vertex[8..16] != quad[8..16]
+                } else {
+                    !(0. ..=255.).contains(&vertex[12])
+                        || !(0. ..=255.).contains(&vertex[13])
+                        || vertex[14] != 7.
+                        || vertex[15] != 7.
+                }
             {
                 return Err("Invalid glyph vertex".into());
             }
@@ -124,6 +136,28 @@ mod tests {
         assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_ok());
         glyphs[52] = 1.1;
         assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_err());
+    }
+    #[test]
+    fn emoji_quads_admit_only_bounded_ids_and_local_texture_coordinates() {
+        let mut glyphs = vec![0.; 64];
+        for vertex in glyphs.chunks_exact_mut(16) {
+            vertex[4..8].fill(1.);
+            vertex[12] = 4096.;
+            vertex[14] = -1.;
+        }
+        assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_ok());
+        for (index, bad) in [
+            (12, 65536.),
+            (12, 1.5),
+            (13, 1.),
+            (15, 1.),
+            (18, -0.1),
+            (51, 1.1),
+        ] {
+            let mut invalid = glyphs.clone();
+            invalid[index] = bad;
+            assert!(validate_text_mesh(&invalid, &[1, 0, 4], 0).is_err());
+        }
     }
     #[test]
     fn glyph_ffi_rejects_partial_quads_and_invalid_ordered_ranges() {

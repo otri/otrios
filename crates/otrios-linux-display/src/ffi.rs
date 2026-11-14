@@ -2,7 +2,9 @@
 //! The only unsafe Rust module in the project. Invariants: the opaque C owner
 //! stays on its creating thread; calls borrow slices synchronously; Drop runs
 //! once after the final borrow. C includes the platform ABI headers. No raw
-//! pointer, callback, or ownership transfer is exposed to callers (RFC 0001).
+//! pointer or ownership transfer is exposed to callers. The safe emoji provider
+//! is retained in a stable Box and called synchronously on this thread; C never
+//! owns it, invokes it during destruction, or lets a panic cross FFI (RFC 0001).
 use crate::validate_mesh;
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
@@ -72,6 +74,11 @@ unsafe extern "C" {
         bands: *const u8,
         bb: usize,
     ) -> c_int;
+    fn ot_set_emoji_rasterizer(
+        d: *mut c_void,
+        rasterize: unsafe extern "C" fn(*mut c_void, u32, *mut u8, usize) -> c_int,
+        context: *mut c_void,
+    );
     fn ot_upload_text(
         d: *mut c_void,
         slot: u32,
@@ -93,8 +100,38 @@ unsafe extern "C" {
     fn ot_touch_close(input: *mut c_void);
     fn ot_pixels(d: *mut c_void, rgba: *mut u8, length: usize) -> c_int;
 }
+struct EmojiRasterizer {
+    callback: Box<dyn Fn(u32) -> Result<Vec<u8>, String>>,
+}
+// C calls only synchronously on Display's owner thread. The boxed context stays
+// stable until it is replaced, or until ot_close completes before field Drop.
+unsafe extern "C" fn rasterize_emoji(
+    context: *mut c_void,
+    id: u32,
+    alpha: *mut u8,
+    bytes: usize,
+) -> c_int {
+    if context.is_null() || alpha.is_null() || bytes != 64 * 64 {
+        return -1;
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: C retains exactly the stable EmojiRasterizer allocation owned
+        // by Display and borrows it only during a synchronous graphics call.
+        let source = unsafe { &*context.cast::<EmojiRasterizer>() };
+        let tile = (source.callback)(id)?;
+        if tile.len() != bytes {
+            return Err("Invalid emoji tile size".to_string());
+        }
+        // SAFETY: C supplies a writable 64x64 alpha staging array for this call;
+        // the source Vec owns a separate allocation and both lengths agree.
+        unsafe { std::ptr::copy_nonoverlapping(tile.as_ptr(), alpha, bytes) };
+        Ok::<(), String>(())
+    }));
+    if matches!(result, Ok(Ok(()))) { 0 } else { -1 }
+}
 pub struct Display {
     owner: NonNull<c_void>,
+    emoji_rasterizer: Option<Box<EmojiRasterizer>>,
     _thread: PhantomData<Rc<()>>,
 }
 impl Display {
@@ -143,6 +180,7 @@ impl Display {
         })?;
         Ok(Self {
             owner,
+            emoji_rasterizer: None,
             _thread: PhantomData,
         })
     }
@@ -226,6 +264,26 @@ impl Display {
                 bands.len(),
             )
         })
+    }
+    /// Supply bounded single-channel alpha tiles on the first visible use of an emoji.
+    /// The graphics owner retains the callback and owns all cached GPU pages.
+    pub fn set_emoji_rasterizer(
+        &mut self,
+        rasterizer: impl Fn(u32) -> Result<Vec<u8>, String> + 'static,
+    ) {
+        let mut source = Box::new(EmojiRasterizer {
+            callback: Box::new(rasterizer),
+        });
+        // SAFETY: Box keeps the context address stable; the C owner borrows it
+        // synchronously on this thread. It is replaced before the old box drops.
+        unsafe {
+            ot_set_emoji_rasterizer(
+                self.owner.as_ptr(),
+                rasterize_emoji,
+                (&mut *source as *mut EmojiRasterizer).cast(),
+            )
+        };
+        self.emoji_rasterizer = Some(source);
     }
     /// Retained colored triangles and indexed glyph quads share one ordered plan.
     pub fn upload_scene(
@@ -377,7 +435,9 @@ impl Display {
 }
 impl Drop for Display {
     fn drop(&mut self) {
-        // SAFETY: sole owner, !Send/!Sync, no outstanding borrows or retained Rust pointers.
+        // SAFETY: sole owner, !Send/!Sync, no outstanding borrows. C destroys all
+        // resources without invoking callbacks; the boxed emoji provider remains
+        // live until after this method returns and the C owner is destroyed.
         unsafe { ot_close(self.owner.as_ptr()) };
     }
 }
@@ -1015,6 +1075,112 @@ mod tests {
         );
         assert!(display.glyph_cache_stats()[1] > 0);
         assert_eq!(display.glyph_cache_stats()[2], expected_coverage_bytes());
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; focused emoji pixel acceptance"]
+    fn mesa_monochrome_emoji_uses_authored_tint_alpha_and_lazy_tile_reuse() {
+        let _display_owner = mesa_display_owner();
+        let mut d = Display::headless([64, 64], false).unwrap();
+        d.set_font(1, 1, &[0.; 4], 1, 1, &[0; 4]).unwrap();
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let observed = calls.clone();
+        d.set_emoji_rasterizer(move |id| {
+            observed.set(observed.get() + 1);
+            assert!((1..=2).contains(&id));
+            let mut alpha = vec![0; 64 * 64];
+            for y in 8..56 {
+                for x in 8..56 {
+                    alpha[y * 64 + x] = if x < 32 { 255 } else { 128 };
+                }
+            }
+            Ok(alpha)
+        });
+        let quad = |id: f32, alpha: f32| {
+            let mut vertices = Vec::new();
+            for [x, y, u, v] in [
+                [-1., 1., 0., 0.],
+                [1., 1., 1., 0.],
+                [-1., -1., 0., 1.],
+                [1., -1., 1., 1.],
+            ] {
+                // Monochrome emoji use the same authored green as ordinary text.
+                vertices.extend([
+                    x, y, u, v, 0., 1., 0., alpha, 0., 0., 0., 0., id, 0., -1., 0.,
+                ]);
+            }
+            vertices
+        };
+        let projection = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+        let linear = d.linear_scene_enabled();
+        let blend = |color: u8, background: u8, alpha: f32| {
+            let decode = |v: u8| {
+                let x = f32::from(v) / 255.;
+                if x <= 0.04045 {
+                    x / 12.92
+                } else {
+                    ((x + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            if linear {
+                let x = decode(color) * alpha + decode(background) * (1. - alpha);
+                let encoded = if x <= 0.0031308 {
+                    12.92 * x
+                } else {
+                    1.055 * x.powf(1. / 2.4) - 0.055
+                };
+                (encoded * 255.).round() as u8
+            } else {
+                (f32::from(color) * alpha + f32::from(background) * (1. - alpha)).round() as u8
+            }
+        };
+        let expected = |alpha: f32| {
+            [
+                blend(0, 16, alpha),
+                blend(255, 28, alpha),
+                blend(0, 41, alpha),
+            ]
+        };
+        let full = expected(128. / 255.);
+        let half = expected(64. / 255.);
+        d.upload_scene(0, &[], &quad(1., 1.), &[1, 0, 4]).unwrap();
+        for _ in 0..2 {
+            d.draw(projection, false).unwrap();
+            let pixels = d.pixels().unwrap();
+            let pixel = |x, y| &pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 3];
+            assert!(
+                pixel(20, 32)
+                    .iter()
+                    .zip([0_u8, 255, 0])
+                    .all(|(a, b)| a.abs_diff(b) <= 2)
+            );
+            assert!(
+                pixel(44, 32)
+                    .iter()
+                    .zip(full)
+                    .all(|(a, b)| a.abs_diff(b) <= 2)
+            );
+            assert!(
+                pixel(1, 1)
+                    .iter()
+                    .zip([16_u8, 28, 41])
+                    .all(|(a, b)| a.abs_diff(b) <= 2)
+            );
+        }
+        assert_eq!(calls.get(), 1, "repeat visible draws reuse the GPU tile");
+        d.upload_scene(0, &[], &quad(1., 0.5), &[1, 0, 4]).unwrap();
+        d.draw(projection, false).unwrap();
+        let pixels = d.pixels().unwrap();
+        let offset = (32 * 64 + 44) * 4;
+        assert!(
+            pixels[offset..offset + 3]
+                .iter()
+                .zip(half)
+                .all(|(a, b)| a.abs_diff(b) <= 2)
+        );
+        assert_eq!(calls.get(), 1, "opacity changes do not decode another tile");
+        d.upload_scene(0, &[], &quad(2., 1.), &[1, 0, 4]).unwrap();
+        d.draw(projection, false).unwrap();
+        assert_eq!(calls.get(), 2, "a new visible emoji decodes exactly once");
     }
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]

@@ -589,18 +589,23 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/font-resource.mjs"
         | "font-reference.mjs"
         | "web/font-reference.mjs"
+        | "emoji-reference.mjs"
+        | "web/emoji-reference.mjs"
         | "pkg/otrios_dashboard.js"
         | "web/pkg/otrios_dashboard.js"
         | "app-catalog.mjs"
         | "web/app-catalog.mjs" => Some("text/javascript"),
         "text-input.mjs" | "web/text-input.mjs" => Some("text/javascript"),
         "fonts/Roboto.ttf" | "web/fonts/Roboto.ttf" => Some("font/ttf"),
-        "fonts/OFL.txt" | "web/fonts/OFL.txt" => Some("text/plain; charset=utf-8"),
+        "fonts/OFL.txt" | "web/fonts/OFL.txt"
+        | "fonts/Emoji-LICENSE.txt" | "web/fonts/Emoji-LICENSE.txt"
+        | "fonts/Emoji-NOTICE.txt" | "web/fonts/Emoji-NOTICE.txt" => Some("text/plain; charset=utf-8"),
         "style.css" | "web/style.css" => Some("text/css"),
         "favicon.svg" | "web/favicon.svg" => Some("image/svg+xml"),
         "favicon.ico" | "web/favicon.ico" => Some("image/vnd.microsoft.icon"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
-        "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
+        "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst"
+        | "fonts/Emoji.otemo" | "web/fonts/Emoji.otemo" => {
             Some("application/octet-stream")
         }
         "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
@@ -658,11 +663,12 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                         | "slug-shaders.mjs"
                         | "font-resource.mjs"
                         | "font-reference.mjs"
+                        | "emoji-reference.mjs"
                 )
             {
                 file = app.web.join("../shared").join(&path);
             }
-            if !file.exists() && path == "fonts/Roboto-Regular.otq.zst" {
+            if !file.exists() && matches!(path.as_str(), "fonts/Roboto-Regular.otq.zst" | "fonts/Emoji.otemo" | "fonts/Emoji-LICENSE.txt" | "fonts/Emoji-NOTICE.txt") {
                 file = app.web.join("../shared").join(&path);
             }
             if !file.exists() && matches!(path.as_str(), "fonts/Roboto.ttf" | "fonts/OFL.txt") {

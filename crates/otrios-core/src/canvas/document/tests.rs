@@ -512,3 +512,38 @@ fn appended_paragraphs_preserve_existing_geometry_and_anchor() {
     assert!(r.append_blocks(&["bad\nparagraph".into()]).is_err());
     assert_eq!(r.source.original_text().unwrap(), snapshot);
 }
+
+#[test]
+fn emoji_sequences_keep_one_cluster_and_color_quad_through_wrapping() {
+    let text = "👩🏽‍💻🇨🇦1️⃣👨‍👩‍👧‍👦";
+    let mut r = reader(text, 36., 180.);
+    settle(&mut r);
+    let mut ranges = Vec::new();
+    let frame = r.frame();
+    for draw in &frame.draws {
+        for quad in draw.chunk.mesh.glyph_vertices.chunks_exact(64) {
+            assert_eq!(quad[14], -1.);
+            for (actual, expected) in [quad[2], quad[3], quad[18], quad[35]]
+                .into_iter()
+                .zip([0., 0., 1., 1.])
+            {
+                assert!((actual - expected).abs() < 1e-5);
+            }
+        }
+        ranges.extend(draw.chunk.clusters.iter().map(|r| (r.start, r.end)));
+    }
+    ranges.sort();
+    ranges.dedup();
+    let expected: Vec<_> = clusters::Clusters::new(text)
+        .map(|(at, s)| (at as u32, (at + s.len()) as u32))
+        .collect();
+    assert_eq!(ranges, expected);
+    assert_eq!(ranges.len(), 4);
+    let mut text_presentation = reader("❤\u{fe0e}", 100., 80.);
+    settle(&mut text_presentation);
+    let frame = text_presentation.frame();
+    let quad = &frame.draws[0].chunk.mesh.glyph_vertices;
+    assert_eq!(quad.len(), 64);
+    assert_eq!(quad[14], 7.);
+    assert!(quad[8] > 0.);
+}

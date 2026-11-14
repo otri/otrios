@@ -627,9 +627,8 @@ fn primitive_bounds(node: &SceneNode, x: f32, y: f32, factor: f32, font: &Font) 
             let unit = font.metrics().scale(scale);
             let baseline = y + font.metrics().baseline_from_top(scale);
             let mut pen = x;
-            for ch in value.chars() {
-                let glyph = font.glyph(ch);
-                if glyph.curve_count != 0 {
+            for glyph in font.text_glyphs(value) {
+                if glyph.drawable() {
                     let b = glyph.ink_bounds;
                     include(
                         pen + b[0] * unit - 1.,

@@ -92,7 +92,7 @@ impl Templates {
                 Template {
                     ink: g.ink_bounds.map(|b| b * factor),
                     attributes,
-                    drawable: g.curve_count != 0,
+                    drawable: g.drawable(),
                 }
             })
             .collect();
@@ -184,10 +184,12 @@ impl Builder {
             }
             let pen = placed.x as f32 + self.inset;
             let [xmin, ymin, xmax, ymax] = g.ink;
-            let left = pen + xmin - 1.;
-            let right = pen + xmax + 1.;
-            let top = baseline - ymax - 1.;
-            let bottom = baseline - ymin + 1.;
+            let emoji = g.attributes[6] == -1.;
+            let margin = if emoji { 0. } else { 1. };
+            let left = pen + xmin - margin;
+            let right = pen + xmax + margin;
+            let top = baseline - ymax - margin;
+            let bottom = baseline - ymin + margin;
             let bounds = &mut self.current.bounds;
             bounds[0] = bounds[0].min(left);
             bounds[1] = bounds[1].min(top);
@@ -200,7 +202,12 @@ impl Builder {
                 .enumerate()
             {
                 let v = &mut quad[corner * 16..(corner + 1) * 16];
-                v[..4].copy_from_slice(&[x, y, (x - pen) / em, (baseline - y) / em]);
+                let uv = if emoji {
+                    [(corner % 2) as f32, (corner / 2) as f32]
+                } else {
+                    [(x - pen) / em, (baseline - y) / em]
+                };
+                v[..4].copy_from_slice(&[x, y, uv[0], uv[1]]);
                 v[4..8].copy_from_slice(&self.color);
                 v[8..].copy_from_slice(&g.attributes);
             }

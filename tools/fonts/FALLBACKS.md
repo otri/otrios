@@ -29,10 +29,11 @@ scalar lists are emitted in `assets/fonts/roboto/resource.json`.
 All outlines and advances normalize to Roboto's EM and baseline. Glyph-ID ranges
 are disjoint between source fonts; each font can retain its own cmap aliases.
 U+FE0E/U+FE0F variation selectors have explicit zero-curve, zero-advance entries.
-This supports ordinary text/emoji presentation selectors without replacement boxes.
-It does not add shaping for ZWJ families, country flags or skin-tone combinations;
-color/bitmap emoji and full script shaping require a later renderer/text contract.
-Emoji use the authored text color, consistently on Frame and Web.
+The analytic packet supports these selectors without replacement boxes but does
+not itself shape sequences. Unicode 17 emoji sequences, including ZWJ families
+and flags, use the separate monochrome OpenMoji resource described in
+[EMOJI.md](EMOJI.md). Text presentation uses the analytic font where available.
+Full script shaping remains outside this font contract.
 
 The generated packet has 360 glyph records and 18,254 quadratic curves. It remains
 within 1,024 records, 32,768 curves (two texels each in a 256×256 atlas), 512 curves

@@ -54,14 +54,17 @@ def verify_binary(data,item):
     if not 0<item['bytes']<=MAX_BINARY or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Native artifact digest rejected')
     if len(data)<52 or data[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(data[18:20],'little')!=40:raise ValueError('Wrong executable target')
 
-def verify_font(data,item):
-    if not 0<item['bytes']<=1024*1024 or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Font resource digest rejected')
+def verify_font(data,item,limit=1024*1024):
+    if not 0<item['bytes']<=limit or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Font resource digest rejected')
+
+def resource_limit(local):
+    return 32*1024*1024 if local=='fonts/Emoji.otemo' else 1024*1024
 
 def resource_items(manifest):
-    for remote,local in [('apps/catalog.flex','app-catalog.flex'),('web/fonts/Roboto-Regular.otq.zst','fonts/Roboto-Regular.otq.zst'),('web/Slug-LICENSE.txt','Slug-LICENSE.txt')]:
+    for remote,local in [('apps/catalog.flex','app-catalog.flex'),('web/fonts/Roboto-Regular.otq.zst','fonts/Roboto-Regular.otq.zst'),('web/Slug-LICENSE.txt','Slug-LICENSE.txt'),('web/fonts/Emoji.otemo','fonts/Emoji.otemo'),('web/fonts/Emoji-LICENSE.txt','fonts/Emoji-LICENSE.txt'),('web/fonts/Emoji-NOTICE.txt','fonts/Emoji-NOTICE.txt')]:
         item=manifest['assets'].get(remote)
         if item:
-            if not 0<item['bytes']<=1024*1024:raise ValueError('Resource exceeds item budget')
+            if not 0<item['bytes']<=resource_limit(local):raise ValueError('Resource exceeds item budget')
             yield remote,local,item
 
 def valid_release(release):
@@ -73,7 +76,7 @@ def cached(cache,release,key,openssl):
     raw=(dest/'manifest.json').read_bytes();sig=(dest/'manifest.sig').read_bytes()
     manifest=verify_manifest(raw,sig,release,cache,key,openssl)
     verify_binary((dest/'dashboard-native').read_bytes(),manifest['assets']['native/armv7/dashboard-native'])
-    for _,local,item in resource_items(manifest):verify_font((dest/local).read_bytes(),item)
+    for _,local,item in resource_items(manifest):verify_font((dest/local).read_bytes(),item,resource_limit(local))
     return release,dest/'dashboard-native'
 
 def cache_size(path):
@@ -195,7 +198,7 @@ def qualify(base,cache,key,openssl,release=None,limit=CACHE_BYTES,pins=()):
         data=fetch(base,root+path,MAX_BINARY);verify_binary(data,item)
         atomic(stage/'dashboard-native',data,0o700)
         for remote,local,item in resource_items(manifest):
-            data=fetch(base,root+remote,1024*1024);verify_font(data,item)
+            limit=resource_limit(local);data=fetch(base,root+remote,limit);verify_font(data,item,limit)
             (stage/local).parent.mkdir(parents=True,exist_ok=True);atomic(stage/local,data)
         atomic(stage/'manifest.json',raw);atomic(stage/'manifest.sig',sig)
         stage.rename(dest)

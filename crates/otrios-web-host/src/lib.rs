@@ -664,6 +664,15 @@ impl CanvasApp {
         self.composer.clear();
         Ok(())
     }
+    pub fn set_emoji_resource(&self, bytes: Vec<u8>) -> Result<(), String> {
+        Font::install_emoji_resource(bytes)
+    }
+    pub fn font_emoji_raster(&self, id: u32) -> Result<Vec<u8>, String> {
+        self.font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .emoji_raster(id)
+    }
     pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
         let a = self
             .font
@@ -906,6 +915,15 @@ impl CanvasPresentation {
         self.font = Some(Arc::new(Font::from_zstd(bytes, hash)?));
         self.rendered_hud = None;
         Ok(())
+    }
+    pub fn set_emoji_resource(&self, bytes: Vec<u8>) -> Result<(), String> {
+        Font::install_emoji_resource(bytes)
+    }
+    pub fn font_emoji_raster(&self, id: u32) -> Result<Vec<u8>, String> {
+        self.font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .emoji_raster(id)
     }
     pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
         let a = self

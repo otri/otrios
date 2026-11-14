@@ -17,6 +17,8 @@ void ot_get_info(ot_display *d,ot_info *info);
  * these synchronous calls. C validates dimensions, ranges and owned allocations. */
 int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats);
 int ot_set_font(ot_display *d,uint32_t cw,uint32_t ch,const float *curves,size_t curve_floats,uint32_t bw,uint32_t bh,const uint8_t *bands,size_t band_bytes);
+typedef int (*ot_emoji_rasterizer)(void *context,uint32_t id,uint8_t *alpha,size_t bytes);
+void ot_set_emoji_rasterizer(ot_display *d,ot_emoji_rasterizer rasterize,void *context);
 int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floats,const uint32_t *draws,size_t draw_words);
 int ot_linear_scene(ot_display *d);
 void ot_text_stats(ot_display *d,uint64_t *stats);

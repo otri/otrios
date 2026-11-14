@@ -2,7 +2,7 @@
 // Host ordering/lifetime tests. Actual shader pixels require browser/native probes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SceneRenderer,linearToSrgb,srgbToLinear} from '../web/shared/gpu-scene.mjs';
+import {EmojiAtlas,SceneRenderer,linearToSrgb,srgbToLinear} from '../web/shared/gpu-scene.mjs';
 function device(){
   const calls=[];let id=0,framebuffer=null,viewport=[0,0,1280,800];
   const methods={
@@ -39,6 +39,31 @@ function frame(phase=0,color=[1,1,1,1]){
   for(const [i,x,y] of [[0,10+phase,10],[1,20+phase,10],[2,10+phase,20],[3,20+phase,20]])glyphVertices.set([x,y,i%2,Math.floor(i/2),...color,8,8,0,0,0,0,7,7],i*16);
   return {vertices:new Float32Array(36),glyphVertices,draws:new Uint32Array([0,0,3,1,0,4,0,3,3])};
 }
+test('emoji pages populate on demand, deduplicate, and recycle without retained UVs',()=>{
+  const {gl,calls}=device(),decoded=[],pixels=new Uint8Array(64*64);pixels[0]=128;
+  const atlas=new EmojiAtlas(gl,id=>{decoded.push(id);return pixels;});
+  assert.equal(atlas.pages.length,0);assert.equal(atlas.stats.bytes,0);
+  const first=atlas.get(0);assert.equal(atlas.get(0),first);assert.deepEqual(decoded,[0]);
+  const upload=calls.find(c=>c[0]==='texSubImage2D').at(-1),offset=2*68+2;
+  assert.equal(upload.length,68*68);assert.equal(upload[offset],128);assert.equal(upload[0],0);
+  assert.equal(calls.find(c=>c[0]==='texSubImage2D')[7],gl.ALPHA);
+  for(let id=1;id<atlas.capacity;id++)atlas.get(id);
+  assert.equal(atlas.pages.length,4);assert.equal(atlas.stats.bytes,4*1024*1024);
+  assert.deepEqual(atlas.get(atlas.capacity),first);assert.equal(atlas.entries.has(0),false);assert.equal(atlas.stats.evictions,1);
+  atlas.dispose();assert.equal(atlas.stats.bytes,0);
+
+  const renderer=new SceneRenderer(gl),layer=renderer.createLayer();let rasterCalls=0;
+  renderer.setFont({...packet(),emojiRaster:()=>{rasterCalls++;return pixels;},emojiTileSize:64});
+  const f=frame();for(let i=0;i<4;i++){f.glyphVertices[i*16+12]=42;f.glyphVertices[i*16+14]=-1;}
+  const original=f.glyphVertices.slice();layer.setFrame(f);renderer.prepare([layer]);
+  assert.equal(rasterCalls,0,'preparing retained text does not decode hidden emoji');
+  calls.length=0;renderer.beginFrame();layer.draw();renderer.endFrame();layer.draw();
+  assert.equal(rasterCalls,1);assert.equal(renderer.cacheStats.misses,0,'emoji masks never enter the analytic cache');
+  assert.deepEqual(layer.glyphVertices,original,'atlas addresses remain draw-local');
+  const scratch=calls.find(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array&&c[2][14]===-1)?.[2];
+  assert(scratch);assert.equal(scratch[15],0);assert.equal(scratch[12],2.5/1024);assert.equal(scratch[8],63/1024);
+  renderer.dispose();
+});
 test('a new retained chunk does not repack or upload prepared neighbors',()=>{
   const {gl,calls}=device(),renderer=new SceneRenderer(gl),a=renderer.createLayer(),b=renderer.createLayer();renderer.setFont(packet());
   a.setFrame(frame());renderer.prepare([a]);const prepared=a.preparedDraws;

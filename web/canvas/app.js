@@ -8,7 +8,7 @@ import {AppTransfers} from './app-transfers.mjs';
 import {TextInputs} from './text-input.mjs';
 import {PointerSamples,sampleTime} from './touch-input.mjs';
 import {layoutViewport,chatViewport,pointerPosition,semanticBounds,viewportRequestNeeded} from './viewport.mjs';
-import {loadFontResource} from './font-resource.mjs';
+import {loadFontResource,loadEmojiResource} from './font-resource.mjs';
 import {loadAppRelease} from './app-catalog.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
 const timingToolsReady=new URL(location.href).searchParams.get('timings')==='1'?import('./navigation-timings.mjs'):null;
@@ -61,11 +61,11 @@ try{
     navigator.serviceWorker.addEventListener('message',({data})=>{if(data?.type==='artifact-cache-status'){revision.dataset.cacheState=data.enabled?'ready':'unavailable';if(data.enabled){revision.dataset.cacheBytes=String(data.bytes);revision.dataset.cacheLimit=String(data.limit);revision.dataset.cacheEntries=String(data.count);}}});
     navigator.serviceWorker.register(new URL('./artifact-cache-worker.js',import.meta.url),{type:'module',scope:'/'}).then(()=>navigator.serviceWorker.ready).then(reg=>reg.active?.postMessage({type:'artifact-cache-status'})).catch(e=>{revision.dataset.cacheState='unavailable';console.warn('Artifact cache unavailable',e);});
   }else revision.dataset.cacheState='unsupported';
-  const [wasmModule,fontResource,appRelease]=await Promise.all([
+  const [wasmModule,fontResource,appRelease,emojiResource]=await Promise.all([
     WebAssembly.compileStreaming(fetch(new URL('./pkg/otrios_dashboard_bg.wasm',import.meta.url))).then(module=>{timings?.mark('wasmCompiled');return module;}),
-    loadFontResource(import.meta.url).then(font=>{timings?.mark('fontLoaded');return font;}),loadAppRelease(import.meta.url).then(release=>{timings?.mark('catalogAdmitted');return release;}),
+    loadFontResource(import.meta.url).then(font=>{timings?.mark('fontLoaded');return font;}),loadAppRelease(import.meta.url).then(release=>{timings?.mark('catalogAdmitted');return release;}),loadEmojiResource(import.meta.url),
   ]);
-  await init({module_or_path:wasmModule});const presenter=new CanvasPresentation();presenter.set_font(fontResource.bytes,fontResource.hash);timings?.mark('presenterReady');
+  await init({module_or_path:wasmModule});const presenter=new CanvasPresentation();presenter.set_emoji_resource(emojiResource.bytes);presenter.set_font(fontResource.bytes,fontResource.hash);timings?.mark('presenterReady');
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let desiredViewport=layoutViewport(innerWidth,innerHeight);
   let model=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
@@ -79,7 +79,7 @@ try{
   function createGraphics(){
     renderer=new SceneRenderer(gl,{stableTextQuads:query.get('stable-quads')==='1',atlasScale:query.has('font-probe')?0:2,linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'});
     staticLayer=renderer.createLayer();motionLayer=renderer.createLayer();hudLayer=renderer.createLayer();documentLayers=new DocumentLayers(renderer);presentationLayers=new PresentationLayers(renderer);
-    renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands()});
+    renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands(),emojiTileSize:64,emojiRaster:id=>presenter.font_emoji_raster(id)});
   }
   const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
   createGraphics();revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';revision.dataset.alpha='premultiplied';

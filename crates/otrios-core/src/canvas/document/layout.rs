@@ -107,9 +107,16 @@ impl Measure {
             .map(|(at, cluster)| {
                 let mut chars = cluster.chars();
                 let first = chars.next().unwrap();
-                let glyph = if cluster.len() == 1 {
+                let single_or_presentation = match chars.next() {
+                    None => true,
+                    Some('\u{fe0e}' | '\u{fe0f}') => chars.next().is_none(),
+                    _ => false,
+                };
+                let glyph = if let Some(index) = self.font.cluster_glyph_index(cluster) {
+                    index as u16
+                } else if cluster.len() == 1 {
                     self.ascii[cluster.as_bytes()[0] as usize]
-                } else if chars.next().is_none() {
+                } else if single_or_presentation {
                     glyphs
                         .binary_search_by_key(&first, |g| g.scalar)
                         .map_or(self.fallback, |n| n as u16)

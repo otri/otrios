@@ -7,6 +7,12 @@
 precision highp float;
 uniform highp sampler2D curveTexture;
 uniform highp sampler2D bandTexture;
+// Independently populated emoji alpha pages. Atlas addresses are resolved at
+// draw time; retained glyph buffers keep the resource-local emoji identity.
+uniform sampler2D emojiPage0;
+uniform sampler2D emojiPage1;
+uniform sampler2D emojiPage2;
+uniform sampler2D emojiPage3;
 uniform vec2 curveSize;
 uniform vec2 bandSize;
 // 1 for direct rendering; atlas oversampling factor for destination-pixel prefiltering.
@@ -83,6 +89,18 @@ vec2 solveVertical(vec4 p12, vec2 p3) {
     return (a.y * t - 2.0 * b.y) * t + p12.y;
 }
 void main() {
+    if (glyphData.z < 0.0) {
+        vec2 uv = glyphData.xy + sampleCoord * banding.xy;
+        vec4 sampleColor;
+        if (glyphData.w < 0.5) sampleColor = texture2D(emojiPage0, uv);
+        else if (glyphData.w < 1.5) sampleColor = texture2D(emojiPage1, uv);
+        else if (glyphData.w < 2.5) sampleColor = texture2D(emojiPage2, uv);
+        else sampleColor = texture2D(emojiPage3, uv);
+        // The vertex shader supplies the authored text tint, already converted
+        // for the selected composition mode and premultiplied by opacity.
+        gl_FragColor = rgba * sampleColor.a;
+        return;
+    }
     vec2 pixelsPerEm = 1.0 / (max(fwidth(sampleCoord) * max(coverageScale, 1.0), vec2(1.0 / 16384.0)) * CURVE_SCALE);
     vec2 bandIndex = clamp(floor(sampleCoord * banding.xy + banding.zw), vec2(0.0), glyphData.zw);
     vec4 horizontal = bandAt(glyphData.xy + vec2(bandIndex.y, 0.0));

@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/hfg-gmuend/openmoji",
+  "version": "17.0.0",
+  "commit": "f9fc506a3f913be9897ab0181d611d4c910a4104",
+  "archive": "https://github.com/hfg-gmuend/openmoji/releases/download/17.0.0/openmoji-72x72-black.zip",
+  "sourceSha256": "b025bc2de99018c1438d6542a94541d537f9c8fd06f88b1d565c667056cbad4e",
+  "license": "CC-BY-SA-4.0",
+  "licenseSha256": "5e436ff8ffbb77d8607220e9bce20c8915d860010feeb6c1ebef5a85688e9b39",
+  "attribution": "OpenMoji – the open-source emoji and icon project. Designed by OpenMoji authors (https://openmoji.org), licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Images were resized and converted to alpha masks."
+}

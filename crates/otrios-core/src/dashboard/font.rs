@@ -59,6 +59,7 @@ pub struct Curve {
 #[derive(Clone, Debug)]
 pub struct Glyph {
     pub scalar: char,
+    pub emoji_id: Option<u32>,
     pub id: u32,
     pub advance: f32,
     /// xmin/ymin/xmax/ymax in font units, including negative side bearings and descenders.
@@ -71,7 +72,13 @@ pub struct Glyph {
     pub band_transform: [f32; 4],
 }
 impl Glyph {
+    pub fn drawable(&self) -> bool {
+        self.curve_count != 0 || self.emoji_id.is_some()
+    }
     pub fn band_data(&self) -> [f32; 4] {
+        if let Some(id) = self.emoji_id {
+            return [id as f32, 0., -1., 0.];
+        }
         [
             f32::from(self.band_offset % TEXTURE_WIDTH as u16),
             f32::from(self.band_offset / TEXTURE_WIDTH as u16),
@@ -229,6 +236,7 @@ impl Font {
             previous = Some(code);
             glyphs.push(Glyph {
                 scalar,
+                emoji_id: None,
                 id,
                 advance,
                 ink_bounds: bounds,
@@ -284,6 +292,20 @@ impl Font {
             return Err("Font license notice is missing".into());
         }
         let atlas = build_atlas(metrics, &mut glyphs, &curves)?;
+        for id in super::emoji::Catalog::shared().ids() {
+            let em = f32::from(metrics.units_per_em);
+            glyphs.push(Glyph {
+                scalar: char::from_u32(0xf0000 + id).unwrap(),
+                emoji_id: Some(id),
+                id: 0x10000 + id,
+                advance: em,
+                ink_bounds: [0., -em * 0.2, em, em * 0.8],
+                curve_start: 0,
+                curve_count: 0,
+                band_offset: 0,
+                band_transform: [0.; 4],
+            });
+        }
         Ok(Self {
             metrics,
             glyphs,
@@ -323,15 +345,47 @@ impl Font {
     pub fn hash(&self) -> &str {
         &self.hash
     }
+    pub fn install_emoji_resource(bytes: Vec<u8>) -> Result<(), String> {
+        super::emoji::Catalog::install(bytes)
+    }
+    pub fn emoji_raster(&self, id: u32) -> Result<Vec<u8>, String> {
+        super::emoji::Catalog::shared().raster(id)
+    }
+    pub fn cluster_glyph_index(&self, value: &str) -> Option<usize> {
+        if value
+            .chars()
+            .all(|c| ('\u{1f3fb}'..='\u{1f3ff}').contains(&c))
+            && !value.is_empty()
+        {
+            return Some(self.glyph_index('\u{fe0f}'));
+        }
+        let (len, id) = super::emoji::Catalog::shared().prefix(value)?;
+        (len == value.len()).then(|| self.glyph_index(char::from_u32(0xf0000 + id).unwrap()))
+    }
+    pub fn text_glyphs<'a>(&'a self, mut value: &'a str) -> impl Iterator<Item = &'a Glyph> + 'a {
+        std::iter::from_fn(move || {
+            let first = value.chars().next()?;
+            let (len, index) = if ('\u{1f3fb}'..='\u{1f3ff}').contains(&first) {
+                (first.len_utf8(), self.glyph_index('\u{fe0f}'))
+            } else if first.is_ascii() && !matches!(first, '#' | '*' | '0'..='9') {
+                (first.len_utf8(), self.glyph_index(first))
+            } else if let Some((len, id)) = super::emoji::Catalog::shared().prefix(value) {
+                (len, self.glyph_index(char::from_u32(0xf0000 + id).unwrap()))
+            } else {
+                (first.len_utf8(), self.glyph_index(first))
+            };
+            value = &value[len..];
+            Some(&self.glyphs[index])
+        })
+    }
     pub fn text_width(&self, value: &str, scale: f32) -> f32 {
-        value.chars().map(|c| self.glyph(c).advance).sum::<f32>() * self.metrics.scale(scale)
+        self.text_glyphs(value).map(|g| g.advance).sum::<f32>() * self.metrics.scale(scale)
     }
     pub fn measure_text(&self, value: &str, scale: f32) -> TextMetrics {
         let mut x = 0.;
         let mut bounds: Option<[f32; 4]> = None;
-        for ch in value.chars() {
-            let g = self.glyph(ch);
-            if g.curve_count != 0 {
+        for g in self.text_glyphs(value) {
+            if g.drawable() {
                 let b = [
                     x + g.ink_bounds[0],
                     g.ink_bounds[1],
@@ -469,13 +523,13 @@ fn build_atlas(metrics: Metrics, glyphs: &mut [Glyph], curves: &[Curve]) -> Resu
 
 /// Check memory-sensitive fields before constructing a decoder. This private resource
 /// format requires an ordinary single zstd frame, known content size and no dictionary.
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-fn check_zstd_header(bytes: &[u8]) -> Result<usize, String> {
+pub(super) fn check_zstd_header(bytes: &[u8]) -> Result<usize, String> {
     let mut r = Reader::new(bytes);
     if r.take(4)? != [0x28, 0xb5, 0x2f, 0xfd] {
         return Err("Invalid font zstd frame magic".into());
@@ -623,7 +677,7 @@ mod tests {
         );
         assert!(a.curves.iter().all(|x| x.is_finite()));
         assert!(a.max_band_curves <= 128);
-        for glyph in f.glyphs() {
+        for glyph in f.glyphs().iter().filter(|g| g.emoji_id.is_none()) {
             for band in 0..16 {
                 let b = (usize::from(glyph.band_offset) + band) * 4;
                 let count = usize::from(a.bands[b]);
@@ -650,7 +704,7 @@ mod tests {
     #[test]
     fn shader_addresses_remain_byte_coordinates_without_large_float_indices() {
         let font = test_font();
-        for glyph in font.glyphs() {
+        for glyph in font.glyphs().iter().filter(|g| g.emoji_id.is_none()) {
             let [x, y, mx, my] = glyph.band_data();
             assert!((0. ..=255.).contains(&x) && (0. ..=255.).contains(&y));
             assert_eq!(x.fract(), 0.);
@@ -678,6 +732,7 @@ mod tests {
         };
         let mut glyphs = [Glyph {
             scalar: 'A',
+            emoji_id: None,
             id: 1,
             advance: 1024.,
             ink_bounds: [0., 0., 1024., 1024.],

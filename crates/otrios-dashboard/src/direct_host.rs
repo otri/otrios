@@ -71,6 +71,8 @@ pub(super) fn run() -> Result<(), String> {
         atlas.band_height,
         &atlas.bands,
     )?;
+    let emoji_font = font.clone();
+    display.set_emoji_rasterizer(move |id| emoji_font.emoji_raster(id));
     let initial = display.info();
     println!(
         "Direct DRM/GBM/EGL/GLES2 {}x{} format={} bits={}/{}/{}/{}",

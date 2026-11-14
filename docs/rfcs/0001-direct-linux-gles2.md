@@ -17,7 +17,7 @@ A named touch device supplies evdev events; retain the accepted calibration matr
 
 Add an Apache-2.0 host/platform crate, `otrios-linux-display`. The Rust API exposes owned display/renderer objects and checked slices/events, without raw pointers. A small C adapter includes the platform's real DRM/GBM/EGL/GLES2/input headers, avoiding handwritten copies of large platform structs. No additional Rust dependency is required for this initial adapter.
 
-This crate alone changes its unsafe lint from workspace `forbid` to crate-default `deny`, allowing unsafe only inside one documented FFI module. Every other crate, including all core runtime code and common host state logic, retains `unsafe_code = "forbid"`. The wrapper owns a non-null opaque adapter pointer, is neither Send nor Sync, and destroys it exactly once. Foreign calls consume Rust buffers synchronously; no foreign code retains a Rust allocation or callback closure.
+This crate alone changes its unsafe lint from workspace `forbid` to crate-default `deny`, allowing unsafe only inside one documented FFI module. Every other crate, including all core runtime code and common host state logic, retains `unsafe_code = "forbid"`. The wrapper owns a non-null opaque adapter pointer, is neither Send nor Sync, and destroys it exactly once. Foreign calls consume Rust buffers synchronously. The sole retained Rust context is the same-thread emoji provider described below; C never owns or frees a Rust allocation.
 
 Required invariants:
 
@@ -27,8 +27,9 @@ Required invariants:
 4. Every locked scanout BO and registered framebuffer has exactly one owner. Keep the currently displayed buffer locked until the replacement's kernel flip completion. Bound waits and handle EINTR; never recycle an uncertain displayed buffer.
 5. Match GBM FourCC, EGL native visual, KMS framebuffer depth/stride and observed colour bits. Fail an unsupported 16-bit request rather than converting silently to 32-bit.
 6. On shutdown/failure, restore or disable this CRTC before freeing scanout buffers, then remove framebuffers, release BOs, destroy GL/EGL objects/surfaces and GBM/device descriptors in dependency order. Restore the console through the existing root service hook.
-7. Read only the configured input descriptor. Validate its axes, handle short/nonblocking reads and cancel on dropped events/device loss. No input payload or Rust pointer is retained across FFI calls.
+7. Read only the configured input descriptor. Validate its axes, handle short/nonblocking reads and cancel on dropped events/device loss. No input payload or input-owner Rust pointer is retained across FFI calls.
 8. Partial initialization uses the same cleanup path. Safe callers cannot call into a destroyed context or send the owner to another thread.
+9. The emoji raster provider is a stable `Box` owned by the safe `Display`. C retains only its borrowed context address and invokes it synchronously during a draw on the creating thread, with one writable 64 × 64 single-channel alpha staging buffer. The wrapper checks the exact length, copies the returned tile and catches panics before they can cross C. Replacing the provider replaces the C context before dropping the old box. `ot_close` never invokes the provider, and runs before the box is dropped. No asynchronous callback, cross-thread invocation or ownership transfer is admitted.
 
 The adapter is host integration, not copied LGPL runtime implementation. Existing shared primitive/CRDT algorithms remain in `otrios-core` under LGPL-3.0-only. Preserve applicable third-party notices for any reused code.
 
@@ -68,3 +69,18 @@ short mutex; no GL/display owner crosses threads. Input collection and dispatch
 must continue while graphics upload or a page flip is blocked. Event overload or
 device failure must be explicit, and mount replacement/revocation must suppress
 stale input rather than directing an old contact into a new UI.
+
+## Dynamic emoji atlas extension (2026-11-14)
+
+Full emoji sequence lookup and bounded tile decoding remain shared LGPL runtime
+operations. The native graphics adapter requests a single-channel alpha tile
+only when a visible emoji draw first needs it. Masks use the authored text tint
+and opacity through the shared text shader. It retains at most four lazily
+allocated 1,024 × 1,024 ALPHA pages (1 MiB each, 4 MiB total). Each page holds
+225 padded tiles. LRU reuse happens immediately before the corresponding draw;
+retained meshes keep stable emoji IDs and local UVs, so reuse cannot leave stale
+atlas addresses in another mesh. A frame may draw more distinct emoji than fit
+simultaneously in the pages. GL ordering preserves earlier draws when a later
+upload reuses a slot. Runtime font parsing and emoji shaping are not copied into
+the platform crate. The safe provider method adds no public raw-pointer API or
+unsafe-lint scope.

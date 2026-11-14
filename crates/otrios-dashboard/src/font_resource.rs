@@ -17,6 +17,10 @@ pub(super) fn load() -> Result<Arc<Font>, String> {
                 .join("../../web/shared/fonts/Roboto-Regular.otq.zst")
         }
     });
+    let emoji_path = path.with_file_name("Emoji.otemo");
+    let emoji_bytes = std::fs::read(&emoji_path)
+        .map_err(|e| format!("Emoji resource {}: {e}", emoji_path.display()))?;
+    Font::install_emoji_resource(emoji_bytes)?;
     let bytes =
         std::fs::read(&path).map_err(|e| format!("Font resource {}: {e}", path.display()))?;
     Font::from_zstd(&bytes, RESOURCE_SHA256).map(Arc::new)
