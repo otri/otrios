@@ -683,7 +683,8 @@ impl Document {
             }
         }
         let _profile = crate::canvas::profiling::span("oib.compiled.miss");
-        let has_styles = self.oib_source_shared()?.styles.is_some();
+        let has_styles = self.oib_source_shared()?.styles.is_some()
+            || super::super::oib::seed(&signed).is_some_and(super::super::oib::styles::has_styles);
         let previous = if has_styles {
             None
         } else {

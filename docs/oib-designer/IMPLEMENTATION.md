@@ -1587,3 +1587,30 @@ Core/dashboard/web-host compilation passed. The focused runtime regression
 (1 test): imported defaults without a local catalog, exact-lock color update with
 stable references, and a document assignment overriding the library default.
 No broad suite was run. Signed publication will perform its normal package checks.
+
+T28 first host build completed (native/Wasm/ARM), source ebfd344. Initial transfer
+failed before activation because the Mac's Tailscale connection was stopped;
+reconnected the existing connection and deployed the already-built release
+b0d150493b8d7a6f213edf400671a7ee818c1fae51c6164a3d2406cb3043ec64.
+Library pack admission rejected spaces in starter-system/contract identifier
+names; corrected to oib.2d and panel.colors. Signed library revision
+3655d1c7cdd3c9205cdb1cddf9bf14af2e2c64c94bf126bbce0d5b1da6af5873
+then deployed in release
+0a0e3cc68f263d9f4e7519fa4090c68ef088b5059bfbe04ea5d9d8f3c55b723d,
+reusing host assets; app-only transfer was 163840 bytes.
+
+The first fresh reset still bootstrapped the previous cached admission. The ARM
+client rejected its incompatible export contract. Restarted the authority against
+the installed catalog and repeated authenticated Designer DeleteData(remove=false),
+registry generation80. Fresh mounted ARM client then resolved the new library;
+other apps were unchanged and no old data was migrated. Restarted the native
+client to clear its old catalog/admission for this one-time breaking cutover.
+
+Live selection of SettingsPanel showed oib.2d / panel.primary and the library-owned
+background variable with no editable properties. Dark style rendered correctly.
+Switching to Light exposed three remaining local-only style gates in definition
+preview invalidation and retained-paint eligibility. Fixed their shared presence
+query to include imported catalogs. Extended the same focused regression to actual
+mounted cached Dark→Light→Dark compilation; rerun passed (1 test). This observed
+failure justifies rebuilding the corrected hosts and repeating only that mode
+journey. Final deployment evidence follows after activation.

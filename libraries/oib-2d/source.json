@@ -24,24 +24,42 @@
               },
               "system": 1
             },
-            "name": "OIB 2D",
+            "name": "oib.2d",
             "variables": [
               {
                 "id": 1,
                 "name": "panel_background",
                 "availability": "Active",
                 "values": {
-                  "light": [52, 211, 153, 255],
-                  "dark": [24, 128, 96, 255]
+                  "light": [
+                    52,
+                    211,
+                    153,
+                    255
+                  ],
+                  "dark": [
+                    24,
+                    128,
+                    96,
+                    255
+                  ]
                 }
               }
             ],
             "contracts": [
               {
                 "id": 1,
-                "name": "Panel colors",
-                "classes": [4],
-                "fields": [{"id": 1, "name": "Background", "domain": "Body"}]
+                "name": "panel.colors",
+                "classes": [
+                  4
+                ],
+                "fields": [
+                  {
+                    "id": 1,
+                    "name": "background",
+                    "domain": "Body"
+                  }
+                ]
               }
             ],
             "styles": [
@@ -89,7 +107,16 @@
             "style": 1
           },
           "fields": [
-            {"field": 1, "targets": [{"references": [], "node": 1, "property": 1}]}
+            {
+              "field": 1,
+              "targets": [
+                {
+                  "references": [],
+                  "node": 1,
+                  "property": 1
+                }
+              ]
+            }
           ]
         }
       ]

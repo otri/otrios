@@ -52,8 +52,11 @@ within its existing authorization and bounded atomic edit model. Document
 references cannot reach another Space or ambient host data. No global registry
 of names is searched at runtime.
 
-Each reference is `(owner, stable_id)`, where owner is a resolved exact signed
-library identity or a document-local namespace. Labels such as `button.primary`
+Each stored reference is `(owner, system_id, stable_id)`, where owner is the
+stable publisher-qualified LibraryId or a document-local namespace. Exact signed
+library revisions are selected separately by verified import locks. A package
+never embeds its own revision in these references: that would create a circular
+content hash. Labels such as `button.primary`
 and `action_background` are display names; they are never reference keys.
 Renaming does not change a stable ID. Imported IDs cannot be shadowed by local
 names. A fork receives a new owner/identity, with explicit remapping of references.

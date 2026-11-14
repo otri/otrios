@@ -798,6 +798,54 @@ fn imported_style_values_update_under_stable_namespace_and_document_override() {
             .value,
         Some(Value::Color([50, 60, 70, 255]))
     );
+    // Exercise the mounted compilation cache with no document-local catalog.
+    // A mode-only refresh must rebuild library paint instead of reusing Dark.
+    assert!(seed.graph.as_ref().unwrap().styles.is_none());
+    let mut mounted =
+        crate::canvas::StateAdapter::for_ui(&ui, "oib:imported-style-cache", &[], [41; 16])
+            .unwrap();
+    fn color_count(node: &otrios_interfaces::layout::TemplateNode, expected: [u8; 4]) -> usize {
+        use otrios_interfaces::layout::{Expr, Shape};
+        let color = match &node.shape {
+            Shape::Text { color, .. }
+            | Shape::Superellipse { color, .. }
+            | Shape::Circle { color } => Some(color),
+            _ => None,
+        };
+        usize::from(matches!(color, Some(Expr::Literal(Value::Color(color))) if *color == expected))
+            + node
+                .children
+                .iter()
+                .map(|child| color_count(child, expected))
+                .sum::<usize>()
+    }
+    for (mode, expected, excluded) in [
+        (Mode::Dark, [50, 60, 70, 255], None),
+        (Mode::Light, [240, 240, 240, 255], Some([50, 60, 70, 255])),
+        (Mode::Dark, [50, 60, 70, 255], None),
+    ] {
+        mounted.set_oib_style_mode(mode);
+        let (_, layout) = mounted.oib_compiled(None).unwrap();
+        let count = |color| {
+            layout
+                .blueprint()
+                .templates
+                .iter()
+                .map(|template| color_count(&template.root, color))
+                .sum::<usize>()
+        };
+        assert!(
+            count(expected) > 0,
+            "mounted {mode:?} must contain library style paint"
+        );
+        if let Some(excluded) = excluded {
+            assert_eq!(
+                count(excluded),
+                0,
+                "Light refresh must not retain Dark library paint"
+            );
+        }
+    }
     let mut overridden = seed.clone();
     let mut local = payload;
     let namespace = SystemRef {

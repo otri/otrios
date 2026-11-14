@@ -4554,8 +4554,7 @@ impl Mount {
                 .as_ref()
                 .filter(|previous| {
                     super::oib::seed(&self.ui)
-                        .and_then(|seed| seed.graph.as_ref())
-                        .is_none_or(|graph| graph.styles.is_none())
+                        .is_none_or(|seed| !super::oib::styles::has_styles(seed))
                         && previous.same_structure(&basis)
                 })
                 .map(|previous| {

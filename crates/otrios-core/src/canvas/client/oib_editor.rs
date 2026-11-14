@@ -177,12 +177,8 @@ impl Mount {
     }
     pub(super) fn refresh_definition_presentation(&mut self) -> Result<bool> {
         let definition = self.selected_definition();
-        let has_styles = self
-            .design_doc()
-            .oib_authoring_seed()?
-            .graph
-            .as_ref()
-            .is_some_and(|graph| graph.styles.is_some());
+        let has_styles =
+            super::super::oib::styles::has_styles(&self.design_doc().oib_authoring_seed()?);
         let style_mode = has_styles.then_some(self.design_doc().oib_style_mode());
         let old = self
             .definition_presentation

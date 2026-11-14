@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! RFC 0037 immutable color-style admission and resolution. Not yet a package
-//! capability: source/package activation and editor integration remain gated.
+//! RFC 0037 immutable color-style admission, signed imports and resolution.
 use super::super::{Result, err};
 use otrios_interfaces::oib::{designer::ClassId, styles::*};
 use sha2::{Digest, Sha256};
@@ -14,6 +13,18 @@ mod local;
 pub(crate) use frame::automatic;
 pub(crate) use local::edit_local;
 pub use local::{binding, catalog, color_inputs, local_admitted, resolved_payload};
+
+/// Cheap presence query for mode invalidation and retained-paint eligibility.
+/// Admission and resolution still validate the complete catalog separately.
+pub(crate) fn has_styles(seed: &otrios_interfaces::oib::Seed) -> bool {
+    seed.graph
+        .as_ref()
+        .is_some_and(|graph| graph.styles.is_some())
+        || seed
+            .resolved_libraries
+            .iter()
+            .any(|body| body.graph.styles.is_some())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariableUse {
