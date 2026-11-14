@@ -1700,3 +1700,28 @@ hello/state_available=true with the current release, and remained open for the
 three-second check without errors. This verifies current connectivity, not a claim
 that every reported historical disconnect was caused by deployment. Owned browser
 tab closed after verification. No app data reset or migration occurred.
+
+## Automatic publisher regression — 2026-11-14
+
+The reported presentation-transfer.mjs404 was reproduced against a newly active
+f072237c749575157d026170f51470490196de03128fc8e05e969f5875686ce5 release,
+whose metadata declared protocolv28. Automatic builder logs showed it fetched the
+correct a41b5e1 source but ran the copied runtime/bin/watch-dashboard.py, which
+imported its historical sibling publisher: hardcodedv28 and no presentation-transfer
+or favicon assets. Current Rust/Wasm code was therefore repackaged with obsolete
+metadata and an incomplete web asset closure. This was an automatic publisher
+regression, not evidence that the earlier corrected module was absent from997afd.
+
+Paused the existing launch agent. Added a stable source-checkout launcher and
+installed it at the existing runtime/bin/watch-dashboard.py path. It executes
+config.repo/scripts/watch-dashboard.py; a selected Git revision change re-executes
+that checkout's watcher before building, replacing imported Python tools as well.
+The existing generated source-inbox was exported from the completed feature commit;
+no user checkout or app data was replaced. Python syntax checks and the installed
+launcher's real --help path passed.
+
+Reused existing binaries and repackaged with the current publisher, reproducing
+exactly997afd2705de011a9e363b5277fb417b0563b023df0ecca3bf1d1ff09c8a851a,
+with protocolv39 and complete assets. FRAME/NATIVE activation succeeded. No
+recompilation, data reset or broad test suite. Focused live module and automatic
+builder restart checks follow below.
