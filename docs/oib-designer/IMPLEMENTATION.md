@@ -1725,3 +1725,13 @@ exactly997afd2705de011a9e363b5277fb417b0563b023df0ecca3bf1d1ff09c8a851a,
 with protocolv39 and complete assets. FRAME/NATIVE activation succeeded. No
 recompilation, data reset or broad test suite. Focused live module and automatic
 builder restart checks follow below.
+
+Recovery acceptance: the version-pinned presentation-transfer.mjs returned200,
+text/javascript, 5185 bytes. Live Components loaded997afd with protocolv39, an
+empty error field and Live shared space. Restarted the existing automatic launch
+agent with its source pin advanced from021c899 to pushedf1d78f7: startup logged
+BUILDER_TOOLS from source-inbox/scripts/watch-dashboard.py, fetched the new pin,
+then logged BUILDER_TOOLS again after re-execution. A subsequent fetch/idle cycle
+left997afd active with no rebuild or obsolete publication. Launch agent running;
+configuration points to the same existing generated inbox and service. Owned
+browser tab closed after verification. No data reset or migration.
