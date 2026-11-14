@@ -678,6 +678,85 @@ fn revocation_is_scoped_and_removal_reattach_preserves_data() {
 }
 
 #[test]
+fn public_edit_admits_anonymous_content_but_not_management_or_moderation() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let private_binding = attach(&mut registry, &space);
+    assert_eq!(
+        spaces::authorize(&registry, None, &private_binding, Operation::Read),
+        Err(Error::Denied)
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicEdit,
+        },
+    );
+    let binding = spaces::bind(&registry, None, &space, "notes", &policy().schema).unwrap();
+    for operation in [Operation::Read, Operation::Edit, Operation::Comment] {
+        spaces::authorize_installed(&registry, None, &binding, operation, &policy()).unwrap();
+    }
+    spaces::authorize_chat(
+        &registry,
+        None,
+        &binding,
+        &policy(),
+        &otrios_interfaces::chat::Command::Join { credential: None },
+    )
+    .unwrap();
+    assert_eq!(
+        spaces::authorize(&registry, None, &binding, Operation::Moderate),
+        Err(Error::Denied)
+    );
+    let management = request(
+        &registry,
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::Closed,
+        },
+    );
+    assert_eq!(
+        spaces::apply(&registry, "visitor", &management, Some(&policy())),
+        Err(Error::Denied)
+    );
+    let mut installed = policy();
+    installed.editable = false;
+    assert_eq!(
+        spaces::authorize_installed(&registry, None, &binding, Operation::Edit, &installed),
+        Err(Error::Denied)
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    assert_eq!(
+        spaces::authorize(&registry, None, &binding, Operation::Edit),
+        Err(Error::Denied)
+    );
+    let current = spaces::bind(&registry, None, &space, "notes", &policy().schema).unwrap();
+    assert_eq!(
+        spaces::authorize(&registry, None, &current, Operation::Edit),
+        Err(Error::Denied)
+    );
+    assert_eq!(
+        spaces::authorize_chat(
+            &registry,
+            None,
+            &current,
+            &policy(),
+            &otrios_interfaces::chat::Command::Join { credential: None }
+        ),
+        Err(Error::Denied)
+    );
+}
+
+#[test]
 fn public_comments_are_distinct_from_edits_and_closed_only_apps_block_exposure() {
     let mut r = fixture();
     let space = r.spaces[0].id.clone();

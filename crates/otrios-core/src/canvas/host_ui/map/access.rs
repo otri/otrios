@@ -8,6 +8,7 @@ fn audience(value: Audience) -> &'static str {
         Audience::Closed => "Private",
         Audience::PublicView => "Public · Read only",
         Audience::PublicComment => "Public · Signed-in comments",
+        Audience::PublicEdit => "Public · Anyone can edit",
     }
 }
 pub(super) fn render(
@@ -63,6 +64,7 @@ pub(super) fn render(
                 Audience::Closed,
                 Audience::PublicView,
                 Audience::PublicComment,
+                Audience::PublicEdit,
             ]
             .into_iter()
             .enumerate()
@@ -85,7 +87,7 @@ pub(super) fn render(
             b.flat(
                 "Cancel",
                 "Cancel",
-                [left, top + 292., 100., 56.],
+                [left, top + 356., 100., 56.],
                 HostAction::Pane(Pane::Members),
             );
             None
@@ -97,6 +99,7 @@ pub(super) fn render(
                 Audience::Closed => "Only members will be able to enter.",
                 Audience::PublicView => "Anyone will be able to read this Space.",
                 Audience::PublicComment => "Anyone can read. Signed-in visitors can comment.",
+                Audience::PublicEdit => "Anyone can read and edit this Space without signing in.",
             };
             let mut y = top + 72.;
             for line in caption_lines(notice, width, font) {

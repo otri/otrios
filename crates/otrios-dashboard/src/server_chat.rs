@@ -83,7 +83,7 @@ impl Hub {
             provisions: StdMutex::new((0, 0)),
         }))
     }
-    fn admit_guest(&self) -> bool {
+    pub(super) fn admit_guest(&self) -> bool {
         let Ok(mut window) = self.provisions.lock() else {
             return false;
         };

@@ -30,6 +30,8 @@ pub enum Audience {
     Closed,
     PublicView,
     PublicComment,
+    /// Anonymous collaborative app editing; Space administration stays private.
+    PublicEdit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

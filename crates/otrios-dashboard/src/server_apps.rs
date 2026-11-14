@@ -1144,6 +1144,7 @@ impl Hub {
     ) -> bool {
         scope.space.as_deref() == Some(binding.space.as_str())
             && (operation == otrios_interfaces::spaces::Operation::Read
+                || scope.identity.is_none()
                 || otrios_core::spaces::admit_human_action(
                     scope.identity.as_deref(),
                     &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
@@ -1171,8 +1172,9 @@ impl Hub {
             && self.registry().is_ok_and(|r| {
                 r.spaces.iter().any(|space| {
                     space.id == binding.space
-                        && otrios_core::spaces::role(space, scope.identity.as_deref())
-                            == Some(otrios_interfaces::spaces::Role::Admin)
+                        && (space.audience == otrios_interfaces::spaces::Audience::PublicEdit
+                            || otrios_core::spaces::role(space, scope.identity.as_deref())
+                                == Some(otrios_interfaces::spaces::Role::Admin))
                 })
             })
     }
@@ -1204,11 +1206,18 @@ impl Hub {
                 command,
                 otrios_interfaces::chat::Command::Leave
                     | otrios_interfaces::chat::Command::ReadAsset { .. }
-            ) || otrios_core::spaces::admit_human_action(
-                scope.identity.as_deref(),
-                &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
-            )
-            .is_ok())
+            ) || (scope.identity.is_none()
+                && (self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Edit)
+                    || self.allowed(
+                        scope,
+                        binding,
+                        otrios_interfaces::spaces::Operation::Comment,
+                    )))
+                || otrios_core::spaces::admit_human_action(
+                    scope.identity.as_deref(),
+                    &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+                )
+                .is_ok())
             && self.registry().is_ok_and(|registry| {
                 self.app_policy(&binding.app).is_ok_and(|policy| {
                     otrios_core::spaces::authorize_chat(

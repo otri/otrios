@@ -220,6 +220,11 @@ async fn worker(
                         let identity = scope.identity.clone();
                         let result = if !permitted {
                             Err("This Space does not permit that chat action".into())
+                        } else if identity.is_none()
+                            && matches!(command, wire::Command::Join { credential: None })
+                            && !hub.chat.admit_guest()
+                        {
+                            Err("Guest provisioning rate limit".into())
                         } else if matches!(command, wire::Command::Publish { .. }) {
                             authority
                                 .publish_chat(&scope, &active, &hub, &command, time)
@@ -248,13 +253,15 @@ async fn worker(
                                 }
                                 let mut events = room.set_admin(id, moderate);
                                 events.extend(match command {
-                                    wire::Command::Join { credential: None } => room
-                                        .join_admitted(
-                                            id,
-                                            identity.as_deref().ok_or("Sign in first")?,
-                                            moderate,
-                                            time,
-                                        )?,
+                                    wire::Command::Join { credential: None } => {
+                                        if let Some(identity) = identity.as_deref() {
+                                            room.join_admitted(id, identity, moderate, time)?
+                                        } else {
+                                            // The current Space Edit/Comment grant admitted
+                                            // this temporary, non-moderating guest already.
+                                            room.join(id, None, false, time, false)?
+                                        }
+                                    }
                                     wire::Command::Join { .. }
                                     | wire::Command::Authenticate { .. }
                                     | wire::Command::SignOut => {

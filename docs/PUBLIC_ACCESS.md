@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Public demos and private Monitoring
 
-`https://otrios.otri.ca` serves the public launcher and signed code. Since the
-2026-11-01 [Spaces migration](SPACES.md), Brass Relay allows anonymous reading
-and signed-in visitor comments. Household's shared demo apps and Operations'
-Monitoring require explicit membership. The Frame is a Household Member and can
-visit public Brass Relay; it has no Operations membership. Navigation, editing
-focus and animation phase remain local.
+`https://otrios.otri.ca` serves the public launcher and signed code. Public Space
+uses the explicit Public edit audience: anonymous visitors can read and edit its
+editable experiments and use temporary guest profiles in Brass Relay. Operations'
+Monitoring remains closed to nonmembers. Public view and Public comment retain
+their narrower permissions; Public comment still requires sign-in to comment.
+Navigation, editing focus and animation phase remain local.
 
 Navigation entries serve app-specific page titles and Open Graph metadata in
 the initial HTML. Home uses `OTriOS`; `/brass-relay` uses the browser title
@@ -53,8 +53,10 @@ signed code and release negotiation available. A whole-process crash affects bot
 The public session requires an exact allowed browser Origin and has separate
 peer, byte and rate limits. Its v1 hello must finish before binary state is
 accepted. Anonymous clients can mount only public Space app UI/state. State operations
-are validated server-side; layout, schema and arbitrary fields cannot be written
-by public controls. Monitoring UI/behavior/state are delivered only through an
+are validated server-side. Public edit grants the app's declared editable values
+and bounded OIB authoring; it grants neither Space administration, moderation,
+host-code publication nor arbitrary schema changes. Read-only app policy remains
+read-only even in Public edit. Monitoring UI/behavior/state are delivered only through an
 authorized mount. Private bytes under `authority/bundles/` (or legacy
 `authority/apps/`) have no static public
 route, despite residing beside public assets in the single signed local store.

@@ -1735,3 +1735,31 @@ then logged BUILDER_TOOLS again after re-execution. A subsequent fetch/idle cycl
 left997afd active with no rebuild or obsolete publication. Launch agent running;
 configuration points to the same existing generated inbox and service. Owned
 browser tab closed after verification. No data reset or migration.
+
+## Public Space experiments and anonymous editing — 2026-11-14
+
+User explicitly authorized moving every experiment into Public Space and granting
+anonymous read/write there. Added explicit PublicEdit audience instead of widening
+PublicComment. Anonymous edit/comment grants still require the installed app's
+editable/comments policy; read-only apps stay read-only. OIB authoring follows the
+scoped Edit grant in PublicEdit. Space administration, moderation, private apps,
+service-principal restrictions and code publication remain separate. Anonymous
+Brass Relay Join uses the existing bounded temporary guest model and provisioning
+rate limit, without an account or globally authenticated identity. Audience changes
+revoke stale grants. Access UI includes Public · Anyone can edit. Session protocol
+v40 carries the new audience variant; release-control v1 remains unchanged.
+
+Roles: public_edit_authorization implemented backend/grants and one focused
+invariant; Terra public_space_move_inventory identified the existing move workflow;
+parent owns access UI, protocol, deployment and live operations. The focused
+public_edit_admits_anonymous_content_but_not_management_or_moderation test passed
+(1 test); no broad suite ran.
+
+Authenticated, generation-checked Move(AppAndData) operations moved test-playground,
+component-playground, layout-lab, input-lab, animation-lab, three-d-lab,
+layout-document, layout-text-scroll, live-ui and oib-designer from Experiments
+867c0556be77ad7e67fe67f8ec59a598 into Public Space
+09d26fb0578ba377c51d05a8bd3852fd. Durable receipts advanced registry81 through90.
+Source has no attached apps; destination has those ten plus Brass Relay. Operations'
+Monitoring was not selected or moved. No app-data reset was used. New permission
+activation and anonymous acceptance follow after deployment.

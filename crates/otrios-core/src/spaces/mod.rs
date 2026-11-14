@@ -647,10 +647,12 @@ pub fn authorize(
     let member = role(s, identity).is_some();
     let allowed = match operation {
         Operation::Read => visible(s, identity),
-        Operation::Edit => member && a.policy.editable,
+        Operation::Edit => (member || s.audience == Audience::PublicEdit) && a.policy.editable,
         Operation::Comment => {
             a.policy.comments
-                && (member || (identity.is_some() && s.audience == Audience::PublicComment))
+                && (member
+                    || s.audience == Audience::PublicEdit
+                    || (identity.is_some() && s.audience == Audience::PublicComment))
         }
         Operation::Moderate => member && a.policy.comments,
     };

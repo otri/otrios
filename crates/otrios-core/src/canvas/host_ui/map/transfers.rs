@@ -48,6 +48,7 @@ fn audience(value: Audience) -> &'static str {
         Audience::Closed => "Closed",
         Audience::PublicView => "Public view",
         Audience::PublicComment => "Public view and comment",
+        Audience::PublicEdit => "Public · Anyone can edit",
     }
 }
 pub(super) fn render(

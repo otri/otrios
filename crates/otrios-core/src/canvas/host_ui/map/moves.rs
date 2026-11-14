@@ -86,6 +86,7 @@ pub(super) fn render(
         Audience::Closed => "Private",
         Audience::PublicView => "Public · read only",
         Audience::PublicComment => "Public · signed-in comments",
+        Audience::PublicEdit => "Public · Anyone can edit",
     };
     let mut y = top + 64.;
     for line in caption_lines(

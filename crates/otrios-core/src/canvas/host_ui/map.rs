@@ -872,6 +872,9 @@ pub(super) fn render(
                         otrios_interfaces::spaces::Audience::PublicComment => {
                             "Public · Signed-in comments"
                         }
+                        otrios_interfaces::spaces::Audience::PublicEdit => {
+                            "Public · Anyone can edit"
+                        }
                     },
                     [left, top + palette_shift + 260., width, 40.],
                 );

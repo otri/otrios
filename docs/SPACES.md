@@ -622,15 +622,16 @@ their earlier mount cannot reactivate. Older registry members default to interva
 zero on recovery; live bindings are RAM-only and always renewed after restart.
 
 Read, Edit, Comment and Moderate are distinct runtime operations. Public read
-does not imply editing. Visitor comments require a verified identity and public
-comment policy; moderation requires membership. An app can disallow editing or
+does not imply editing. Public comment visitor comments require a verified identity. Public edit explicitly
+allows anonymous app edits and temporary guest comments; moderation still requires
+membership. An app can disallow editing or
 comments. An attached closed-only app prevents a public audience, and a public
 Space rejects attachment of a closed-only app.
 
 ## Public audiences and comments
 
-An Admin chooses Closed, Public view, or Public view & comment in Apps & Data /
-Sharing. Public choices require an explicit confirmation naming the Space and
+An Admin chooses Private, Public read only, Public signed-in comments, or Public
+anyone can edit in People & access. Public choices require an explicit confirmation naming the Space and
 explaining that every attached app's content is included. Current closed-only
 code (including Monitoring) blocks public settings even if retained policy metadata
 predates that code. An explicit audience change adopts compatible installed app
@@ -641,7 +642,10 @@ The fixed Chat presentation declares separate comment operations. Read-only view
 receive the first transcript and bounded live windows without creating a profile,
 presence or writable document session. Signed-in visitors may join/post and manage
 their own app-local nickname/avatar/draft when public comments are enabled. These
-commands cannot edit the app document or grant moderation. Members moderate where
+commands cannot edit the app document or grant moderation. Public edit separately
+grants ordinary app editing (including OIB authoring) where the installed app
+allows it, and anonymous chat Join uses the existing bounded temporary-guest
+model. It does not create an account or grant membership. Members moderate where
 supported; guest credentials and legacy app authentication cannot elevate managed
 participants. Configured service tokens cannot act as human commenters.
 
