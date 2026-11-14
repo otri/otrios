@@ -176,6 +176,10 @@ impl Mount {
         }
     }
     pub(super) fn refresh_definition_presentation(&mut self) -> Result<bool> {
+        // Ordinary apps have no OIB authoring subtree or definition preview.
+        if super::super::oib::seed(&self.ui).is_none() {
+            return Ok(false);
+        }
         let definition = self.selected_definition();
         let has_styles =
             super::super::oib::styles::has_styles(&self.design_doc().oib_authoring_seed()?);

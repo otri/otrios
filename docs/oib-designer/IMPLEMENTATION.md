@@ -1648,3 +1648,17 @@ property override precedence, compatible appearance updates versus changed expor
 contracts, imported read-only Designer inspection/selection, and fresh-data live
 cutover. Full state-recipe/focus/subtree-mode/per-instance-style authoring and the
 larger Designer control-matrix qualification remain outside this priority goal.
+
+## T28 follow-up — ordinary-app Merkle Missing
+
+User reported Test Playground → Components displaying `Merkle Missing` after T28.
+Reproduced on the live browser. The new style-presence query in
+refresh_definition_presentation unconditionally read oib_authoring_seed even for
+ordinary apps, which have no OIB subtree. Added an early return for non-OIB UI;
+OIB imported/local style invalidation remains unchanged. No state or wire format
+change, no data reset.
+
+Reused the existing `wasm_reducer_and_declarative_app_are_qualified_at_extremes`
+regression: failed with Merkle Missing before the fix, passed after (1 test).
+This covers ordinary Components, Layouts and Home event/scene refresh. No new
+suite or broad checks. Deployment/live confirmation follows after activation.
