@@ -1877,3 +1877,12 @@ only. Extended the existing send/retry regression to verify a live Draft is emit
 before Send; the focused test passed (1 test), preserving pending retry identity.
 No broad browser campaign or test messages to the live room. Deployment and the
 read-only live control/layout acceptance follow below.
+
+Live-only sourcec2c707b built and deployed successfully as
+2d3b2d5eebc4887844c2140fbae2e90da390fb762b7176523e778858512bca5a.
+FRAME/NATIVE applied; automatic builder restored pinned to the source. The live
+Brass Relay page loaded that release with Live shared space and an empty error
+field. Neither private/live mode control remained; Message composer and Send were
+present. At CSS1536×960 the composer width was928.8px and the gap to Send14.4px,
+matching the expanded full-row layout. No draft text or message was posted; owned
+browser tab closed. Existing browser fixture campaigns were updated but not run.
