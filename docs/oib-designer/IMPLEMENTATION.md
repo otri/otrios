@@ -1862,3 +1862,18 @@ Temporary diagnostic wrapper was restored and the owned browser tab closed.
 Only the existing bounded font-atlas regression, the focused cache-footprint
 regression, necessary builds and this one live high-DPI check were used. Color
 emoji and joined-sequence shaping remain outside the scalar fallback coverage.
+
+## Brass Relay live-only drafting — 2026-11-14
+
+User requested removing the Live/Private toggle and all support for private-only
+composition. Removed the local private flag/default, toggle action and rendering,
+and the private-mode draft suppression branch. Expanded composer width into the
+freed90logical units. Ordinary drafts are always shared through the existing lease
+and renewal protocol; command text and intermediate IME composition retain their
+existing input semantics. No state/wire schema change or data migration.
+
+Updated the current Brass Relay guide and browser fixtures to use live drafting
+only. Extended the existing send/retry regression to verify a live Draft is emitted
+before Send; the focused test passed (1 test), preserving pending retry identity.
+No broad browser campaign or test messages to the live room. Deployment and the
+read-only live control/layout acceptance follow below.

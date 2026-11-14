@@ -781,7 +781,7 @@ impl Client {
         p.button(19, [36., cy, 40., input_h], "Commands", "/", false);
         p.button(
             1,
-            [84., cy, page_w - 260., input_h],
+            [84., cy, self.input_width() + 24., input_h],
             "Message composer",
             "",
             false,
@@ -839,17 +839,6 @@ impl Client {
             Rect::new(12., 12., self.input_width(), input_h - 24.),
             rows,
         ));
-        p.button(
-            5,
-            [page_w - 164., cy, 82., input_h],
-            if self.private {
-                "Private draft: enable live drafts"
-            } else {
-                "Live drafts: compose privately"
-            },
-            if self.private { "Private" } else { "Live" },
-            false,
-        );
         p.button(
             2,
             [page_w - 74., cy, 94., input_h],

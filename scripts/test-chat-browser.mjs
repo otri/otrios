@@ -126,9 +126,8 @@ try{
   await wait(b,"JSON.parse(document.querySelector('#revision').dataset.chat).drafts===1");
   assert.equal(await evaluate(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify(draft)})`),false,'draft is not sent history');
   await screenshot(b,'live-draft-portrait');console.log('draft visible');
-  await control(a,'Live drafts: compose privately');
-  await wait(b,"JSON.parse(document.querySelector('#revision').dataset.chat).drafts===0");
   await press(a,'Enter');
+  await wait(b,"JSON.parse(document.querySelector('#revision').dataset.chat).drafts===0");
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify(draft)})`);
   await wait(a,"JSON.parse(document.querySelector('#revision').dataset.chat).pending===0");
   await dispatch(b,'A dispatch from the other station.');

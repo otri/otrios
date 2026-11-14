@@ -92,7 +92,6 @@ pub struct Client {
     pub(super) avatar_page: u8,
     pub(super) member_page: usize,
     pub(super) selected: Option<Member>,
-    pub(super) private: bool,
     pub(super) effects: u8,
     pub(super) native: bool,
     pub(super) managed: bool,
@@ -176,7 +175,6 @@ impl Default for Client {
             avatar_page: 0,
             member_page: 0,
             selected: None,
-            private: false,
             effects: 2,
             native: false,
             managed: false,
@@ -607,20 +605,19 @@ impl Client {
             })
             .map(Some);
         }
-        let wanted = if self.private
-            || self.compose.text().starts_with('/') && !self.compose.text().starts_with("//")
-        {
-            String::new()
-        } else {
-            let mut result = String::new();
-            for cluster in self.compose.text().graphemes(true).take(256) {
-                if result.len() + cluster.len() > 1024 {
-                    break;
+        let wanted =
+            if self.compose.text().starts_with('/') && !self.compose.text().starts_with("//") {
+                String::new()
+            } else {
+                let mut result = String::new();
+                for cluster in self.compose.text().graphemes(true).take(256) {
+                    if result.len() + cluster.len() > 1024 {
+                        break;
+                    }
+                    result.push_str(cluster);
                 }
-                result.push_str(cluster);
-            }
-            result
-        };
+                result
+            };
         if self.draft_generation != 0
             && ((self.draft_dirty && self.now.saturating_sub(self.draft_at) >= 100)
                 || (wanted.is_empty() && !self.draft_sent.is_empty())
@@ -1118,7 +1115,7 @@ impl Client {
             1 => {
                 self.focus = Some(Focus::Compose);
                 self.queue(Command::ClaimDraft);
-                if !self.disclosed && !self.private {
+                if !self.disclosed {
                     self.say("Live drafts are visible before sending");
                     self.disclosed = true;
                 }
@@ -1129,11 +1126,6 @@ impl Client {
                 self.focus = None;
             }
             4 => self.open_profile(),
-            5 => {
-                self.private = !self.private;
-                self.draft_dirty = true;
-                self.notice.clear();
-            }
             6 => {
                 self.sharing.clear_preview();
                 self.panel = Panel::None;
@@ -1303,7 +1295,7 @@ impl Client {
         96.
     }
     pub(super) fn input_width(&self) -> f32 {
-        self.page_width() - 284.
+        self.page_width() - 194.
     }
     pub(super) fn compose_y(&self) -> f32 {
         self.viewport[1] - 28. - self.input_height()
@@ -1545,12 +1537,16 @@ mod tests {
             epoch: 1,
             wall: 10 * 600_000,
             online: true,
+            draft_generation: 1,
+            now: 100,
             ..Client::default()
         };
         client.focus = Some(Focus::Compose);
         client
             .edit(&Edit::Commit("First line\nsecond line".into()))
             .unwrap();
+        let draft = decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap();
+        assert!(matches!(draft, Command::Draft {text,..} if text == "First line\nsecond line"));
         client.send().unwrap();
         let sent = decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap();
         assert!(matches!(&sent, Command::Send {epoch:10,text,..} if text.contains('\n')));

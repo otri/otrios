@@ -19,13 +19,12 @@ History pages resolve the current profile, including after an authority restart;
 the journal retains the original sender snapshot. If the retained guest identity
 has expired, that snapshot is the fallback. Message text remains as written.
 
-The composer stays compact. **Live** shares a temporary draft before sending;
-the first focus discloses that behavior. Switch to **Private** to clear the shared
-draft and compose privately. Sent messages are separate durable records. Remote
+The composer always shares a temporary live draft before sending; the first
+focus discloses that behavior. Sent messages are separate durable records. Remote
 drafts expire after three seconds without renewal, and disappear on disconnect,
 leaving the room or removal. Slash commands are never shared as live drafts.
 Typing sparks and steam have a bounded pool; reduced-motion preferences disable
-them. Privacy toggles add no confirmation paragraph.
+them.
 
 Drag the transcript to read older dispatches, with momentum on release. New
 messages preserve your reading position; the new-dispatch control returns to the

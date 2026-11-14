@@ -64,7 +64,7 @@ try {
   }
   const older=await snapshot(a);assert(older.chat.first_sequence<initial.chat.first_sequence-16,'actual transcript dragging must acquire older coverage');assert(older.chat.last_sequence<records,'older view must be anchored away from the tail');await capture(a,'older');
   const b=await page();await wait(b,`JSON.parse(document.querySelector('#revision').dataset.chat).last_sequence===${records}`);await snapshot(b);
-  await click(b,'Live drafts: compose privately');await click(b,'Message composer');
+  await click(b,'Message composer');
   canary='OUTSIDE_ANCHORED_VIEW_'+Date.now();const before=await snapshot(a),beforeBytes=received.get(a+':4').bytes;
   await call('Page.bringToFront',{},b);await call('Input.insertText',{text:canary},b);await click(b,'Send message');
   await wait(b,`JSON.parse(document.querySelector('#revision').dataset.chat).pending===0&&JSON.parse(document.querySelector('#revision').dataset.chat).last_sequence===${records+1}`);
