@@ -60,16 +60,19 @@ function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false,
   const emY=declaredEm||Math.abs((q[33]-q[1])/dv);
   const sx=Math.round((retained?emY*scaleX:Math.abs((q[16]-q[0])*scaleX/du))*256)/256,sy=Math.round((retained?emY*scaleY:Math.abs((q[33]-q[1])*scaleY/dv))*256)/256;
   if(sx<=0||sy<=0||q[17]!==q[1]||q[32]!==q[0])return null;
-  const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],pad=guard*sampling;
-  const width=Math.ceil((q[14]+1)/q[8]*sx*sampling+2*pad),height=Math.ceil((q[15]+1)/q[9]*sy*sampling+2*pad);
-  if(!Number.isFinite(width)||!Number.isFinite(height)||width>ATLAS_SIZE||height>ATLAS_SIZE||width<=0||height<=0)return null;
-  if(guard>2){
-    // Include the prefilter support, the bilinear footprint and (for retained
-    // quads) at most half a pixel of vertex correction. Outside this clear
-    // border use analytic fallback instead of sampling a neighboring tile.
-    const mx=.5+(retained?.5*sampling*sx/(emY*scaleX):0),my=.5+(retained?.5*sampling*sy/(emY*scaleY):0),clear=pad-sampling;
-    for(let i=0;i<4;i++){const u=pad+(q[i*16+2]-x0)*sx*sampling,v=pad+(y1-q[i*16+3])*sy*sampling;if(u-mx< -clear||u+mx>width+clear||v-my< -clear||v+my>height+clear)return null;}
+  const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],inkWidth=(q[14]+1)/q[8],inkHeight=(q[15]+1)/q[9];
+  // Glyph quads include logical-space ink padding. At large viewport/DPR
+  // scales it can exceed a fixed destination-pixel guard and sample the next
+  // cache tile. Reserve the complete quad footprint plus bilinear/snap support.
+  const mx=.5+(retained?.5*sampling*sx/(emY*scaleX):0),my=.5+(retained?.5*sampling*sy/(emY*scaleY):0);
+  let pad=guard*sampling;
+  for(let i=0;i<4;i++){
+    const u=q[i*16+2],v=q[i*16+3];
+    pad=Math.max(pad,(x0-u)*sx*sampling+mx,(u-x0-inkWidth)*sx*sampling+mx,(v-y1)*sy*sampling+my,(y1-inkHeight-v)*sy*sampling+my);
   }
+  pad=Math.ceil(pad);
+  const width=Math.ceil(inkWidth*sx*sampling+2*pad),height=Math.ceil(inkHeight*sy*sampling+2*pad);
+  if(!Number.isFinite(width)||!Number.isFinite(height)||width>ATLAS_SIZE||height>ATLAS_SIZE||width<=0||height<=0)return null;
   return {key:[sx,sy,pad,...q.subarray(8,16)].join(','),width,height,offset,sx,sy,x0,y1,pad,sampling};
 }
 function appendRun(runs,kind,first,count,groups,view,source){const n=runs.length;if(n&&runs[n-3]===kind&&runs[n-2]+runs[n-1]===first&&groups.at(-2)===view&&groups.at(-1)+(kind===2?runs[n-1]/6*4:runs[n-1])===source)runs[n-1]+=count;else{runs.push(kind,first,count);groups.push(view,source);}}

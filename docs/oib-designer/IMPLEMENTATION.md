@@ -1795,3 +1795,50 @@ and confirmation behavior are unchanged; no protocol or data changes.
 
 Validation is the necessary host build and one live move-review/cancel journey,
 without moving apps. No new polish tests or broad suite.
+
+Move-choice fix a65af04 deployed as
+00002d699722a987a76d2fb63cfbd7458c2af6c3f6040f23411643e3e0b09971.
+Live keyboard pickup of OIB Designer → Operations opened the actual review;
+a browser image confirmed drawn selected/unselected circles and readable
+Public Space to Operations. Selecting App only updated its explanation; Cancel
+closed the review. No Move confirmation was sent. OIB Designer remained in Public
+Space and Operations contained only Monitoring. Owned browser tab closed.
+
+## Shared emoji coverage and high-resolution cache padding — 2026-11-14
+
+The supplied Brass Relay message contains intact U+1F44D, not a stored replacement
+character. The old 213-glyph Roboto resource used .notdef for unsupported text.
+Added pinned OFL Noto Emoji/Symbols outlines to the existing quadratic resource:
+360 glyph records, including 106 selected emoji plus arrows/common symbols.
+Variation selectors FE0E/FE0F have zero curves/advance. Emoji use authored text
+color; joined families, flags, skin-tone sequences and color emoji remain outside
+this scalar renderer. Full source hashes, notices and coverage are recorded in
+tools/fonts/FALLBACKS.md and assets/fonts/roboto/resource.json. No runtime font
+parser or platform-font dependency is added.
+
+Curve admission now uses the existing two-texels-per-curve 16-bit address limit
+(32768). The generated packet has18254curves and65099band-reference texels, within
+the unchanged65535band-address and128per-band limits. First atlas admission caught
+an incorrect generator estimate (four references/texel instead of one); corrected
+the estimator and selected a coherent bounded repertoire rather than expanding
+texture addressing. Final resourceSHA256:
+5a1dfacef4ab114a6b25c7c9e98a037a54be9d43151f93d73c6f0d6afe60efc2.
+Compressed104278bytes, decoded248164bytes. Extended and ran the existing bounded
+atlas regression: representative emoji/symbol glyphs, zero-width selectors and
+all curve/band references passed (1 test).
+
+A separate pre-existing high-resolution issue was reproduced on live Brass Relay:
+CSS1536×960, DPR2, effective device scale2.4×2.4. Cache occupied only78entries and
+628/1024shelf rows, but all406cached quad filtering footprints crossed their tiles
+(minimum margin−1.3002texels). This is scale-dependent cache bleed, not exhaustion.
+The web/native fix sizes tile padding from the actual quad footprint and bilinear
+support. Deployment and live acceptance follow below.
+
+GPU role glyph_precision_fix added one focused cache-UV regression and ran
+`node --test --test-name-pattern='cached glyph padding contains' scripts/test_gpu_scene.mjs`:
+1 test passed across effective scales1,2,2.4,3. It checks that uploaded cached quad
+UVs and their half-texel filter footprint remain inside their own tile while
+ordinary glyphs still use caching. Web/native cache size and shader remain
+unchanged; native entry reuse also validates current quad containment. Native C
+compilation and live high-resolution rendering are covered by the ensuing host
+build/acceptance. No broad rendering campaign.

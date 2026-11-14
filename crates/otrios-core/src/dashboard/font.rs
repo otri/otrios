@@ -12,7 +12,8 @@ const RECORD: usize = 32;
 const BANDS: usize = 8;
 const TEXTURE_WIDTH: usize = 256;
 const MAX_GLYPHS: usize = 1024;
-const MAX_CURVES: usize = 16384;
+// Each curve occupies two texels addressed by a 16-bit index in the band atlas.
+const MAX_CURVES: usize = TEXTURE_WIDTH * TEXTURE_WIDTH / 2;
 const MAX_BAND_CURVES: usize = 128;
 
 #[derive(Clone, Copy, Debug)]
@@ -595,12 +596,22 @@ mod tests {
         assert!(f.metrics.line_height(3.) > text.ink_bounds[3] - text.ink_bounds[1]);
         assert!(f.glyph('W').advance > 2. * f.glyph('i').advance);
         assert!(f.glyph(' ').curve_count == 0 && f.glyph(' ').advance > 0.);
-        assert_eq!(f.glyph('🦀').id, 0);
+        assert_eq!(f.glyph('\u{10ffff}').id, 0);
         assert!(f.notice.contains("SIL OPEN FONT LICENSE Version 1.1"));
     }
     #[test]
     fn atlas_is_prepared_and_all_band_references_are_bounded() {
         let f = test_font();
+        for ch in "👍😀🙂😂👋🙏❤✅🚀🎉🔥💡●○←↑→↓".chars() {
+            let glyph = f.glyph(ch);
+            assert_eq!(glyph.scalar, ch, "Missing bundled fallback for {ch}");
+            assert!(glyph.id != 0 && glyph.curve_count > 0);
+        }
+        for selector in ['\u{fe0e}', '\u{fe0f}'] {
+            assert_eq!(f.glyph(selector).advance, 0.);
+            assert_eq!(f.glyph(selector).curve_count, 0);
+        }
+        assert_eq!(f.text_width("❤\u{fe0f}", 2.), f.text_width("❤", 2.));
         let a = f.atlas();
         assert_eq!(
             a.curves.len(),

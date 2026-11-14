@@ -88,6 +88,29 @@ test('physical viewport changes rebuild glyph coverage at the new device scale',
   assert.equal(renderer.fitCanvas(canvas,2),false);
 });
 
+test('cached glyph padding contains the filtered quad at high viewport and device scales',()=>{
+  for(const scale of [1,2,2.4,3]){
+    const {gl,calls}=device(),renderer=new SceneRenderer(gl,{width:1280*scale,height:800*scale}),layer=renderer.createLayer();
+    renderer.setLogicalSize(1280,800);renderer.setFont(packet());
+    const f=frame();
+    // Actual glyph quads carry a one-logical-pixel ink margin, not a fixed
+    // physical margin. The footprint must stay inside this glyph's cache tile.
+    for(let i=0;i<4;i++){
+      const right=i%2,bottom=Math.floor(i/2),o=i*16;
+      f.glyphVertices[o]=right?21:9;f.glyphVertices[o+1]=bottom?21:9;
+      f.glyphVertices[o+2]=right?1.1:-.1;f.glyphVertices[o+3]=bottom?1.1:-.1;
+    }
+    layer.setFrame(f);renderer.prepare([layer]);
+    const tile=[...renderer.cache.values()][0];assert(tile,'ordinary glyphs retain caching');
+    const cached=calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array&&c[2].length===48).at(-1)[2];
+    for(let i=0;i<cached.length;i+=8){
+      const u=cached[i+2]*1024-tile.x,v=(1-cached[i+3])*1024-tile.y;
+      assert(u>=.5&&u<=tile.width-.5,`horizontal filtering crosses its tile at scale ${scale}`);
+      assert(v>=.5&&v<=tile.height-.5,`vertical filtering crosses its tile at scale ${scale}`);
+    }
+  }
+});
+
 test('the byte lookup table exactly encodes all possible linear RGBA8 channels',()=>{
   const {gl,calls}=device();new SceneRenderer(gl,{linearLight:true});
   const upload=calls.find(call=>call[0]==='texImage2D'&&call[4]===256&&call[5]===1);

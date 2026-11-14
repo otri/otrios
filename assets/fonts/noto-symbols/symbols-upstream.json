@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "commit": "caa8c83707a5797d62fd02f14301391986f21d75",
+  "fontPath": "ofl/notosanssymbols/NotoSansSymbols[wght].ttf",
+  "sourceSha256": "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7",
+  "licenseSha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0",
+  "license": "OFL-1.1"
+}

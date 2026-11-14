@@ -7,7 +7,7 @@ publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_na
 app_imports=SourceFileLoader('otrios_app_imports',str(pathlib.Path(__file__).with_name('process-app-imports.py'))).load_module()
 
 def inputs(repo):
-    exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt']
+    exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt','assets/fonts/noto-emoji/NotoEmoji.ttf','assets/fonts/noto-emoji/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols2-Regular.ttf','assets/fonts/noto-symbols/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols.ttf','assets/fonts/noto-symbols/Symbols-OFL.txt']
     files=[repo/x for x in exact]
     files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:

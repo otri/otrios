@@ -643,8 +643,27 @@ static int cache_quad_exact(ot_display *d,const float *q,const float *projection
 // Phase-independent, prefiltered coverage: raster once at 2x/3x, with
 // analytic coverage still integrated over one destination pixel. Linear sampling
 // then reconstructs fractional placement without changing the glyph cache key.
+// A cached glyph is reusable only while the complete filtered quad stays in
+// its own tile. Source ink padding scales with the viewport and display ratio.
+static float glyph_padding(const float *q,float sx,float sy,float ss,float base,float margin) {
+    float x0=-q[10]/q[8],y0=-q[11]/q[9],x1=(q[14]+1.f-q[10])/q[8],y1=(q[15]+1.f-q[11])/q[9],pad=base;
+    for(int i=0;i<4;i++) {
+        float u=q[i*16+2],v=q[i*16+3];
+        pad=fmaxf(pad,fmaxf(fmaxf((x0-u)*sx*ss,(u-x1)*sx*ss),fmaxf((y0-v)*sy*ss,(v-y1)*sy*ss))+margin);
+    }
+    return ceilf(pad);
+}
+static int glyph_entry_contains(const struct glyph_entry *entry,const float *q,float margin) {
+    for(int i=0;i<4;i++) {
+        float u=(entry->uv_bias[0]+q[i*16+2]*entry->uv_scale[0])*CACHE_SIZE-entry->x;
+        float v=(entry->uv_bias[1]+q[i*16+3]*entry->uv_scale[1])*CACHE_SIZE-entry->y;
+        if(u<margin || v<margin || u>entry->w-margin || v>entry->h-margin)return 0;
+    }
+    return 1;
+}
 static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex *out,int retained,float declared_em) {
     uint8_t tint[4];
+    float ss=(float)d->atlas_scale,margin=.5f+(retained && d->stable_text?.5f*ss:0.f);
     for(int i=1;i<4;i++)if(memcmp(q+4,q+i*16+4,12*sizeof(float)))return 1;
     float du=q[18]-q[2],dv=q[35]-q[3];
     if(fabsf(du)<1e-8f || fabsf(dv)<1e-8f || q[8]<=0 || q[9]<=0)return 1;
@@ -675,7 +694,7 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     float ux_span=p[0]*dx+p[2]*dy,uy_span=p[1]*dx+p[3]*dy;
     dx=q[32]-q[0];dy=q[33]-q[1];
     float vx_span=p[0]*dx+p[2]*dy,vy_span=p[1]*dx+p[3]*dy;
-    if(entry && !memcmp(entry->key+2,q+8,8*sizeof(float)) &&
+    if(entry && glyph_entry_contains(entry,q,margin) && !memcmp(entry->key+2,q+8,8*sizeof(float)) &&
        (ux_span==0.f || uy_span==0.f) && (vx_span==0.f || vy_span==0.f) &&
        ((ux_span==0.f && vy_span==0.f) || (uy_span==0.f && vx_span==0.f)) &&
        (em>0?(entry->key[0]==target_x && entry->key[1]==target_y):(fabsf(fabsf(ux_span)+fabsf(uy_span)-fabsf(du)*entry->key[0])<=0.001f+fabsf(du)/512.f &&
@@ -700,12 +719,12 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     float sx=(float)(uint32_t)(su*256.f+0.5f)/256.f,sy=(float)(uint32_t)(sv*256.f+0.5f)/256.f;
     if(sx<=0 || sy<=0)return 1;
     float x0=-q[10]/q[8],y0=-q[11]/q[9],x1=(q[14]+1.f-q[10])/q[8],y1=(q[15]+1.f-q[11])/q[9];
-    float ss=(float)d->atlas_scale,pad=(d->stable_text?3.f:2.f)*ss;
+    float pad=glyph_padding(q,sx,sy,ss,(d->stable_text?3.f:2.f)*ss,margin);
     float fw=(x1-x0)*sx*ss+2.f*pad,fh=(y1-y0)*sy*ss+2.f*pad;
     if(!isfinite(fw)||!isfinite(fh)||fw<1||fh<1||fw>CACHE_SIZE-2||fh>CACHE_SIZE-2)return 1;
     if(d->alpha_atlas && (fw>CACHE_SCRATCH_SIZE || fh>CACHE_SCRATCH_SIZE))return 1;
     int w=(int)fw,h=(int)fh;w+=((float)w<fw);h+=((float)h<fh);
-    float key[24]={sx,sy};memcpy(key+2,q+8,8*sizeof(float));
+    float key[24]={sx,sy};memcpy(key+2,q+8,8*sizeof(float));key[10]=pad;
     entry=find_glyph(d,key,w,h);
     if(entry)d->text_hits++;
     else {
@@ -785,7 +804,8 @@ static int mesh_accepts_alpha(ot_display *d,const struct text_mesh *m) {
                 sx=em*(fabsf(p[0])+fabsf(p[1]));sy=em*(fabsf(p[2])+fabsf(p[3]));
             }
             sx=roundf(sx*256.f)/256.f;sy=roundf(sy*256.f)/256.f;
-            float pad=(d->stable_text?3.f:2.f)*(float)d->atlas_scale;
+            float ss=(float)d->atlas_scale,margin=.5f+(m->views && d->stable_text?.5f*ss:0.f);
+            float pad=glyph_padding(q,sx,sy,ss,(d->stable_text?3.f:2.f)*ss,margin);
             float w=fabsf((q[14]+1.f)/q[8])*sx*(float)d->atlas_scale+2.f*pad;
             float h=fabsf((q[15]+1.f)/q[9])*sy*(float)d->atlas_scale+2.f*pad;
             if(w<=CACHE_SIZE-2 && h<=CACHE_SIZE-2 && (w>CACHE_ALPHA_ENTRY_LIMIT || h>CACHE_ALPHA_ENTRY_LIMIT))return 0;
