@@ -1682,3 +1682,21 @@ pin to the current release alongside JS/CSS, and conventional /favicon.ico and
 /favicon.svg URLs serve the active release with explicit MIME admission. Frozen
 builder inputs now include SVG/ICO assets. No wire protocol or app data changes.
 Server compilation passed. Final live icon/connection acceptance follows below.
+
+Favicon release 997afd2705de011a9e363b5277fb417b0563b023df0ecca3bf1d1ff09c8a851a
+activated on Frame/Web. Runtime binaries built from7706c72; release asset admission
+updated in a41b5e1. The first activation correctly rejected the missing explicit
+favicon allowlist entries; added them as optional assets (older releases remain
+admitted), updated the existing publication test fixture, and deployed the already
+built binaries. No repeated compilation or broad test campaign was needed.
+Automatic builder restored pinned to a41b5e1.
+
+Live Components automatically upgraded from the fixed1e6054ab runtime to the final
+release and retained an empty error field / Live shared space. Root favicon.svg
+and favicon.ico plus both version-pinned HTML icon links returned200, respectively
+image/svg+xml (358 bytes) and image/vnd.microsoft.icon (2472 bytes). Browser WSS
+checks for both /session and the selected Space session opened, received compatible
+hello/state_available=true with the current release, and remained open for the
+three-second check without errors. This verifies current connectivity, not a claim
+that every reported historical disconnect was caused by deployment. Owned browser
+tab closed after verification. No app data reset or migration occurred.
