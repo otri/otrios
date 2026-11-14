@@ -173,6 +173,32 @@ impl Builder<'_> {
         );
         self.actions.push(HostAction::ToggleRemoveData);
     }
+    fn choice(&mut self, label: &str, selected: bool, frame: [f32; 4], action: HostAction) {
+        // Native geometry avoids missing radio glyphs in the bundled font.
+        // Decoration has no responder; the whole parent row handles the press.
+        let center = frame[3] / 2.;
+        let mut nodes = vec![
+            a::circle(if selected { INK } else { SOFT }).frame([10., center - 12., 24., 24.]),
+            a::circle(WHITE).frame([12., center - 10., 20., 20.]),
+        ];
+        if selected {
+            nodes.push(a::circle(INK).frame([16., center - 6., 12., 12.]));
+        }
+        let line = self.font.map_or(32., |font| font.metrics().line_height(2.));
+        nodes.push(text(
+            label,
+            [48., (frame[3] - line) / 2., (frame[2] - 56.).max(1.), line],
+            2.,
+        ));
+        self.nodes.push(
+            a::canvas(nodes)
+                .frame(frame)
+                .semantic_label(&short(label, 94))
+                .semantic_checked(selected)
+                .on_press(a::Event::back()),
+        );
+        self.actions.push(action);
+    }
     fn profile(&mut self, avatar: &str, width: f32, font: Option<&crate::dashboard::font::Font>) {
         let (x, y) = font.map_or((19.5, 18.), |font| {
             let [left, bottom, right, top] = font.measure_text(avatar, 2.).ink_bounds;

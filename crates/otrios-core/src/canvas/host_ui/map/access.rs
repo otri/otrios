@@ -69,17 +69,9 @@ pub(super) fn render(
             .into_iter()
             .enumerate()
             {
-                b.flat(
+                b.choice(
                     audience(value),
-                    &format!(
-                        "{}  {}",
-                        if value == draft.audience {
-                            "●"
-                        } else {
-                            "○"
-                        },
-                        audience(value)
-                    ),
+                    value == draft.audience,
                     [left, top + 72. + i as f32 * 64., width, 56.],
                     HostAction::AccessAudience(value),
                 );

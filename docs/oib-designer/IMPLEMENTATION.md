@@ -1782,3 +1782,16 @@ with Message composer and Send enabled; no test message was posted. Anonymous
 /spaces discovery excluded Operations and Monitoring. The owned tabs were closed.
 Only the focused access regression and this small live permission journey ran;
 no broad qualification suite or app-data reset.
+
+## Space move review missing glyphs — 2026-11-14
+
+User screenshot showed replacement boxes for the source/destination arrow and
+three move choices. These were Unicode arrow/radio glyphs in text, not missing
+image downloads. Replaced the radio captions with shared circle geometry (ring
+and selected center), retaining full-row press handlers, captions and checked
+semantics. Reused that control in the access audience picker, which had the same
+unsupported circle glyphs. Direction uses the ordinary word "to". Move operations
+and confirmation behavior are unchanged; no protocol or data changes.
+
+Validation is the necessary host build and one live move-review/cancel journey,
+without moving apps. No new polish tests or broad suite.

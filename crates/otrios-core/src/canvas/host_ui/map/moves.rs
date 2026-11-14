@@ -90,7 +90,7 @@ pub(super) fn render(
     };
     let mut y = top + 64.;
     for line in caption_lines(
-        &format!("{} → {}", source.name, destination.name),
+        &format!("{} to {}", source.name, destination.name),
         width,
         font,
     ) {
@@ -110,12 +110,9 @@ pub(super) fn render(
         &[(MoveMode::DataOnly, "Data only")]
     };
     for (mode, caption) in modes {
-        b.flat(
+        b.choice(
             caption,
-            &format!(
-                "{}  {caption}",
-                if moving.mode == *mode { "●" } else { "○" }
-            ),
+            moving.mode == *mode,
             [left, y, width, 48.],
             HostAction::MoveMode(*mode),
         );
