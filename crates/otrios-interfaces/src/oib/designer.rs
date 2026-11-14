@@ -57,6 +57,8 @@ pub struct ObjectAddress {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
     Style(super::styles::StyleId),
+    ImportedStyle(super::styles::StyleRef),
+    ImportedVariable(super::styles::VariableRef),
     Variable(super::styles::VariableId),
     Document(DocumentId),
     Definition(DefinitionId),

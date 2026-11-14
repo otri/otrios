@@ -241,7 +241,6 @@ fn color_style_exact_owners_rename_retirement_and_reverse_dependencies() {
     let other_ref = SystemRef {
         owner: Owner::Library {
             library: otrios_interfaces::oib::library::LibraryId(format!("{}:base", "a".repeat(64))),
-            revision: [9; 32],
         },
         system: SystemId(1),
     };
@@ -286,14 +285,13 @@ fn color_style_exact_owners_rename_retirement_and_reverse_dependencies() {
         resolve(&admitted, Mode::Dark, StateMask::default(), &[], &[])
     );
     source.systems[1].reference.owner = Owner::Library {
-        library: otrios_interfaces::oib::library::LibraryId(format!("{}:base", "a".repeat(64))),
-        revision: [10; 32],
+        library: otrios_interfaces::oib::library::LibraryId(format!("{}:other", "a".repeat(64))),
     };
     let mut changed_owners = allowed;
     changed_owners.insert(source.systems[1].reference.owner.clone());
     assert!(
         Admitted::new(source, &changed_owners).is_err(),
-        "exact variable revision cannot float"
+        "variable references cannot change library namespace"
     );
 }
 

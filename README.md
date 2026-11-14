@@ -52,7 +52,9 @@ The [app packages](apps/README.md) include The Brass Relay, Test Playground and 
 The proposed [OTriOS design reference](DESIGN.md) defines the SpaceX-inspired
 monochrome direction. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
 named styles, descriptive variables, Light/Dark modes and state resolution;
-this visual/style cutover is not implemented yet.
+named color styles and Light/Dark variables are enabled in Designer. Library-owned
+styles use stable ownership with exact signed import locks; see the
+[Designer implementation record](docs/oib-designer/IMPLEMENTATION.md).
 
 ## Build and check
 

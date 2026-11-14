@@ -674,3 +674,156 @@ fn styled_compiler_keeps_focus_overlay_gate_and_bound_control_source() {
             .any(|hop| matches!(hop.role, document::SourceRole::Style(_)))
     );
 }
+
+#[test]
+fn imported_style_values_update_under_stable_namespace_and_document_override() {
+    use otrios_interfaces::oib::{graph as g, library as l};
+    let mut ui = prepared(true);
+    let base = oib::seed(&ui).unwrap();
+    let mut payload = DocumentStyles {
+        catalog: catalog(base).catalog,
+        components: vec![binding(&catalog(base))],
+    };
+    let library_id = l::LibraryId(format!("{}:controls", "0".repeat(64)));
+    let namespace = SystemRef {
+        owner: otrios_interfaces::oib::styles::Owner::Library {
+            library: library_id.clone(),
+        },
+        system: SystemId(1),
+    };
+    payload.catalog.systems[0].reference = namespace.clone();
+    payload.catalog.systems[0].styles[0].defaults[0].value = FieldValue::Variable(VariableRef {
+        system: namespace.clone(),
+        variable: VariableId(1),
+    });
+    payload.components[0].style.system = namespace;
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        unreachable!()
+    };
+    let source = seed.graph.as_mut().unwrap();
+    let library = crate::library::seal_graph(l::Graph {
+        format: l::FORMAT.into(),
+        required_classes: source.classes.clone(),
+        definitions: source
+            .definitions
+            .iter()
+            .filter(|definition| definition.id != DefinitionId(11))
+            .cloned()
+            .collect(),
+        exports: vec![l::Export {
+            id: l::ExportId(1),
+            name: "SettingsPanel".into(),
+            definition: DefinitionId(10),
+            contract: [0; 32],
+        }],
+        behaviors: vec![],
+        styles: Some(payload.clone()),
+    })
+    .unwrap();
+    source
+        .definitions
+        .retain(|definition| definition.id == DefinitionId(11));
+    source.imports = Some(g::Imports {
+        format: g::IMPORTS_FORMAT.into(),
+        locks: vec![g::LibraryLock {
+            library: library_id.clone(),
+            revision: [1; 32],
+            exports: vec![g::LockedExport {
+                export: l::ExportId(1),
+                contract: library.exports[0].contract,
+            }],
+        }],
+        bindings: vec![g::ImportBinding {
+            id: 70,
+            library: library_id.clone(),
+            export: l::ExportId(1),
+            definitions: [10, 12, 13]
+                .map(|id| g::DefinitionBinding {
+                    source: DefinitionId(id),
+                    target: DefinitionId(id),
+                })
+                .to_vec(),
+        }],
+    });
+    seed.resolved_libraries = vec![g::ResolvedLibrary {
+        library: library_id,
+        revision: [1; 32],
+        graph: library,
+        component: None,
+    }];
+    let mut ui = graph::materialize(&ui).unwrap();
+    let before = oib::seed(&ui).unwrap().clone();
+    let allocations = instances::initial_allocations(&before);
+    let frame = automatic(&before, &allocations, Mode::Dark)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        document::property_sources_styled(
+            &before,
+            &allocations,
+            &address(),
+            &BTreeMap::new(),
+            &frame
+        )
+        .unwrap()
+        .value,
+        Some(Value::Color([12, 12, 12, 255]))
+    );
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        unreachable!()
+    };
+    seed.resolved_libraries[0]
+        .graph
+        .styles
+        .as_mut()
+        .unwrap()
+        .catalog
+        .systems[0]
+        .variables[0]
+        .values
+        .dark = [50, 60, 70, 255];
+    seed.resolved_libraries[0].revision = [2; 32];
+    seed.graph.as_mut().unwrap().imports.as_mut().unwrap().locks[0].revision = [2; 32];
+    super::super::imports::compatible(&before, seed).unwrap();
+    let ui = graph::materialize(&ui).unwrap();
+    let seed = oib::seed(&ui).unwrap();
+    assert_eq!(
+        super::binding(seed, DefinitionId(10)).unwrap(),
+        Some(payload.components[0].clone())
+    );
+    let frame = automatic(seed, &allocations, Mode::Dark).unwrap().unwrap();
+    assert_eq!(
+        document::property_sources_styled(seed, &allocations, &address(), &BTreeMap::new(), &frame)
+            .unwrap()
+            .value,
+        Some(Value::Color([50, 60, 70, 255]))
+    );
+    let mut overridden = seed.clone();
+    let mut local = payload;
+    let namespace = SystemRef {
+        owner: otrios_interfaces::oib::styles::Owner::Document(
+            overridden.graph.as_ref().unwrap().id,
+        ),
+        system: SystemId(1),
+    };
+    local.catalog.systems[0].reference = namespace.clone();
+    local.catalog.systems[0].styles[0].defaults[0].value =
+        FieldValue::Literal([100, 110, 120, 255]);
+    local.components[0].style.system = namespace;
+    overridden.graph.as_mut().unwrap().styles = Some(local);
+    let frame = automatic(&overridden, &allocations, Mode::Dark)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        document::property_sources_styled(
+            &overridden,
+            &allocations,
+            &address(),
+            &BTreeMap::new(),
+            &frame
+        )
+        .unwrap()
+        .value,
+        Some(Value::Color([100, 110, 120, 255]))
+    );
+}

@@ -790,8 +790,10 @@ impl Designer {
             && let Primitive::Text { value, .. } = &mut title.primitive
         {
             match self.selection {
-                Selection::Style(_) => *value = "Style".into(),
-                Selection::Variable(_) => *value = "Color variable".into(),
+                Selection::Style(_) | Selection::ImportedStyle(_) => *value = "Style".into(),
+                Selection::Variable(_) | Selection::ImportedVariable(_) => {
+                    *value = "Color variable".into()
+                }
                 _ => {}
             }
         }
@@ -1552,6 +1554,8 @@ fn identity_lines(selection: &Selection) -> Vec<String> {
     match selection {
         Selection::Document(id) => vec![format!("Document #{}", id.0)],
         Selection::Style(id) => vec![format!("Style #{}", id.0)],
+        Selection::ImportedStyle(r) => vec![format!("Library style #{}", r.style.0)],
+        Selection::ImportedVariable(r) => vec![format!("Library variable #{}", r.variable.0)],
         Selection::Variable(id) => vec![format!("Variable #{}", id.0)],
         Selection::Definition(id) => vec![format!("Definition #{}", id.0)],
         Selection::DefinitionNode { definition, node } => {

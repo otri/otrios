@@ -2,7 +2,7 @@
 //! RFC 0037 first color-only style contract; no runtime resolver or authority.
 use super::{
     designer::{ClassId, DefinitionId, DocumentId, PropertyPath},
-    library::{LibraryId, Revision},
+    library::LibraryId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,15 +31,13 @@ identity!(ContractId);
 identity!(StyleId);
 identity!(FieldId);
 
-/// A library namespace includes its exact admitted revision. These bytes do not
-/// authenticate that owner; package admission must supply the trusted owner set.
+/// Stable authored namespace. Exact library revisions come from the importing
+/// document lock, never from self-referential signed package bytes. Admission
+/// must supply the trusted owner set.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Owner {
     Document(DocumentId),
-    Library {
-        library: LibraryId,
-        revision: Revision,
-    },
+    Library { library: LibraryId },
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -210,7 +208,8 @@ pub struct ComponentStyle {
     pub fields: Vec<PropertyMapping>,
 }
 
-/// Editable document-local design system. Imported style packages remain gated.
+/// Design-system catalog and component bindings. Authored document catalogs are
+/// document-owned; signed library catalogs are library-owned.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentStyles {
@@ -251,6 +250,10 @@ pub enum StyleEdit {
     Assign {
         definition: DefinitionId,
         style: Option<StyleId>,
+    },
+    AssignReference {
+        definition: DefinitionId,
+        style: StyleRef,
     },
     DeleteStyle {
         style: StyleId,

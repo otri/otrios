@@ -1253,3 +1253,47 @@ editable. Imported node colors are library baseline fallbacks below an explicit
 document style; local authored node colors and causal/shared/occurrence values
 retain priority. Forwarded outer inputs still win. Imported private hierarchy
 targets and library-owned style payloads remain gated.
+
+## T28 — library-owned color styles and fresh-data cutover
+
+Stored style/variable references identify `(Owner, SystemId, StyleId/VariableId)`.
+A library Owner contains only its publisher-qualified stable LibraryId. Exact
+revisions belong exclusively to verified import locks and resolved library bodies;
+putting a package's own revision inside its hashed graph is forbidden. There is
+no migration path for the discarded revision-bearing ownership representation.
+
+The signed library Graph carries an optional DocumentStyles payload: color
+catalog plus component/property mappings. Package admission checks that every
+system belongs to LibraryInfo.library, all variable references resolve inside the
+standalone package, and mappings are complete and type-correct. The library-source
+exporter rebases document owners to the destination LibraryId and rejects ambient
+external dependencies. The package signature covers these bytes normally.
+
+At runtime exact import locks select immutable catalogs. Definition aliases remap
+package component bindings into the document namespace; node/property identities
+stay package-relative. The runtime merges catalog namespaces and overlays explicit
+document assignments over library defaults. A local style may reference an imported
+variable, and a document assignment may select an imported style. Imported bodies
+remain immutable. Existing instance/property overrides retain their precedence.
+The returned merged catalog is a projection, never written back as local source.
+
+Library export contracts include stable system/variable/style/contract IDs, Color
+field domains, compatible classes and component mappings. Display names and
+color/mode/state-patch values are excluded. Those value changes can use compatible
+updates. Removing an exported ID, changing its contract or mapping, or changing a
+field/type changes the admission contract. V1 accepts Color fields only; other
+types require a future explicit schema, not coercion or fallback.
+
+Designer lists imported styles/variables with their system namespace. They can be
+inspected and used, but edited only in their owning library source. Local styles
+and variables retain the ordinary private draft/Apply/history path. Removing a
+document style assignment reveals the library default. Library-owned values are
+not copied into the document when selected. History remaps local identities only,
+including when imported records happen to share the same numeric ID.
+
+The state protocol is v39; release-control v1 and guest ABI1 are unchanged. Deploy
+new hosts and the signed library, then reset only Designer using authenticated
+DeleteData(remove=false) under the installed catalog. Bootstrap fresh Merkle data;
+do not decode/migrate old authored style data. Validate one focused imported
+update/override invariant and one short live mounted style journey. Broad suites
+and repeated platform qualification are deliberately outside this iteration.

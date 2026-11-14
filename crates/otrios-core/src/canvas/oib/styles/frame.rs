@@ -111,21 +111,12 @@ pub(crate) fn automatic(
     mode: Mode,
 ) -> Result<Option<Frame>> {
     use otrios_interfaces::oib::designer::{DefinitionId, NodeId};
-    if seed
-        .graph
-        .as_ref()
-        .is_none_or(|graph| graph.styles.is_none())
-    {
+    let Some(payload) = super::resolved_payload(seed)? else {
         return Ok(None);
-    }
+    };
     let Some(catalog) = super::local_admitted(seed)? else {
         return Ok(None);
     };
-    let payload = seed
-        .graph
-        .as_ref()
-        .and_then(|graph| graph.styles.as_ref())
-        .ok_or("Missing local style source")?;
     if payload.components.is_empty() {
         return Ok(None);
     }
@@ -174,7 +165,7 @@ pub(crate) fn automatic(
     }
     let mut bindings = vec![];
     for root in &doc.instances {
-        walk(&doc, payload, root.definition, root.id, &[], &mut bindings)?;
+        walk(&doc, &payload, root.definition, root.id, &[], &mut bindings)?;
     }
     let uses: Vec<_> = bindings
         .iter()

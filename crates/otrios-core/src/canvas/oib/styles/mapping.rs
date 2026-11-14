@@ -52,10 +52,21 @@ impl Projection {
 fn admitted_owner(seed: &Seed, owner: &Owner) -> bool {
     match owner {
         Owner::Document(id) => seed.graph.as_ref().is_some_and(|graph| graph.id == *id),
-        Owner::Library { library, revision } => seed
-            .resolved_libraries
-            .iter()
-            .any(|resolved| resolved.library == *library && resolved.revision == *revision),
+        Owner::Library { library } => seed
+            .graph
+            .as_ref()
+            .and_then(|graph| graph.imports.as_ref())
+            .is_some_and(|imports| {
+                imports
+                    .locks
+                    .iter()
+                    .find(|lock| lock.library == *library)
+                    .is_some_and(|lock| {
+                        seed.resolved_libraries.iter().any(|resolved| {
+                            resolved.library == *library && resolved.revision == lock.revision
+                        })
+                    })
+            }),
     }
 }
 impl<'a> Mapped<'a> {

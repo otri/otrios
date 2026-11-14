@@ -112,8 +112,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 }
                 if before==ids.len() {break;}
             }
+            let styles = export_styles(graph.styles.as_ref(), graph.id, &spec.library, &ids)?;
             let graph=library::seal_graph(contract::Graph {
-                behaviors:vec![], format:contract::FORMAT.into(), required_classes:graph.classes.clone(),
+                styles, behaviors:vec![], format:contract::FORMAT.into(), required_classes:graph.classes.clone(),
                 definitions:graph.definitions.iter().filter(|def|ids.contains(&def.id)).cloned().collect(),
                 exports:spec.exports.into_iter().map(|e|Export{id:e.id,name:e.name,definition:e.definition,contract:[0;32]}).collect(),
             })?;
@@ -323,4 +324,49 @@ pub(super) fn inherit_libraries(
         libraries.push(library::verify(nested, key)?);
     }
     bundle::with_oib_ui_and_libraries(tree, &ui, &info.libraries, &libraries, key)
+}
+
+/// A standalone library exports its own stable namespace, never a document ID
+/// or a resolved revision. External styles require an explicit package closure.
+fn export_styles(
+    source: Option<&otrios_interfaces::oib::styles::DocumentStyles>,
+    document: otrios_interfaces::oib::designer::DocumentId,
+    library: &otrios_interfaces::oib::library::LibraryId,
+    definitions: &BTreeSet<otrios_interfaces::oib::designer::DefinitionId>,
+) -> Result<Option<otrios_interfaces::oib::styles::DocumentStyles>> {
+    use otrios_interfaces::oib::styles::*;
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let mut styles = source.clone();
+    let rebase = |reference: &mut SystemRef| -> Result<()> {
+        if reference.owner != Owner::Document(document) {
+            return Err("Library export requires document-owned styles; external style dependencies are not package-local".into());
+        }
+        reference.owner = Owner::Library {
+            library: library.clone(),
+        };
+        Ok(())
+    };
+    for system in &mut styles.catalog.systems {
+        rebase(&mut system.reference)?;
+        for style in &mut system.styles {
+            for entry in style
+                .defaults
+                .iter_mut()
+                .chain(style.patches.iter_mut().flat_map(|patch| &mut patch.fields))
+            {
+                if let FieldValue::Variable(reference) = &mut entry.value {
+                    rebase(&mut reference.system)?;
+                }
+            }
+        }
+    }
+    styles
+        .components
+        .retain(|binding| definitions.contains(&binding.definition));
+    for binding in &mut styles.components {
+        rebase(&mut binding.style.system)?;
+    }
+    Ok(Some(styles))
 }

@@ -1569,3 +1569,21 @@ variables. State protocol v38, release-control v1 and guest ABI1 remain as decla
 Library-owned style packaging, state recipe/focus authoring, subtree mode boundaries,
 per-instance style references, contrast and full representative catalog qualification
 remain open. The full Designer goal is not complete.
+
+## T28 library-owned styles — 2026-11-14
+
+Priority goal: stable owner references, signed catalog export, unified imported /
+local resolution, compatibility classification, and deployment with fresh Designer
+Merkle bootstrap. No old-data migration or preservation. Implementation is in the
+feature worktree; deployment evidence follows below when observed.
+
+Roles: library_style_package owns schema/signing/export contracts;
+library_style_resolution owns runtime merge/precedence; parent owns Designer,
+protocol, integration and deployment. Terra style_cutover_reference identified the
+existing reset route and authored the signed starter panel style.
+
+Core/dashboard/web-host compilation passed. The focused runtime regression
+`imported_style_values_update_under_stable_namespace_and_document_override` passed
+(1 test): imported defaults without a local catalog, exact-lock color update with
+stable references, and a document assignment overriding the library default.
+No broad suite was run. Signed publication will perform its normal package checks.

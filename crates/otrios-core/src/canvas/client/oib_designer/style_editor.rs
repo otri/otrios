@@ -105,6 +105,30 @@ fn editable_component(seed: &otrios_interfaces::oib::Seed, definition: Definitio
         })
     })
 }
+fn qualified(system: &s::System, name: &str) -> String {
+    match &system.reference.owner {
+        s::Owner::Document(_) => name.into(),
+        s::Owner::Library { .. } => format!("{} / {name}", system.name),
+    }
+}
+fn style_selection(system: &s::System, style: s::StyleId) -> Selection {
+    match system.reference.owner {
+        s::Owner::Document(_) => Selection::Style(style),
+        s::Owner::Library { .. } => Selection::ImportedStyle(s::StyleRef {
+            system: system.reference.clone(),
+            style,
+        }),
+    }
+}
+fn variable_selection(system: &s::System, variable: s::VariableId) -> Selection {
+    match system.reference.owner {
+        s::Owner::Document(_) => Selection::Variable(variable),
+        s::Owner::Library { .. } => Selection::ImportedVariable(s::VariableRef {
+            system: system.reference.clone(),
+            variable,
+        }),
+    }
+}
 pub(super) fn library(
     b: &mut Builder,
     seed: &otrios_interfaces::oib::Seed,
@@ -116,7 +140,8 @@ pub(super) fn library(
 ) -> Result<(Vec<SceneNode>, f32)> {
     let mut nodes = tabs(b, section)?;
     let mut y = 64.;
-    let system = local(seed);
+    let catalog = super::super::super::oib::styles::catalog(seed)?;
+    let systems = catalog.as_ref().map_or(&[][..], |c| c.systems.as_slice());
     match section {
         Section::Components => return Ok((nodes, y)),
         Section::Styles => {
@@ -145,12 +170,15 @@ pub(super) fn library(
                     y += 56.;
                 }
             }
-            let styles = system.map_or(&[][..], |s| s.styles.as_slice());
+            let styles: Vec<_> = systems
+                .iter()
+                .flat_map(|system| system.styles.iter().map(move |item| (system, item)))
+                .collect();
             if styles.is_empty() {
                 nodes.push(title(b, y, "No styles")?);
                 y += 44.;
             }
-            for item in styles.iter().skip(page * PAGE).take(PAGE) {
+            for (system, item) in styles.iter().skip(page * PAGE).take(PAGE) {
                 let action = if let Some(Pick::Style(definition)) = pick {
                     let class = seed
                         .designer
@@ -158,22 +186,23 @@ pub(super) fn library(
                         .and_then(|d| d.definitions.iter().find(|d| d.id == definition))
                         .and_then(|d| d.nodes.iter().find(|n| n.id == d.root))
                         .map(|n| n.class);
-                    if !system.is_some_and(|system| {
-                        system.contracts.iter().any(|c| {
-                            c.id == item.contract
-                                && class.is_some_and(|class| c.classes.contains(&class))
-                        })
+                    if !system.contracts.iter().any(|c| {
+                        c.id == item.contract
+                            && class.is_some_and(|class| c.classes.contains(&class))
                     }) {
                         continue;
                     }
-                    LocalAction::Style(s::StyleEdit::Assign {
+                    LocalAction::Style(s::StyleEdit::AssignReference {
                         definition,
-                        style: Some(item.id),
+                        style: s::StyleRef {
+                            system: system.reference.clone(),
+                            style: item.id,
+                        },
                     })
                 } else {
-                    LocalAction::Select(Selection::Style(item.id))
+                    LocalAction::Select(style_selection(system, item.id))
                 };
-                nodes.push(b.focus_row(0., y, 320., &item.name, action)?);
+                nodes.push(b.focus_row(0., y, 320., &qualified(system, &item.name), action)?);
                 y += 56.;
             }
             paging(b, &mut nodes, &mut y, page, styles.len())?;
@@ -210,26 +239,28 @@ pub(super) fn library(
                 nodes.push(title(b, y, "Choose color variable")?);
                 y += 44.;
             }
-            let variables = system.map_or(&[][..], |s| s.variables.as_slice());
+            let variables: Vec<_> = systems
+                .iter()
+                .flat_map(|system| system.variables.iter().map(move |item| (system, item)))
+                .collect();
             if variables.is_empty() {
                 nodes.push(title(b, y, "No variables")?);
                 y += 44.;
             }
-            for item in variables.iter().skip(page * PAGE).take(PAGE) {
-                let action =
-                    if let (Some(Pick::Variable(style, field)), Some(system)) = (pick, system) {
-                        LocalAction::Style(s::StyleEdit::SetField {
-                            style,
-                            field,
-                            value: s::FieldValue::Variable(s::VariableRef {
-                                system: system.reference.clone(),
-                                variable: item.id,
-                            }),
-                        })
-                    } else {
-                        LocalAction::Select(Selection::Variable(item.id))
-                    };
-                nodes.push(b.focus_row(0., y, 320., &item.name, action)?);
+            for (system, item) in variables.iter().skip(page * PAGE).take(PAGE) {
+                let action = if let Some(Pick::Variable(style, field)) = pick {
+                    LocalAction::Style(s::StyleEdit::SetField {
+                        style,
+                        field,
+                        value: s::FieldValue::Variable(s::VariableRef {
+                            system: system.reference.clone(),
+                            variable: item.id,
+                        }),
+                    })
+                } else {
+                    LocalAction::Select(variable_selection(system, item.id))
+                };
+                nodes.push(b.focus_row(0., y, 320., &qualified(system, &item.name), action)?);
                 y += 56.;
             }
             paging(b, &mut nodes, &mut y, page, variables.len())?;
@@ -282,30 +313,44 @@ pub(super) fn inspector(
     {
         nodes.push(title(b, y, "Definition style")?);
         y += 40.;
-        if let Some(active) = source(seed).and_then(|source| {
-            source
-                .components
-                .iter()
-                .find(|binding| binding.definition == definition)
-        }) {
-            if let Some(style) =
-                system.and_then(|s| s.styles.iter().find(|s| s.id == active.style.style))
+        if let Some(active) = super::super::super::oib::styles::binding(seed, definition)? {
+            let catalog = super::super::super::oib::styles::catalog(seed)?;
+            if let Some((system, style)) = catalog
+                .as_ref()
+                .and_then(|c| {
+                    c.systems
+                        .iter()
+                        .find(|s| s.reference == active.style.system)
+                })
+                .and_then(|system| {
+                    system
+                        .styles
+                        .iter()
+                        .find(|s| s.id == active.style.style)
+                        .map(|style| (system, style))
+                })
             {
                 nodes.push(b.focus_row(
                     0.,
                     y,
                     320.,
-                    &style.name,
-                    LocalAction::Select(Selection::Style(style.id)),
+                    &qualified(system, &style.name),
+                    LocalAction::Select(style_selection(system, style.id)),
                 )?);
                 y += 56.;
             }
-            if editable {
+            if editable
+                && source(seed).is_some_and(|s| {
+                    s.components
+                        .iter()
+                        .any(|binding| binding.definition == definition)
+                })
+            {
                 nodes.push(b.focus_button(
                     0.,
                     y,
                     320.,
-                    "Remove style",
+                    "Remove style override",
                     LocalAction::Style(s::StyleEdit::Assign {
                         definition,
                         style: None,
@@ -335,6 +380,95 @@ pub(super) fn inspector(
                 LocalAction::StyleChoose(definition),
             )?);
             y += 56.;
+        }
+    }
+    let catalog = super::super::super::oib::styles::catalog(seed)?;
+    if let Selection::ImportedStyle(reference) = selection {
+        if let Some(system) = catalog
+            .as_ref()
+            .and_then(|c| c.systems.iter().find(|s| s.reference == reference.system))
+            && let Some(item) = system.styles.iter().find(|s| s.id == reference.style)
+        {
+            nodes.push(title(b, y, &qualified(system, &item.name))?);
+            y += 40.;
+            if editable && let Some(definition) = component_context {
+                nodes.push(b.focus_button(
+                    0.,
+                    y,
+                    320.,
+                    "Use style",
+                    LocalAction::Style(s::StyleEdit::AssignReference {
+                        definition,
+                        style: reference.clone(),
+                    }),
+                )?);
+                y += 56.;
+            }
+            for entry in &item.defaults {
+                let name = system
+                    .contracts
+                    .iter()
+                    .find(|c| c.id == item.contract)
+                    .and_then(|c| c.fields.iter().find(|f| f.id == entry.field))
+                    .map_or("Color", |f| f.name.as_str());
+                match &entry.value {
+                    s::FieldValue::Literal(color) => {
+                        nodes.push(title(
+                            b,
+                            y,
+                            &format!("{name}: #{:02X}{:02X}{:02X}", color[0], color[1], color[2]),
+                        )?);
+                        y += 40.;
+                    }
+                    s::FieldValue::Variable(var) => {
+                        if let Some((system, variable)) = catalog
+                            .as_ref()
+                            .and_then(|c| c.systems.iter().find(|s| s.reference == var.system))
+                            .and_then(|s| {
+                                s.variables
+                                    .iter()
+                                    .find(|v| v.id == var.variable)
+                                    .map(|v| (s, v))
+                            })
+                        {
+                            nodes.push(b.focus_row(
+                                0.,
+                                y,
+                                320.,
+                                &format!("{name}: {}", qualified(system, &variable.name)),
+                                LocalAction::Select(variable_selection(system, variable.id)),
+                            )?);
+                            y += 56.;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Selection::ImportedVariable(reference) = selection {
+        if let Some((system, variable)) = catalog
+            .as_ref()
+            .and_then(|c| c.systems.iter().find(|s| s.reference == reference.system))
+            .and_then(|s| {
+                s.variables
+                    .iter()
+                    .find(|v| v.id == reference.variable)
+                    .map(|v| (s, v))
+            })
+        {
+            nodes.push(title(b, y, &qualified(system, &variable.name))?);
+            y += 40.;
+            for (mode, color) in [
+                ("Light", variable.values.light),
+                ("Dark", variable.values.dark),
+            ] {
+                nodes.push(title(
+                    b,
+                    y,
+                    &format!("{mode}: #{:02X}{:02X}{:02X}", color[0], color[1], color[2]),
+                )?);
+                y += 40.;
+            }
         }
     }
     if let (Selection::Style(id), Some(system)) = (selection, system)
@@ -391,13 +525,20 @@ pub(super) fn inspector(
             nodes.push(title(b, y, &format!("{name} source"))?);
             y += 40.;
             if let s::FieldValue::Variable(reference) = &field.value {
-                let variable = system.variables.iter().find(|v| v.id == reference.variable);
+                let variable_system = catalog
+                    .as_ref()
+                    .and_then(|c| c.systems.iter().find(|s| s.reference == reference.system));
+                let variable = variable_system
+                    .and_then(|s| s.variables.iter().find(|v| v.id == reference.variable));
                 nodes.push(b.focus_row(
                     0.,
                     y,
                     320.,
                     variable.map_or("Missing variable", |v| v.name.as_str()),
-                    LocalAction::Select(Selection::Variable(reference.variable)),
+                    LocalAction::Select(variable_system.map_or_else(
+                        || Selection::Variable(reference.variable),
+                        |s| variable_selection(s, reference.variable),
+                    )),
                 )?);
                 y += 56.;
                 if editable {
@@ -504,23 +645,43 @@ impl Client {
                 let seed = m.design_doc().oib_authoring_seed()?;
                 let graph = seed.graph.as_ref().ok_or("Missing style source")?;
                 let mut operations = vec![];
-                if let s::StyleEdit::Assign {
-                    definition,
-                    style: Some(style),
-                } = &edit
-                {
-                    let system = local(&seed).ok_or("Missing local styles")?;
+                let assignment = match &edit {
+                    s::StyleEdit::Assign {
+                        definition,
+                        style: Some(style),
+                    } => local(&seed).map(|s| {
+                        (
+                            *definition,
+                            s::StyleRef {
+                                system: s.reference.clone(),
+                                style: *style,
+                            },
+                        )
+                    }),
+                    s::StyleEdit::AssignReference { definition, style } => {
+                        Some((*definition, style.clone()))
+                    }
+                    _ => None,
+                };
+                if let Some((definition, reference)) = assignment {
+                    let catalog = super::super::super::oib::styles::catalog(&seed)?
+                        .ok_or("Missing styles")?;
+                    let system = catalog
+                        .systems
+                        .iter()
+                        .find(|s| s.reference == reference.system)
+                        .ok_or("Unknown style system")?;
                     let style = system
                         .styles
                         .iter()
-                        .find(|s| s.id == *style)
+                        .find(|s| s.id == reference.style)
                         .ok_or("Unknown style")?;
                     let contract = system
                         .contracts
                         .iter()
                         .find(|c| c.id == style.contract)
                         .ok_or("Unknown style contract")?;
-                    if let Some(def) = graph.definitions.iter().find(|def| def.id == *definition) {
+                    if let Some(def) = graph.definitions.iter().find(|def| def.id == definition) {
                         let root = def
                             .nodes
                             .iter()
@@ -534,7 +695,7 @@ impl Client {
                             {
                                 operations.push(DocumentEdit::Definition(
                                     DefinitionEdit::ClearDefault {
-                                        definition: *definition,
+                                        definition,
                                         node: root.id,
                                         property: default.property,
                                     },
@@ -549,7 +710,8 @@ impl Client {
                         Some(Selection::Variable(s::VariableId(*id)))
                     }
                     s::StyleEdit::SetField { style, .. } => Some(Selection::Style(*style)),
-                    s::StyleEdit::Assign { definition, .. } => {
+                    s::StyleEdit::Assign { definition, .. }
+                    | s::StyleEdit::AssignReference { definition, .. } => {
                         Some(Selection::Definition(*definition))
                     }
                     s::StyleEdit::DeleteStyle { .. } | s::StyleEdit::DeleteVariable { .. } => {

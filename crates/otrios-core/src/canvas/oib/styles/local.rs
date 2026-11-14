@@ -34,34 +34,139 @@ pub fn color_inputs(seed: &Seed, definition: DefinitionId) -> Result<Vec<Propert
         })
         .collect())
 }
+/// Merge immutable imported namespaces with authored document data. Library
+/// revisions are selected exclusively by the validated exact import locks.
+/// The returned projection is never persisted as document-owned source.
+pub fn resolved_payload(seed: &Seed) -> Result<Option<DocumentStyles>> {
+    let graph = seed
+        .graph
+        .as_ref()
+        .ok_or("Missing canonical style source")?;
+    crate::canvas::oib::imports::resolve(seed)?;
+    let mut combined = DocumentStyles {
+        catalog: Catalog {
+            format: FORMAT.into(),
+            systems: vec![],
+        },
+        components: vec![],
+    };
+    let mut bindings = BTreeMap::new();
+    for body in &seed.resolved_libraries {
+        let Some(payload) = &body.graph.styles else {
+            continue;
+        };
+        let owner = Owner::Library {
+            library: body.library.clone(),
+        };
+        if payload.catalog.format != FORMAT
+            || payload
+                .catalog
+                .systems
+                .iter()
+                .any(|system| system.reference.owner != owner)
+        {
+            return Err("Library style catalog has a foreign owner".into());
+        }
+        combined
+            .catalog
+            .systems
+            .extend(payload.catalog.systems.clone());
+        for binding in graph
+            .imports
+            .iter()
+            .flat_map(|imports| &imports.bindings)
+            .filter(|binding| binding.library == body.library)
+        {
+            for mapping in &binding.definitions {
+                if let Some(component) = payload
+                    .components
+                    .iter()
+                    .find(|component| component.definition == mapping.source)
+                {
+                    let mut component = component.clone();
+                    component.definition = mapping.target;
+                    if bindings
+                        .insert(mapping.target, component.clone())
+                        .is_some_and(|old| old != component)
+                    {
+                        return Err("Conflicting imported component styles".into());
+                    }
+                }
+            }
+        }
+    }
+    if let Some(payload) = &graph.styles {
+        if payload.catalog.format != FORMAT
+            || payload
+                .catalog
+                .systems
+                .iter()
+                .any(|system| system.reference.owner != Owner::Document(graph.id))
+        {
+            return Err("Document style catalog has a foreign owner".into());
+        }
+        ordered(
+            payload
+                .components
+                .iter()
+                .map(|component| component.definition),
+        )?;
+        combined
+            .catalog
+            .systems
+            .extend(payload.catalog.systems.clone());
+        // Explicit document use overrides a library's default style assignment.
+        for component in &payload.components {
+            bindings.insert(component.definition, component.clone());
+        }
+    }
+    combined
+        .catalog
+        .systems
+        .sort_by_key(|system| system.reference.clone());
+    combined.components = bindings.into_values().collect();
+    if combined.catalog.systems.is_empty() && combined.components.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(combined))
+    }
+}
+pub fn catalog(seed: &Seed) -> Result<Option<Catalog>> {
+    Ok(resolved_payload(seed)?.map(|payload| payload.catalog))
+}
+pub fn binding(seed: &Seed, definition: DefinitionId) -> Result<Option<ComponentStyle>> {
+    Ok(resolved_payload(seed)?.and_then(|payload| {
+        payload
+            .components
+            .into_iter()
+            .find(|component| component.definition == definition)
+    }))
+}
 pub fn local_admitted(seed: &Seed) -> Result<Option<Admitted>> {
     let graph = seed
         .graph
         .as_ref()
         .ok_or("Missing canonical style source")?;
-    let Some(payload) = &graph.styles else {
+    let Some(payload) = resolved_payload(seed)? else {
         return Ok(None);
     };
-    let owner = Owner::Document(graph.id);
-    if payload.catalog.systems.len() != 1
-        || payload.catalog.systems[0].reference
-            != (SystemRef {
-                owner: owner.clone(),
-                system: SystemId(1),
-            })
-    {
-        return Err("Only the local document style system is admitted".into());
-    }
-    ordered(
-        payload
-            .components
-            .iter()
-            .map(|component| component.definition),
-    )?;
-    let admitted = Admitted::new(payload.catalog.clone(), &BTreeSet::from([owner]))?;
+    let mut owners = BTreeSet::from([Owner::Document(graph.id)]);
+    owners.extend(seed.resolved_libraries.iter().map(|body| Owner::Library {
+        library: body.library.clone(),
+    }));
+    let admitted = Admitted::new(payload.catalog, &owners)?;
     let imported = crate::canvas::oib::imports::imported_definitions(seed);
     for component in &payload.components {
-        if imported.contains(&component.definition) {
+        // Authored document bindings may only reach an imported public root;
+        // signed bindings retain their package-admitted private mappings.
+        if imported.contains(&component.definition)
+            && graph.styles.as_ref().is_some_and(|local| {
+                local
+                    .components
+                    .iter()
+                    .any(|binding| binding.definition == component.definition)
+            })
+        {
             let definition = properties::metadata(seed)?
                 .definitions
                 .iter()
@@ -267,6 +372,23 @@ pub(crate) fn edit_local(seed: &Seed, source: &mut DocumentSource, edit: &StyleE
             });
             system.variables.sort_by_key(|variable| variable.id);
         }
+        StyleEdit::AssignReference { definition, style } => {
+            let def = style_definition(seed, source, *definition)?;
+            let root = def.root;
+            let admitted = local_admitted(seed)?.ok_or("Missing design system")?;
+            if !admitted.selectable(style) {
+                return Err("Style is unavailable".into());
+            }
+            let (contract, _) = admitted.style(style)?;
+            let component = mapped(*definition, root, style.clone(), contract);
+            Mapped::new(&admitted, seed, component.clone())?;
+            let data = payload(source, graph.id)?;
+            data.components
+                .retain(|existing| existing.definition != *definition);
+            data.components.push(component);
+            data.components
+                .sort_by_key(|component| component.definition);
+        }
         StyleEdit::Assign { definition, style } => {
             if source.styles.is_none() && style.is_none() {
                 return Ok(());
@@ -366,11 +488,10 @@ pub(crate) fn edit_local(seed: &Seed, source: &mut DocumentSource, edit: &StyleE
                         .value = value.clone();
                 }
                 StyleEdit::DeleteStyle { style } => {
-                    if data
-                        .components
-                        .iter()
-                        .any(|component| component.style.style == *style)
-                    {
+                    if data.components.iter().any(|component| {
+                        component.style.system == system.reference
+                            && component.style.style == *style
+                    }) {
                         return Err(
                             "Style is in use; remove or replace its component assignments first"
                                 .into(),

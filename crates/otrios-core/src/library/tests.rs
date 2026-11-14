@@ -42,6 +42,7 @@ fn graph() -> Graph {
         visual_child_classes: vec![ClassId(1)],
     };
     seal_graph(Graph {
+        styles: None,
         behaviors: vec![],
         format: FORMAT.into(),
         required_classes: vec![class],
@@ -291,6 +292,7 @@ fn nested_package_binding_keeps_unrelated_payloads_and_checks_independent_trust(
     let seed = canvas::oib::seed(&source).unwrap();
     let src = seed.graph.as_ref().unwrap();
     let body = seal_graph(Graph {
+        styles: None,
         behaviors: vec![],
         format: FORMAT.into(),
         required_classes: src.classes.clone(),
@@ -591,4 +593,94 @@ fn an_exhausted_class_property_namespace_keeps_existing_library_admission() {
         seal_graph(candidate).is_ok(),
         "an empty declaration table requires no successor allocation"
     );
+}
+
+#[test]
+fn signed_style_identity_is_stable_and_values_update_compatibly() {
+    use otrios_interfaces::oib::styles::*;
+    let metadata = info(&[7; 32]);
+    let owner = Owner::Library {
+        library: metadata.library.clone(),
+    };
+    let system = SystemRef {
+        owner,
+        system: SystemId(1),
+    };
+    let mut source = graph();
+    source.styles = Some(DocumentStyles {
+        catalog: Catalog {
+            format: otrios_interfaces::oib::styles::FORMAT.into(),
+            systems: vec![System {
+                reference: system.clone(),
+                name: "controls".into(),
+                variables: vec![Variable {
+                    id: VariableId(1),
+                    name: "background".into(),
+                    availability: Availability::Active,
+                    values: ColorModes {
+                        light: [240, 240, 240, 255],
+                        dark: [20, 20, 20, 255],
+                    },
+                }],
+                contracts: vec![Contract {
+                    id: ContractId(1),
+                    name: "card".into(),
+                    classes: vec![ClassId(1)],
+                    fields: vec![Field {
+                        id: FieldId(1),
+                        name: "background".into(),
+                        domain: Domain::Body,
+                    }],
+                }],
+                styles: vec![Style {
+                    id: StyleId(1),
+                    name: "card.default".into(),
+                    availability: Availability::Active,
+                    contract: ContractId(1),
+                    defaults: vec![Entry {
+                        field: FieldId(1),
+                        value: FieldValue::Variable(VariableRef {
+                            system: system.clone(),
+                            variable: VariableId(1),
+                        }),
+                    }],
+                    patches: vec![],
+                }],
+            }],
+        },
+        components: vec![ComponentStyle {
+            definition: DefinitionId(10),
+            style: StyleRef {
+                system,
+                style: StyleId(1),
+            },
+            fields: vec![PropertyMapping {
+                field: FieldId(1),
+                targets: vec![PropertyPath {
+                    references: vec![],
+                    node: NodeId(1),
+                    property: PropertyId(1),
+                }],
+            }],
+        }],
+    });
+    let original = seal_graph(source).unwrap();
+    let first = inspect(&pack(&metadata, &original).unwrap()).unwrap();
+    let mut changed = original.clone();
+    changed.styles.as_mut().unwrap().catalog.systems[0].variables[0]
+        .values
+        .dark = [40, 50, 60, 255];
+    let changed = seal_graph(changed).unwrap();
+    let second = inspect(&pack(&metadata, &changed).unwrap()).unwrap();
+    assert_ne!(first.revision, second.revision);
+    assert_eq!(original.exports[0].contract, changed.exports[0].contract);
+    let mut removed = changed.clone();
+    let styles = removed.styles.as_mut().unwrap();
+    styles.components.clear();
+    styles.catalog.systems[0].styles.clear();
+    let removed = seal_graph(removed).unwrap();
+    assert_ne!(changed.exports[0].contract, removed.exports[0].contract);
+    let mut forged = metadata;
+    forged.library = LibraryId(format!("{}:other", "a".repeat(64)));
+    assert!(pack(&forged, &changed).is_err());
 }

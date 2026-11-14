@@ -102,6 +102,7 @@ impl Document {
                     .chain(style.patches.iter_mut().flat_map(|patch| &mut patch.fields))
                 {
                     if let FieldValue::Variable(reference) = &mut entry.value
+                        && reference.system == system.reference
                         && let Some(id) = variables.get(&reference.variable)
                     {
                         reference.variable = *id;
@@ -118,7 +119,9 @@ impl Document {
             system.variables.sort_by_key(|variable| variable.id);
         }
         for component in &mut restored.components {
-            if let Some(id) = styles.get(&component.style.style) {
+            if matches!(component.style.system.owner, Owner::Document(_))
+                && let Some(id) = styles.get(&component.style.style)
+            {
                 component.style.style = *id;
             }
         }

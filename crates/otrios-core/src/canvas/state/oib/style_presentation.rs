@@ -26,10 +26,7 @@ impl<'a> SourceContext<'a> {
         mode: otrios_interfaces::oib::styles::Mode,
         scope: SourceScope,
     ) -> Result<Self> {
-        let has_styles = seed
-            .graph
-            .as_ref()
-            .is_some_and(|graph| graph.styles.is_some());
+        let has_styles = styles::resolved_payload(seed)?.is_some();
         let frame = if has_styles && matches!(scope, SourceScope::Occurrence) {
             styles::automatic(seed, allocations, mode)?
         } else {
@@ -38,16 +35,7 @@ impl<'a> SourceContext<'a> {
         let resolved = if let SourceScope::Definition(id) = scope {
             if has_styles {
                 let catalog = styles::local_admitted(seed)?;
-                let binding = seed
-                    .graph
-                    .as_ref()
-                    .and_then(|graph| graph.styles.as_ref())
-                    .and_then(|payload| {
-                        payload
-                            .components
-                            .iter()
-                            .find(|binding| binding.definition == id)
-                    });
+                let binding = styles::binding(seed, id)?;
                 if let (Some(catalog), Some(binding)) = (catalog, binding) {
                     let definition = seed
                         .designer
@@ -109,14 +97,7 @@ impl<'a> SourceContext<'a> {
         else {
             return Ok(trace);
         };
-        let Some(payload) = seed.graph.as_ref().and_then(|graph| graph.styles.as_ref()) else {
-            return Ok(trace);
-        };
-        let Some(binding) = payload
-            .components
-            .iter()
-            .find(|binding| binding.definition == *definition)
-        else {
+        let Some(binding) = styles::binding(seed, *definition)? else {
             return Ok(trace);
         };
         let Some(mapping) = binding.fields.iter().find(|mapping| {
@@ -211,11 +192,7 @@ impl StateAdapter {
         let allocations = self.oib_allocations()?;
         let values = self.oib_active()?;
         let mut properties = document::properties(&seed, &allocations, selection, &values)?;
-        if seed
-            .graph
-            .as_ref()
-            .is_none_or(|graph| graph.styles.is_none())
-        {
+        if styles::resolved_payload(&seed)?.is_none() {
             return Ok(properties);
         }
         let scope = match selection {

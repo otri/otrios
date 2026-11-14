@@ -897,17 +897,33 @@ fn object_rows(doc: &Document) -> Result<Vec<ObjectInfo>> {
 pub fn objects(seed: &Seed, allocations: &[Allocation]) -> Result<Vec<ObjectInfo>> {
     let metadata = expanded_metadata(seed, allocations)?;
     let mut objects = object_rows(&metadata)?;
-    if let Some(styles) = seed.graph.as_ref().and_then(|graph| graph.styles.as_ref()) {
-        for system in &styles.catalog.systems {
+    if let Some(catalog) = super::styles::catalog(seed)? {
+        for system in &catalog.systems {
             objects.extend(system.styles.iter().map(|style| ObjectInfo {
-                selection: Selection::Style(style.id),
+                selection: match &system.reference.owner {
+                    otrios_interfaces::oib::styles::Owner::Document(_) => {
+                        Selection::Style(style.id)
+                    }
+                    _ => Selection::ImportedStyle(otrios_interfaces::oib::styles::StyleRef {
+                        system: system.reference.clone(),
+                        style: style.id,
+                    }),
+                },
                 name: style.name.clone(),
                 class: metadata.class,
                 depth: 1,
                 layout_node: None,
             }));
             objects.extend(system.variables.iter().map(|variable| ObjectInfo {
-                selection: Selection::Variable(variable.id),
+                selection: match &system.reference.owner {
+                    otrios_interfaces::oib::styles::Owner::Document(_) => {
+                        Selection::Variable(variable.id)
+                    }
+                    _ => Selection::ImportedVariable(otrios_interfaces::oib::styles::VariableRef {
+                        system: system.reference.clone(),
+                        variable: variable.id,
+                    }),
+                },
                 name: variable.name.clone(),
                 class: metadata.class,
                 depth: 1,
@@ -926,7 +942,13 @@ pub fn properties(
     selection: &Selection,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Vec<PropertyInfo>> {
-    if matches!(selection, Selection::Style(_) | Selection::Variable(_)) {
+    if matches!(
+        selection,
+        Selection::Style(_)
+            | Selection::Variable(_)
+            | Selection::ImportedStyle(_)
+            | Selection::ImportedVariable(_)
+    ) {
         return Ok(vec![]);
     }
     let expanded = super::instances::expanded_seed(seed, allocations)?;

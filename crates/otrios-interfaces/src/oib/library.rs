@@ -50,6 +50,9 @@ pub struct Graph {
     pub required_classes: Vec<ClassDescriptor>,
     pub definitions: Vec<ComponentDefinition>,
     pub exports: Vec<Export>,
+    /// Signed color styles and variables, owned by this stable LibraryId.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styles: Option<super::styles::DocumentStyles>,
     /// Version-two declarations; version one must contain none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub behaviors: Vec<BehaviorDeclaration>,

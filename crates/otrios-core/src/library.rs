@@ -374,11 +374,96 @@ pub fn validate_graph(graph: &Graph) -> Result<()> {
         reachable(graph, export.definition)?;
     }
     validate_behaviors(graph)?;
+    validate_styles(graph)?;
     if canonical(graph, MAX_GRAPH_BYTES)?.len() > MAX_GRAPH_BYTES {
         return Err("Library graph byte budget".into());
     }
     Ok(())
 }
+/// Validate the bounded signed style closure independently of an importing app.
+/// Library packages cannot borrow document namespaces or ambient libraries.
+fn validate_styles(graph: &Graph) -> Result<()> {
+    use otrios_interfaces::oib::styles::*;
+    let Some(styles) = &graph.styles else {
+        return Ok(());
+    };
+    let owners: BTreeSet<_> = styles
+        .catalog
+        .systems
+        .iter()
+        .map(|system| system.reference.owner.clone())
+        .collect();
+    if owners.len() != 1
+        || !owners
+            .iter()
+            .all(|owner| matches!(owner, Owner::Library { library } if valid_id(library)))
+    {
+        return Err("Library styles require one stable library owner".into());
+    }
+    canvas::oib::styles::Admitted::new(styles.catalog.clone(), &owners)?;
+    if styles.components.len() > MAX_DEFINITIONS
+        || !ordered(styles.components.iter().map(|binding| binding.definition))
+    {
+        return Err("Library style component bindings must be bounded and ordered".into());
+    }
+    for binding in &styles.components {
+        let definition = definition(graph, binding.definition)?;
+        let root = definition
+            .nodes
+            .iter()
+            .find(|node| node.id == definition.root)
+            .ok_or("Missing library style root")?;
+        let system = styles
+            .catalog
+            .systems
+            .iter()
+            .find(|system| system.reference == binding.style.system)
+            .ok_or("Library style binding references an unexported system")?;
+        let style = system
+            .styles
+            .iter()
+            .find(|style| style.id == binding.style.style)
+            .ok_or("Library style binding references an unexported style")?;
+        let contract = system
+            .contracts
+            .iter()
+            .find(|contract| contract.id == style.contract)
+            .ok_or("Missing library style contract")?;
+        let body: Vec<_> = contract
+            .fields
+            .iter()
+            .filter(|field| field.domain == Domain::Body)
+            .collect();
+        if !contract.classes.contains(&root.class)
+            || binding.fields.len() != body.len()
+            || binding
+                .fields
+                .iter()
+                .zip(body)
+                .any(|(mapping, field)| mapping.field != field.id)
+        {
+            return Err("Library style mapping differs from its color contract".into());
+        }
+        let mut targets = BTreeSet::new();
+        for mapping in &binding.fields {
+            if mapping.targets.is_empty() || !ordered(mapping.targets.iter()) {
+                return Err("Library style targets must be nonempty and ordered".into());
+            }
+            for target in &mapping.targets {
+                let property = behavior_property(graph, binding.definition, target)?;
+                if !targets.insert(target)
+                    || property.value_type != ValueType::Color
+                    || !property.policy.live_literal
+                    || property.editor == PropertyEditor::ReadOnly
+                {
+                    return Err("Library style target must be a unique editable color input".into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn behavior_property<'a>(
     graph: &'a Graph,
     start: DefinitionId,
@@ -724,6 +809,47 @@ pub fn export_contract(graph: &Graph, export: ExportId) -> Result<Revision> {
             )?);
         }
     }
+    if let Some(styles) = &graph.styles {
+        // Stable exported IDs and field/type shape form the admission contract.
+        // Names, colors, variable values and state patch values are appearance
+        // updates and deliberately do not invalidate compatible imports.
+        let systems = styles
+            .catalog
+            .systems
+            .iter()
+            .map(|system| {
+                (
+                    &system.reference,
+                    system
+                        .variables
+                        .iter()
+                        .map(|variable| variable.id)
+                        .collect::<Vec<_>>(),
+                    system
+                        .contracts
+                        .iter()
+                        .map(|contract| {
+                            (
+                                contract.id,
+                                &contract.classes,
+                                contract
+                                    .fields
+                                    .iter()
+                                    .map(|field| (field.id, field.domain))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                    system
+                        .styles
+                        .iter()
+                        .map(|style| (style.id, style.contract))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        bytes.extend(canonical(&(systems, &styles.components), MAX_GRAPH_BYTES)?);
+    }
     Ok(Sha256::digest(&bytes).into())
 }
 pub fn seal_graph(mut graph: Graph) -> Result<Graph> {
@@ -813,6 +939,16 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedLibrary> {
     )?;
     let info = decode_info(tree.get(INFO_PATH).ok_or("Missing library Info")?)?;
     let graph = decode_graph(tree.get(GRAPH_PATH).ok_or("Missing library graph")?)?;
+    if graph.styles.as_ref().is_some_and(|styles| {
+        styles.catalog.systems.iter().any(|system| {
+            system.reference.owner
+                != otrios_interfaces::oib::styles::Owner::Library {
+                    library: info.library.clone(),
+                }
+        })
+    }) {
+        return Err("Signed style namespace differs from package library identity".into());
+    }
     if bundle::definitions_use_auto_layout(&graph.definitions)
         && !info
             .required_features

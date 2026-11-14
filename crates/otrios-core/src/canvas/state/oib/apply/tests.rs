@@ -2236,6 +2236,7 @@ fn atomic_apply_imported_panel_style_assignment_has_durable_receipt() {
     let source = imported_fixture::seed_mut(&mut ui);
     let graph = source.graph.as_mut().unwrap();
     let library = crate::library::seal_graph(l::Graph {
+        styles: None,
         format: l::FORMAT.into(),
         required_classes: graph.classes.clone(),
         definitions: graph

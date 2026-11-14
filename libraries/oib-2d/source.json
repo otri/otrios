@@ -11,6 +11,89 @@
   },
   "graph": {
     "format": "otrios-oib-library-v2",
+    "styles": {
+      "catalog": {
+        "format": "otrios-oib-color-styles-v1",
+        "systems": [
+          {
+            "reference": {
+              "owner": {
+                "Library": {
+                  "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d"
+                }
+              },
+              "system": 1
+            },
+            "name": "OIB 2D",
+            "variables": [
+              {
+                "id": 1,
+                "name": "panel_background",
+                "availability": "Active",
+                "values": {
+                  "light": [52, 211, 153, 255],
+                  "dark": [24, 128, 96, 255]
+                }
+              }
+            ],
+            "contracts": [
+              {
+                "id": 1,
+                "name": "Panel colors",
+                "classes": [4],
+                "fields": [{"id": 1, "name": "Background", "domain": "Body"}]
+              }
+            ],
+            "styles": [
+              {
+                "id": 1,
+                "name": "panel.primary",
+                "availability": "Active",
+                "contract": 1,
+                "defaults": [
+                  {
+                    "field": 1,
+                    "value": {
+                      "Variable": {
+                        "system": {
+                          "owner": {
+                            "Library": {
+                              "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d"
+                            }
+                          },
+                          "system": 1
+                        },
+                        "variable": 1
+                      }
+                    }
+                  }
+                ],
+                "patches": []
+              }
+            ]
+          }
+        ]
+      },
+      "components": [
+        {
+          "definition": 10,
+          "style": {
+            "system": {
+              "owner": {
+                "Library": {
+                  "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d"
+                }
+              },
+              "system": 1
+            },
+            "style": 1
+          },
+          "fields": [
+            {"field": 1, "targets": [{"references": [], "node": 1, "property": 1}]}
+          ]
+        }
+      ]
+    },
     "required_classes": [
       {
         "id": 1,
