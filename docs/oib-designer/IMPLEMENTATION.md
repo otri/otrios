@@ -1763,3 +1763,21 @@ layout-document, layout-text-scroll, live-ui and oib-designer from Experiments
 Source has no attached apps; destination has those ten plus Brass Relay. Operations'
 Monitoring was not selected or moved. No app-data reset was used. New permission
 activation and anonymous acceptance follow after deployment.
+
+Public edit runtime source42ecfe5 deployed successfully as
+4ac8de0e6e443b64cad0b88a6784fb617d3dcd98d8db9886da191a239b08f6f1
+on Frame/Web. Builder restored pinned to that source. Authenticated Audience
+change set only Public Space to public-edit at registry91. Its eleven attached
+apps remained present; Operations stayed closed with Monitoring attached.
+
+Focused live acceptance used the incognito browser profile, with public discovery
+role=null and no authenticated monitoring session. Anonymous Components slider
+changed20→70 and a second independent client read70; restored20 with no pending
+fields. Anonymous Designer exposed New component; a private new component was
+applied at generation2, then Undo/Apply removed it at generation3. Both Applies
+received durable success and cleared pending fields; final presented generation3.
+Brass Relay automatically joined a temporary guest (admin=false, online=true),
+with Message composer and Send enabled; no test message was posted. Anonymous
+/spaces discovery excluded Operations and Monitoring. The owned tabs were closed.
+Only the focused access regression and this small live permission journey ran;
+no broad qualification suite or app-data reset.
