@@ -415,3 +415,13 @@ The revised qualification passed at 16 complete clients sharing one room with
 64-client collision probes missed the remote ink latency budget. The configured
 64-public-session admission quota is separate from this responsiveness target;
 neither result establishes a physical connection maximum.
+
+### Automatic builder tool source
+
+The persistent launcher must run `scripts/dashboard-builder-launcher.py` (it may
+be installed at the existing runtime `bin/watch-dashboard.py` path). It delegates
+to `config.repo/scripts/watch-dashboard.py`, so the publisher, asset list, state
+protocol metadata and build sources all come from the selected checkout. Do not
+run a copied historical watcher together with historical sibling publishing
+scripts. When Git refresh changes the selected revision, the watcher re-executes
+from that checkout before building so imported Python tools change with it.

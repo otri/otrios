@@ -139,12 +139,19 @@ def refresh_git(config):
 
 def main(config,once,activate=True,checks=False):
     runtime=pathlib.Path(config['runtime']);lock=open(runtime/'watcher.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    print('BUILDER_TOOLS '+str(pathlib.Path(__file__).resolve()),flush=True)
     repo=pathlib.Path(config['repo']);marker=runtime/'build/source-id';last=marker.read_text() if marker.exists() else None
+    selected_source=(runtime/'git-commit').read_bytes() if (runtime/'git-commit').exists() else None
     retry_at=0;next_git=0;next_import=0
     while True:
         try:
             if time.monotonic()>=next_git:
                 refresh_git(config);next_git=time.monotonic()+10
+                current_source=(runtime/'git-commit').read_bytes() if (runtime/'git-commit').exists() else None
+                if current_source!=selected_source:
+                    # A changed pin must also replace already imported publisher
+                    # modules, not mix the previous tools with new app/runtime code.
+                    os.execv(sys.executable,[sys.executable,str(repo/'scripts/watch-dashboard.py'),*sys.argv[1:]])
             wanted=fingerprint(repo)
             if once or (wanted!=last and time.monotonic()>=retry_at):
                 time.sleep(.5)
