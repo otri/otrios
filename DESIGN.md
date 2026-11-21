@@ -51,6 +51,106 @@ replacement and removal under the same permissions; Home simplification must
 not make those functions unreachable. Apply the same hierarchy in Light/Dark,
 using the selected visual references rather than maintaining two app lists.
 
+## Shared breadcrumb plan
+
+Status: proposed header behavior; route inventory checked against active signed
+release `3d2531716f051fb9ab0d3382dd0632b50022849247b978322909596c8098a68d`
+on 2026-11-22. This plan does not change the deployed header.
+
+Use one global location row, with the account control consistently at its right:
+
+`OTriOS › Space › Collection › Current app                         Profile`
+
+Root Home displays `OTriOS`, with Public and Operations as content sections.
+Within an app, show the actual selected Space's display name. The table uses the
+current Public/Operations placements; an app attached in another Space uses that
+Space's name. Space identity continues to travel in `?space=<id>` rather than
+becoming a fabricated `/public` or `/operations` route. Obtain Space names and
+visibility from admitted discovery metadata.
+
+| Current canonical route | Proposed breadcrumb |
+| --- | --- |
+| `/` | **OTriOS** |
+| `/brass-relay` | OTriOS › Public › **The Brass Relay** |
+| `/oib-designer` | OTriOS › Public › **OIB Designer** |
+| `/test-playground` | OTriOS › Public › **Test Playground** |
+| `/test-playground/components` | OTriOS › Public › Test Playground › **Components** |
+| `/test-playground/layouts` | OTriOS › Public › Test Playground › **Layouts** |
+| `/test-playground/long-document` | OTriOS › Public › Test Playground › **Long Document** |
+| `/test-playground/text-panning` | OTriOS › Public › Test Playground › **Text Panning** |
+| `/test-playground/text-input` | OTriOS › Public › Test Playground › **Text Input** |
+| `/test-playground/animations-two-d` | OTriOS › Public › Test Playground › **2D Animations** |
+| `/test-playground/animations-three-d` | OTriOS › Public › Test Playground › **3D Animations** |
+| `/test-playground/bundle-counter` | OTriOS › Public › Test Playground › **Bundle Counter** |
+| `/monitoring` | OTriOS › Operations › **Monitoring** |
+
+Both legacy aliases use their canonical destination's breadcrumb:
+
+- `/bundle-counter` → `/test-playground/bundle-counter`.
+- `/test-playground/oib-designer` → `/oib-designer`.
+
+### Common behavior and geometry
+
+- Render ancestors as links with one `›` separator; render the final item as the
+  current page title. Each ancestor has a distinct destination. OTriOS opens the
+  launcher; the Space crumb opens that Space's existing app overview; a collection
+  crumb opens that collection in the same Space. Back follows the nearest
+  available admitted parent and preserves existing unsaved-change handling.
+- Build the row from the signed catalog's placement, admitted app titles and
+  current Space metadata. An absent attached parent uses the launcher's existing
+  nearest-attached-parent fallback. Respect access visibility throughout.
+  Remove the stale authored Designer-to-Playground ancestor and supply Counter's
+  actual Playground parent through this shared model.
+- Use the same top inset, minimum row height, type role, alignment, separator,
+  divider and account target in both appearances. Keep the header at the viewport
+  top. App titles share one scale; body layout and fitted content cannot move the
+  header down. Resolve the paired Brass Relay/Home semantic palette.
+- For a long path, collapse intermediate ancestors into a labeled overflow menu
+  while retaining access to the full path. Preserve the current title and usable
+  touch targets. Reflow when the supported viewport cannot fit the remaining row.
+- Use the same Profile/Sign in entry on every app. Place Sign out inside the
+  account menu. Chat participants and chat identity remain room-specific actions
+  under their existing permissions and identities.
+- Put app commands in a separate toolbar immediately below the location row.
+  Collection arrangement actions occupy that toolbar; Designer's editing actions,
+  save status and Edit/Test control occupy its toolbar. Separate component scope
+  navigation from global app location.
+
+### Views within a route
+
+Designer retains `OTriOS › Public › OIB Designer` while Library, Layers and
+Inspect switch workspace panels. Its local scope row identifies the current
+document, component and instance; a component name cannot replace the global app
+title. Appearance and Edit/Test remain modes. Apply/Discard and property drafts
+retain their existing leave guards and transactional behavior.
+
+Profile, app information, Space settings, membership/access, retained data,
+sharing, export/replacement, move and removal flows keep their local panel/dialog
+titles and the underlying location context. These are existing local views,
+without separate public URL routes in the current catalog. The account entry
+remains outside the breadcrumb path.
+
+### Monitoring's fixed content
+
+Monitoring may preserve a fixed dashboard canvas matching the Frame design,
+scaled proportionally within the area below the shared header. Keep the global
+`OTriOS › Operations › Monitoring` row anchored and sized like every other app;
+letterboxing belongs to dashboard content. The account control stays at normal
+header size. Fitting the dashboard must preserve its internal chart arrangement
+and leave header navigation independent of dashboard scaling.
+
+### Delivery order
+
+1. Share the location model and header geometry across the launcher, collections,
+   authored apps, Designer and Monitoring; retain current routes, Space context,
+   permissions and leave handling.
+2. Unify account placement and separate app toolbars and Designer scope navigation.
+3. Apply shared type, spacing, control, icon and Light/Dark styles throughout the
+   shell, including panels, dialogs and their interactive states.
+4. Review every route above in both appearances, with matching actions and an
+   authorized/anonymous account where applicable. Check long titles, navigation
+   after refresh/direct links, aliases and Monitoring's fixed canvas separately.
+
 ## Shared navigation and functional parity
 
 Use one Designer shell and command model with Light/Dark appearances. Command
