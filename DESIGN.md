@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OTriOS design reference
 
-Date: 2026-11-22. Status: **selected app references; Designer consolidation proposed**.
+Date: 2026-11-22. Status: **launcher hierarchy implemented; Designer appearance consolidation proposed**.
 This is the human-readable reference for future OTriOS shell, Designer and base
 2D controls. It does not describe a completed visual cutover. The deployed system
 uses its existing app appearances. The technical contract, resolution rules and
@@ -38,8 +38,8 @@ Show these once inside that collection rather than duplicating all of them on
 Home. Keep OIB Designer as a primary authoring tool rather than a Playground
 experiment/shortcut.
 
-Use one navigation hierarchy to drive both collection views, shared card/icon
-components and heading breadcrumbs. Home displays primary entries; Test
+The launcher now uses one signed navigation hierarchy to drive collection views,
+shared card/icon components and heading breadcrumbs. Home displays primary entries; Test
 Playground displays its children. Installation, Space admission and independent
 app data remain separate from launcher placement: grouping an experiment must
 not uninstall it, detach its collection or reset its values.
@@ -269,5 +269,5 @@ The [Designer design package](docs/oib-designer/README.md) specifies the complet
 workspace and component lifecycle, with stable UX journey IDs, technical contracts,
 a representative control qualification ledger and a disposable tested prototype.
 It targets landscape Frame and desktop authoring; phone portrait is unsupported.
-The appearance/navigation consolidation described here remains proposed; it is
+The Designer appearance consolidation described here remains proposed; it is
 separate from the already deployed Designer authoring capabilities.

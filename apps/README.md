@@ -284,3 +284,25 @@ stage and reflows its controls without changing semantic node identities.
 The shared primitive launcher card in `tools/canvas/components.rs` contains an
 icon, title and subheading. Test Playground owns Edit/Done and its seven order
 registers. Home's `state-v4` binding is empty; the old Home ordering is retired.
+
+## Launcher collections
+
+Home and collection views use the signed catalog's path hierarchy. Home omits
+its own tile and shows the nearest attached parent for each app. Test Playground
+contains the experiments, including the independently installed Bundle Counter;
+OIB Designer remains a primary destination. If a parent is not attached in a
+Space, its attached children remain reachable at the next available level.
+Placement never changes attachment, admission, collection identity or saved data.
+
+Collection Edit uses the same host app settings, sharing, data export/replacement,
+removal and ordering controls as Home. Retained datasets remain accessible through
+Data. Back follows catalog parents. The previous `/bundle-counter` and
+`/test-playground/oib-designer` links resolve to their current canonical entries.
+
+Source-owned routes still come from app navigation. `launcher-routes.json` supplies
+registry placement overrides for an existing route and the independently shipped
+Counter. Complete builds pass it to `canvas-bundle compose ... --routes
+apps/launcher-routes.json`; ordinary installations preserve paths from the active
+signed catalog. The resulting catalog is the shared runtime's navigation source.
+The authored Playground UI remains a standalone package preview; managed Spaces
+render its admitted children with the shared launcher controls.

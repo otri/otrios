@@ -7,6 +7,7 @@ use otrios_interfaces::layout::Value;
 use otrios_interfaces::spaces::{AppAvailability, Change, Discovery};
 use std::collections::BTreeMap;
 mod map;
+mod navigation;
 pub(super) mod transfers;
 pub(super) use map::{Drag, DragKind};
 
@@ -91,6 +92,10 @@ pub(super) struct AccessDraft {
 
 #[derive(Default)]
 pub(super) struct Model {
+    // Signed catalog paths describe placement; discovery still owns admission.
+    pub routes: BTreeMap<String, String>,
+    pub collection: Option<(String, String)>,
+    pub pending_collection: Option<String>,
     pub pane: Pane,
     pub page: usize,
     pub map_page: usize,
@@ -118,6 +123,7 @@ pub(super) struct Model {
 }
 #[derive(Clone, Debug)]
 pub(super) enum HostAction {
+    CollectionBack,
     Pane(Pane),
     Page(i8),
     Launch(String, String),

@@ -451,6 +451,119 @@ fn labels(client: &Client) -> Vec<String> {
         .map(|v| v.node.semantics.as_ref().unwrap().label.clone())
         .collect()
 }
+
+#[test]
+fn launcher_collections_preserve_admission_management_and_parent_navigation() {
+    let (mut client, _) = fixture(Role::Admin);
+    let app = |id: &str, title: &str, path: &str| CatalogEntry {
+        app: App {
+            id: id.into(),
+            title: title.into(),
+            ui_ref: format!("app:{id}/ui"),
+            state_ref: format!("app:{id}/state"),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        },
+        path: path.into(),
+        ui_hash: vec![0; 32],
+        private: false,
+    };
+    let catalog = Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![
+            app("home", "Home", ""),
+            app("test-playground", "Test Playground", "test-playground"),
+            app("counter", "Counter", "test-playground/counter"),
+            app("oib-designer", "OIB Designer", "oib-designer"),
+        ],
+    };
+    client
+        .admit_catalog(&encode_catalog(&catalog).unwrap())
+        .unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    for entry in catalog.apps.iter().filter(|e| e.app.id != "counter") {
+        state.spaces[0].apps.push(MapApp {
+            app: entry.app.id.clone(),
+            title: entry.app.title.clone(),
+            availability: AppAvailability::Available,
+        });
+    }
+    state.spaces[0].attached_count = 4;
+    let receive = |client: &mut Client, state: Discovery| {
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(state),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap()
+    };
+    receive(&mut client, state.clone());
+    assert!(labels(&client).contains(&"Test Playground".into()));
+    assert!(labels(&client).contains(&"OIB Designer".into()));
+    assert!(!labels(&client).contains(&"Home".into()));
+    assert!(!labels(&client).contains(&"Counter".into()));
+    click(&mut client, "Test Playground");
+    assert_eq!(client.path(), "test-playground");
+    assert_eq!(client.screen(), "test-playground");
+    assert!(labels(&client).contains(&"Counter".into()));
+    assert!(!labels(&client).contains(&"OIB Designer".into()));
+    click(&mut client, "Edit");
+    assert!(
+        labels(&client)
+            .iter()
+            .any(|label| label.starts_with("Delete App: Counter"))
+    );
+    click(&mut client, "Counter");
+    for label in ["Share App", "Export Data", "Replace Data"] {
+        assert!(
+            labels(&client).contains(&label.into()),
+            "missing {label}: {:?}",
+            labels(&client)
+        );
+    }
+    click(&mut client, "Close");
+    assert_eq!(client.path(), "test-playground");
+    assert!(labels(&client).contains(&"Counter".into()));
+    client.back().unwrap();
+    assert_eq!(client.path(), "");
+    client.navigate("test-playground").unwrap();
+    assert!(labels(&client).contains(&"Counter".into()));
+    // Removing the group from this Space must never strand its attached child.
+    state.generation = 3;
+    state.cursor.revision = 3;
+    state.spaces[0].apps.retain(|a| a.app != "test-playground");
+    state.spaces[0].attached_count = 3;
+    receive(&mut client, state);
+    assert_eq!(client.path(), "");
+    assert!(labels(&client).contains(&"Counter".into()));
+    assert_eq!(
+        destination(&catalog, "test-playground/oib-designer")
+            .unwrap()
+            .path,
+        "oib-designer"
+    );
+    let mut direct = Client::default();
+    direct
+        .admit_catalog(&encode_catalog(&catalog).unwrap())
+        .unwrap();
+    direct.configure_spaces(Some(SPACE)).unwrap();
+    direct.spaces_outgoing().unwrap();
+    direct.navigate("test-playground").unwrap();
+    let mut admitted = snapshot(Role::Admin, 1);
+    admitted.spaces[0].apps.push(MapApp {
+        app: "test-playground".into(),
+        title: "Test Playground".into(),
+        availability: AppAvailability::Available,
+    });
+    admitted.spaces[0].attached_count = 2;
+    receive(&mut direct, admitted);
+    assert_eq!(direct.path(), "test-playground");
+    assert!(labels(&direct).contains(&"Counter".into()));
+}
 fn click(client: &mut Client, label: &str) {
     let id = client
         .scene()

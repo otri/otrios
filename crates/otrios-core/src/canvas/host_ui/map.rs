@@ -497,6 +497,8 @@ pub(super) fn render(
         return finish(b, "", "OTriOS", false, true);
     }
     let mut background_model = Model {
+        routes: model.routes.clone(),
+        collection: model.collection.clone(),
         editing: model.editing,
         scroll: model.scroll,
         page: model.map_page,
@@ -1115,6 +1117,8 @@ fn map_body<'a>(
     viewport: [f32; 2],
     font: Option<&'a crate::dashboard::font::Font>,
 ) -> Builder<'a> {
+    let launcher = model.launcher(snapshot);
+    let snapshot = &launcher;
     let [w, h] = viewport;
     let any_admin = snapshot.spaces.iter().any(|s| s.role == Some(Role::Admin));
     let mut b = Builder {
@@ -1176,10 +1180,11 @@ fn map_body<'a>(
                 0
             })
         .min(otrios_interfaces::spaces::MAX_INSTALLED_APPS);
-        let rows = count
-            .max(1)
-            .div_ceil(width)
-            .max(usize::from(space.layout.height));
+        let rows = count.max(1).div_ceil(width).max(if model.editing {
+            usize::from(space.layout.height)
+        } else {
+            1
+        });
         let height = 68.
             + rows as f32 * 152.
             + if model.editing && space.role == Some(Role::Admin) {
@@ -1338,7 +1343,7 @@ fn map_body<'a>(
                     ),
                 );
             }
-            if !space.retained.is_empty() {
+            if !space.retained.is_empty() || model.collection.is_some() {
                 card.flat(
                     "All retained data",
                     "Data…",
@@ -1387,7 +1392,16 @@ fn map_body<'a>(
     b.actions.extend(content.actions);
     // Only the header masks content. Footer controls float above the edge fade.
     b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
-    b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
+    if model.collection.is_some() {
+        b.flat(
+            "Back to Home",
+            "< OTriOS",
+            [28., 22., 188., 56.],
+            HostAction::CollectionBack,
+        );
+    } else {
+        b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
+    }
     // Profile is appended again here so overflow masking cannot hide it.
     if let Some(identity) = &snapshot.identity {
         let avatar = snapshot

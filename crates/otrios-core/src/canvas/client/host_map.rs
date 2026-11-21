@@ -278,13 +278,15 @@ impl Client {
                 }
             }
             HostAction::MapApp(space, app) => {
-                let apps = snapshot
+                let summary = snapshot
                     .spaces
                     .iter()
                     .find(|s| s.id == space)
-                    .ok_or("Space unavailable")?
+                    .ok_or("Space unavailable")?;
+                let apps = summary
                     .apps
                     .iter()
+                    .filter(|a| self.host.visible(summary, &a.app))
                     .map(|a| a.app.clone())
                     .collect::<Vec<_>>();
                 let index = apps
@@ -513,15 +515,19 @@ impl Client {
                         return Ok(Some(true));
                     }
                     Some(HostAction::MapApp(s, a)) if s == space && a != app => {
-                        let apps = &self
+                        let summary = self
                             .spaces
                             .snapshot()
                             .ok_or("Spaces unavailable")?
                             .spaces
                             .iter()
                             .find(|s| s.id == space)
-                            .ok_or("Space unavailable")?
-                            .apps;
+                            .ok_or("Space unavailable")?;
+                        let apps = summary
+                            .apps
+                            .iter()
+                            .filter(|a| self.host.visible(summary, &a.app))
+                            .collect::<Vec<_>>();
                         let from = apps
                             .iter()
                             .position(|v| v.app == app)

@@ -53,6 +53,7 @@ fn compose(
     key: &Path,
     private: &Path,
     openssl: &str,
+    routes: Option<&Path>,
 ) -> Result<()> {
     use otrios_interfaces::{
         bundle::*,
@@ -111,6 +112,19 @@ fn compose(
             entry.app.id.clone(),
         )
     });
+    if let Some(routes) = routes {
+        let placements: BTreeMap<String, String> =
+            serde_json::from_slice(&read_file(routes, MAX_FILE_BYTES)?)
+                .map_err(|e| e.to_string())?;
+        for entry in &mut catalog.apps {
+            if let Some(path) = placements.get(&entry.app.id) {
+                if path.is_empty() || !otrios_interfaces::canvas::valid_destination(path) {
+                    return Err("Invalid launcher route".into());
+                }
+                entry.path = path.clone();
+            }
+        }
+    }
     let home = catalog
         .apps
         .iter()
@@ -443,8 +457,8 @@ fn main() -> Result<()> {
                 else { bundle::with_revision(current, before.revision().checked_add(1).ok_or("App revision overflow")?)? };
             write_tree(Path::new(&args[3]), &current)
         }
-        Some("compose") if args.len() == 10 && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
-            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9]),
+        Some("compose") if (args.len() == 10 || args.len() == 12 && args[10] == "--routes") && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
+            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], args.get(11).map(Path::new)),
         Some("inspect") if args.len() == 2 => report(&read_tree(Path::new(&args[1]))?),
         Some("verify") if args.len() == 6 && args[2] == "--key" && args[4] == "--openssl" => {
             let key = bundle_files::public_key(Path::new(&args[3]), false, &args[5])?;

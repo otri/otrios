@@ -47,7 +47,7 @@ and a library-owned Slider. Compatible signed guest updates and rollback reuse
 the same hosts. XR remains a separate later runtime milestone in
 [RFC 0036](docs/rfcs/0036-upgradable-oib-component-libraries.md).
 
-The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
+The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The [launcher collection record](docs/experiments/launcher-collections-2026-11-22.md) covers the consolidated Home and experiment navigation. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
 The proposed [OTriOS design reference](DESIGN.md) selects Brass Relay for dark
 appearance and Home for light appearance, with equivalent Designer navigation

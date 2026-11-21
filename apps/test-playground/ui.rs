@@ -25,12 +25,6 @@ pub fn description() -> Ui {
         .build(
             "Test Playground",
             vec![
-                button("OIB Designer")
-                    .frame([880., 716., 216., 60.])
-                    .pin_right(24.)
-                    .pin_bottom(24.)
-                    .key("oib-designer-link")
-                    .navigate_to(Destination::app("oib-designer").route("oib-designer")),
                 launch_card(
                     "component-playground",
                     "components",

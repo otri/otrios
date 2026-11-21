@@ -426,7 +426,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             Ok(catalog) => catalog,
             Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
         };
-        let Some(entry) = catalog.apps.iter().find(|e| e.path == screen) else {
+        let Some(entry) = otrios_core::canvas::destination(&catalog, screen) else {
             return failure(StatusCode::NOT_FOUND, "Not found");
         };
         entry.app.title.clone()
@@ -597,17 +597,20 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/app-catalog.mjs" => Some("text/javascript"),
         "text-input.mjs" | "web/text-input.mjs" => Some("text/javascript"),
         "fonts/Roboto.ttf" | "web/fonts/Roboto.ttf" => Some("font/ttf"),
-        "fonts/OFL.txt" | "web/fonts/OFL.txt"
-        | "fonts/Emoji-LICENSE.txt" | "web/fonts/Emoji-LICENSE.txt"
-        | "fonts/Emoji-NOTICE.txt" | "web/fonts/Emoji-NOTICE.txt" => Some("text/plain; charset=utf-8"),
+        "fonts/OFL.txt"
+        | "web/fonts/OFL.txt"
+        | "fonts/Emoji-LICENSE.txt"
+        | "web/fonts/Emoji-LICENSE.txt"
+        | "fonts/Emoji-NOTICE.txt"
+        | "web/fonts/Emoji-NOTICE.txt" => Some("text/plain; charset=utf-8"),
         "style.css" | "web/style.css" => Some("text/css"),
         "favicon.svg" | "web/favicon.svg" => Some("image/svg+xml"),
         "favicon.ico" | "web/favicon.ico" => Some("image/vnd.microsoft.icon"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
-        "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst"
-        | "fonts/Emoji.otemo" | "web/fonts/Emoji.otemo" => {
-            Some("application/octet-stream")
-        }
+        "fonts/Roboto-Regular.otq.zst"
+        | "web/fonts/Roboto-Regular.otq.zst"
+        | "fonts/Emoji.otemo"
+        | "web/fonts/Emoji.otemo" => Some("application/octet-stream"),
         "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
             Some("application/wasm")
         }
@@ -668,7 +671,15 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
             {
                 file = app.web.join("../shared").join(&path);
             }
-            if !file.exists() && matches!(path.as_str(), "fonts/Roboto-Regular.otq.zst" | "fonts/Emoji.otemo" | "fonts/Emoji-LICENSE.txt" | "fonts/Emoji-NOTICE.txt") {
+            if !file.exists()
+                && matches!(
+                    path.as_str(),
+                    "fonts/Roboto-Regular.otq.zst"
+                        | "fonts/Emoji.otemo"
+                        | "fonts/Emoji-LICENSE.txt"
+                        | "fonts/Emoji-NOTICE.txt"
+                )
+            {
                 file = app.web.join("../shared").join(&path);
             }
             if !file.exists() && matches!(path.as_str(), "fonts/Roboto.ttf" | "fonts/OFL.txt") {

@@ -9,7 +9,12 @@ pub fn description() -> Ui {
             vec![
                 heading(),
                 wrap_cards(
-                    &["brass-relay", "test-playground", "monitoring"],
+                    &[
+                        "brass-relay",
+                        "oib-designer",
+                        "test-playground",
+                        "monitoring",
+                    ],
                     [384., 176.],
                     [336., 176.],
                     [16., 24.],
@@ -28,6 +33,13 @@ pub fn description() -> Ui {
                     "The Brass Relay",
                     "A shared room on the wire",
                     LaunchIcon::Chat,
+                ),
+                launch_card(
+                    "oib-designer",
+                    "oib-designer",
+                    "OIB Designer",
+                    "Design components and interfaces",
+                    LaunchIcon::Playground,
                 ),
                 launch_card(
                     "test-playground",

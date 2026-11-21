@@ -518,6 +518,17 @@ impl Client {
             self.retry_mount();
         }
         if self.spaces.snapshot().is_some()
+            && let Some(app) = self.host.pending_collection.take()
+        {
+            self.host.collection = self.spaces.snapshot().and_then(|s| {
+                s.spaces
+                    .iter()
+                    .filter(|space| !space.archived && space.apps.iter().any(|a| a.app == app))
+                    .min_by_key(|space| Some(&space.id) != self.selected_space.as_ref())
+                    .map(|space| (space.id.clone(), app.clone()))
+            });
+        }
+        if self.spaces.snapshot().is_some()
             && (self.host_active
                 || self.host_requested
                 || self
@@ -540,7 +551,7 @@ impl Client {
                     rendered = true;
                 }
             } else {
-                rendered = self.show_spaces()?;
+                rendered = self.show_launcher()?;
             }
         }
         Ok(changed || rendered)
@@ -606,6 +617,11 @@ impl Client {
         Ok(text.join(". "))
     }
     pub fn show_spaces(&mut self) -> Result<bool> {
+        self.host.collection = None;
+        self.host.pending_collection = None;
+        self.show_launcher()
+    }
+    fn show_launcher(&mut self) -> Result<bool> {
         if self.request_leave(oib_leave::Target::Spaces)? {
             return Ok(true);
         };
@@ -647,6 +663,16 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        self.host.routes = self
+            .catalog
+            .as_ref()
+            .map(|c| {
+                c.apps
+                    .iter()
+                    .map(|e| (e.app.id.clone(), e.path.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         self.host.transfer_caps = self.transfer_caps.clone();
         // Only metadata/navigation rebuild the host. Local drag feedback must
         // retain the mount; an external rebuild invalidates the captured drag.
@@ -819,18 +845,24 @@ impl Client {
                 None
             });
             if let Some(app) = app {
-                if let Some(launch) = snapshot
-                    .selected
-                    .as_ref()
-                    .and_then(|s| s.apps.iter().find(|a| a.app == app))
-                    .and_then(|a| a.launch.clone())
-                {
-                    self.host_active = false;
-                    self.host_actions.clear();
-                    self.open(&launch.ui_ref, &launch.state_ref);
-                    return Ok(());
+                if self.host.is_collection(&app) {
+                    self.host.collection = Some((space.clone(), app));
+                    self.host.page = 0;
+                    self.host.scroll = 0.;
+                } else {
+                    if let Some(launch) = snapshot
+                        .selected
+                        .as_ref()
+                        .and_then(|s| s.apps.iter().find(|a| a.app == app))
+                        .and_then(|a| a.launch.clone())
+                    {
+                        self.host_active = false;
+                        self.host_actions.clear();
+                        self.open(&launch.ui_ref, &launch.state_ref);
+                        return Ok(());
+                    }
+                    self.host.message = "This app is unavailable on this device.".into();
                 }
-                self.host.message = "This app is unavailable on this device.".into();
             }
         }
         self.prepare_host_move(&snapshot)?;
@@ -895,6 +927,20 @@ impl Client {
         use super::host_ui::{HostAction, Pane};
         self.host.message.clear();
         match action {
+            HostAction::CollectionBack => {
+                let parent = self
+                    .host
+                    .collection
+                    .as_ref()
+                    .and_then(|(_, app)| self.host.routes.get(app))
+                    .and_then(|path| path.rsplit_once('/').map(|(parent, _)| parent.to_string()));
+                self.host.editing = false;
+                if let Some(parent) = parent {
+                    self.navigate(&parent)?;
+                } else {
+                    self.show_spaces()?;
+                }
+            }
             action @ (HostAction::TransferUpload
             | HostAction::TransferShare(_)
             | HostAction::TransferExport(..)
@@ -935,6 +981,9 @@ impl Client {
                 self.build_host(false)?;
             }
             HostAction::MapSpace(space) => {
+                if self.host.collection.is_some() && !self.host.editing {
+                    return Ok(false);
+                }
                 let app = self
                     .spaces
                     .snapshot()
@@ -957,6 +1006,11 @@ impl Client {
             HostAction::MapApp(space, app) => {
                 if self.host.editing {
                     self.host_destination(space, Pane::AppSettings(app), None)?;
+                } else if self.host.is_collection(&app) {
+                    self.host.collection = Some((space, app));
+                    self.host.page = 0;
+                    self.host.scroll = 0.;
+                    self.build_host(false)?;
                 } else {
                     self.host_destination(space, Pane::Home, Some(app))?;
                 }
@@ -1100,6 +1154,16 @@ impl Client {
                 self.build_host(true)?;
             }
             HostAction::Launch(ui, state) => {
+                if let Some(entry) = self
+                    .catalog
+                    .as_ref()
+                    .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == ui))
+                    && self.host.is_collection(&entry.app.id)
+                {
+                    let path = entry.path.clone();
+                    self.navigate(&path)?;
+                    return Ok(true);
+                }
                 self.host_active = false;
                 self.host_actions.clear();
                 self.open(&ui, &state);
@@ -1708,6 +1772,11 @@ impl Client {
             }
         }
         self.catalog_hash = hash(bytes);
+        self.host.routes = c
+            .apps
+            .iter()
+            .map(|e| (e.app.id.clone(), e.path.clone()))
+            .collect();
         self.catalog = Some(c);
         Ok(())
     }
@@ -1812,6 +1881,15 @@ impl Client {
         }
     }
     pub fn title(&self) -> String {
+        if self.host_active
+            && let Some((_, app)) = &self.host.collection
+            && let Some(entry) = self
+                .catalog
+                .as_ref()
+                .and_then(|c| c.apps.iter().find(|e| e.app.id == *app))
+        {
+            return entry.app.title.clone();
+        }
         if self.auth_required
             && let Some(request) = &self.requested
             && let Some(entry) = self
@@ -2181,7 +2259,12 @@ impl Client {
     /// The same catalog destination is used by browser URLs and native entry points.
     pub fn screen(&self) -> String {
         if self.host_active {
-            return "spaces".into();
+            return self
+                .host
+                .collection
+                .as_ref()
+                .map(|(_, app)| app.clone())
+                .unwrap_or_else(|| "spaces".into());
         }
         self.catalog
             .as_ref()
@@ -2191,7 +2274,13 @@ impl Client {
     }
     pub fn path(&self) -> String {
         if self.host_active {
-            return String::new();
+            return self
+                .host
+                .collection
+                .as_ref()
+                .and_then(|(_, app)| self.host.routes.get(app))
+                .cloned()
+                .unwrap_or_default();
         }
         self.catalog
             .as_ref()
@@ -2219,12 +2308,34 @@ impl Client {
                 if path.is_empty() {
                     c.apps.first()
                 } else {
-                    c.apps.iter().find(|e| e.path == path)
+                    super::destination(c, path)
                 }
             })
             .ok_or("Unknown admitted destination")?
             .app
             .clone();
+        if self.host.is_collection(&entry.id)
+            && let Some(space) = self.spaces.snapshot().and_then(|s| {
+                s.spaces
+                    .iter()
+                    .filter(|space| !space.archived && space.apps.iter().any(|a| a.app == entry.id))
+                    .min_by_key(|space| Some(&space.id) != self.selected_space.as_ref())
+                    .map(|space| space.id.clone())
+            })
+        {
+            self.host.collection = Some((space, entry.id));
+            self.host.pane = super::host_ui::Pane::Home;
+            self.host.editing = false;
+            self.host.page = 0;
+            self.host.scroll = 0.;
+            self.show_launcher()?;
+            return Ok(());
+        }
+        if self.host.is_collection(&entry.id) && self.spaces.awaiting_snapshot() {
+            self.host.pending_collection = Some(entry.id);
+            self.host_requested = true;
+            return Ok(());
+        }
         if !self.local_apps.reference(&entry.ui_ref) || self.local_uninstall {
             return Err("App is not installed on this device".into());
         }
@@ -4041,6 +4152,9 @@ impl Client {
             if self.host.drag.is_some() {
                 return self.cancel();
             }
+            if self.host.pane == super::host_ui::Pane::Home && self.host.collection.is_some() {
+                return self.host_action(super::host_ui::HostAction::CollectionBack);
+            }
             return self.host_action(super::host_ui::HostAction::Pane(super::host_ui::Pane::Home));
         }
         if let Some(m) = &mut self.active
@@ -4113,7 +4227,7 @@ impl Client {
             }
         }
         if self.host_requested && self.confirmed() && !self.input_busy() {
-            return self.show_spaces();
+            return self.show_launcher();
         }
         self.wire_clock = self.wire_clock.max(now);
         let map_changed = self.tick_map_drag(now)?;
