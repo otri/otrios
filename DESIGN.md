@@ -1,23 +1,65 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OTriOS design reference
 
-Date: 2026-11-11. Status: **selected visual direction; proposed style system**.
+Date: 2026-11-22. Status: **selected app references; Designer consolidation proposed**.
 This is the human-readable reference for future OTriOS shell, Designer and base
 2D controls. It does not describe a completed visual cutover. The deployed system
-still uses its existing Brass Relay tokens. The executable contract, resolution
-rules and delivery gates are proposed in [RFC 0037](docs/rfcs/0037-oib-design-system.md).
+uses its existing app appearances. The technical contract, resolution rules and
+remaining delivery gates are tracked in [RFC 0037](docs/rfcs/0037-oib-design-system.md).
 
 ## Character
 
-OTriOS should feel precise, calm and purposeful. Use monochrome surfaces, clear
-hierarchy, strong headings and restrained outlines. Content supplies most color.
+OTriOS should feel precise, calm and purposeful. Use quiet surfaces, clear
+hierarchy, readable headings and recognizable controls. Color supports identity,
+actions and state rather than replacing labels or interaction cues.
 Controls should remain readable and recognizable on the Frame and in a browser.
 
-The starting inspiration is the [SpaceX-inspired analysis in awesome-design-md](https://github.com/VoltAgent/awesome-design-md/blob/main/design-md/spacex/DESIGN.md).
-That third-party interpretation describes a marketing website, not an operating
-system specification. We borrow its restraint and typography hierarchy; our
-control states, accessibility, layout and modes are OTriOS decisions. We do not
-copy SpaceX branding, photographs or font assets.
+The selected references are the existing OTriOS apps:
+
+- **Dark:** The Brass Relay's charcoal surfaces, warm brass/copper palette,
+  admitted font hierarchy, buttons and heading navigation.
+- **Light:** Home's warm paper surfaces, ink text, soft color families and
+  recognizable app-icon/card treatment.
+
+These supersede the earlier monochrome/SpaceX-inspired palette proposal. Home
+supplies visual references, not the complete Designer command set. Designer must
+retain equivalent navigation and capabilities in both appearances.
+
+## Shared navigation and functional parity
+
+Use one Designer shell and command model with Light/Dark appearances. Command
+availability depends on the document, selection, permissions and editing state;
+appearance never removes functionality or changes what an action does.
+
+| Area | Required in both appearances |
+| --- | --- |
+| Global heading | Consistent return to OTriOS/Space, Space context and current app title, using Brass Relay's readable heading/navigation pattern |
+| Editing scope | Document/component/instance context, equivalent breadcrumbs and return-to-document behavior |
+| Workspace | Library, Layers and Inspect, with the same panel availability, selection and scrolling |
+| Editing lifecycle | New component, Undo, Redo, Discard, Apply, status and the same conflict/leave confirmations |
+| Test interaction | Edit/Test selection with the same sample isolation and return path |
+| Identity and access | Equivalent sign-in/profile/sign-out entry points and relevant Space access actions, under the same permission rules |
+
+Home's light presentation does not itself provide component-scope navigation,
+Designer panels or the editing lifecycle. Those capabilities must receive the
+light treatment rather than disappear. Chat-specific Members/You actions should
+map to the appropriate shared Space/account concepts, not be copied blindly.
+
+Keep the global app heading separate from the current editing-scope breadcrumb.
+A definition name should not obscure which app or Space the user is in. Use
+Home's icon/color language for library and component identity; do not replace
+clear action labels with unexplained icons. Preserve the authored preview and
+explicit style overrides when changing editor appearance.
+
+Before accepting the consolidation, compare semantic controls and actions for
+the same user/document/selection in both modes. Walk the same navigation and
+editing journey in each: enter Designer, open a component, return to the document,
+edit, Undo/Redo, Apply or Discard, Test, and return to the Space. Theme changes
+must preserve navigation, selection, drafts, business values, keyboard focus and
+modal/input barriers. Fill missing navigation entry points in the shared shell
+using existing commands; a theme is never a reason for a reduced command set.
+Capabilities beyond the existing Designer, Home and Space services need their
+own explicit scope.
 
 ## Organization
 
@@ -39,26 +81,28 @@ that matter to that component, with their source visible.
 `background` is meaningful inside a style, not a single global background for all
 controls. Several styles can reference the same shared variable intentionally.
 
-## Initial palette
+## Reference palette
 
-These opaque sRGB values are the starting palette for the first style catalog.
-They are design targets, not values already deployed. Validate actual rendered
-combinations before acceptance, including nested and overridden surfaces.
+These opaque sRGB values map the existing app motifs to shared semantic roles.
+They are consolidation targets, not a completed Designer visual cutover. Validate
+rendered combinations and complete pressed/disabled/selected/focus treatments
+before acceptance, including nested and overridden surfaces.
 
 | Variable | Dark | Light | Role |
 | --- | --- | --- | --- |
-| `canvas_background` | `#000000` | `#FFFFFF` | Workspace and page |
-| `surface_background` | `#101010` | `#F4F4F4` | Panels and grouped content |
-| `surface_raised_background` | `#1C1C1C` | `#E8E8E8` | Menus and floating surfaces |
-| `text_primary` | `#F5F5F5` | `#151515` | Main text and icons |
-| `text_secondary` | `#B8B8B8` | `#525252` | Descriptions and metadata |
-| `divider_stroke` | `#383838` | `#D0D0D0` | Decorative separation |
-| `control_stroke` | `#909090` | `#707070` | Identifiable control boundary |
-| `action_background` | `#F5F5F5` | `#151515` | Primary action fill |
-| `action_text` | `#151515` | `#FFFFFF` | Primary action text/icons |
-| `action_background_pressed` | `#D0D0D0` | `#383838` | Pressed primary action |
-| `selection_background` | `#303030` | `#DADADA` | Selected rows and segments |
-| `focus_ring` | `#FFFFFF` | `#000000` | Keyboard focus indicator |
+| `canvas_background` | `#171B20` | `#F7F6F0` | Workspace and page |
+| `surface_background` | `#23282E` | `#FFFEFA` | Panels and grouped content |
+| `text_primary` | `#EFF1ED` | `#2C322B` | Main text and icons |
+| `text_secondary` | `#ACB3BB` | `#6D7469` | Descriptions and metadata |
+| `divider_stroke` | `#424951` | `#DDDFD4` | Decorative separation |
+| `action_background` | `#D8B775` | `#344D3D` | Primary action fill |
+| `action_text` | `#171B20` | `#FFFEFA` | Primary action text/icons |
+
+Dark secondary emphasis may use the existing copper `#B98460`. Light app/component
+identity can use Home's Sand, Sage, Stone, Sky, Lilac and Rose families. These are
+identity treatments, not substitutes for selection, focus or error semantics.
+Control boundaries, raised surfaces and interaction-state colors still need
+explicit paired-mode qualification rather than inheriting decorative dividers.
 
 Use a transparent background only when the parent surface is known. A decorative
 divider is deliberately quieter than a control boundary; do not substitute it
@@ -70,9 +114,10 @@ exact palette is deferred until the status catalog is reviewed in both modes.
 
 ## Typography
 
-Use the currently admitted font resources for the first implementation. A DIN-like
-display face is a future asset choice requiring verified licensing and native/Web
-font support; it is not a prerequisite for this visual direction.
+Keep the currently admitted font resources and use Brass Relay's readable heading,
+body and control hierarchy as the consolidation reference. A replacement font is
+not part of this work. The role table below remains a longer-term typography
+target; implement only what the existing metrics/scales can represent.
 
 | Role | Target logical size / line height | Weight | Treatment |
 | --- | --- | --- | --- |
@@ -98,8 +143,10 @@ height for the base catalog. Small icons can sit within a larger effective targe
 Interactive targets must not overlap. Dense desktop presentations may use a
 separately reviewed density style; never shrink the Frame's controls to fit.
 
-Use 4-unit radii for fields, 8 for buttons, 12 for panels and 9999 for deliberate
-pills or circles. A radius is clamped to the available shape. Default strokes are
+Use the existing Brass Relay button motif as the control reference and Home's
+card/icon treatment for light identity surfaces. Consolidate radii and padding
+across modes rather than preserving separate per-app recipes. A radius is
+clamped to the available shape. Default strokes are
 1 logical unit, with final device-scale snapping verified on each host.
 Avoid decorative shadows, gradients, glass and glow in the base catalog.
 
@@ -173,6 +220,8 @@ The first reference catalog must show all base controls in Light/Dark, default,
 selected, pressed, disabled and focus combinations; long labels; nested inverse
 surfaces; and an explicit local override followed by Reset. Acceptance includes
 actual native Frame and browser presentation, not just an HTML approximation.
+While Frame is offline, qualify the active OrbStack/browser flow and shared
+native scene behavior, and record physical Frame checks as deferred.
 
 ## Rules for contributors and agents
 
@@ -194,4 +243,5 @@ The [Designer design package](docs/oib-designer/README.md) specifies the complet
 workspace and component lifecycle, with stable UX journey IDs, technical contracts,
 a representative control qualification ledger and a disposable tested prototype.
 It targets landscape Frame and desktop authoring; phone portrait is unsupported.
-The new production Designer remains proposed.
+The appearance/navigation consolidation described here remains proposed; it is
+separate from the already deployed Designer authoring capabilities.
