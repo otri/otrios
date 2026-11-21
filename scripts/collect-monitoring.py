@@ -67,7 +67,20 @@ def collect(config):
     if len(raw)>2*1024*1024:raise ValueError('Monitoring window too large')
     return raw
 
+def presentation_url(config):
+    base=config.get('authority_url','http://127.0.0.1:8876')
+    if not isinstance(base,str):
+        raise ValueError('Expected a literal loopback authority HTTP origin')
+    parsed=urllib.parse.urlsplit(base)
+    if (parsed.scheme!='http' or parsed.hostname not in ('127.0.0.1','::1')
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ('','/') or parsed.query or parsed.fragment
+            or (parsed.port is not None and not 1<=parsed.port<=65535)):
+        raise ValueError('Expected a literal loopback authority HTTP origin')
+    return urllib.parse.urlunsplit((parsed.scheme,parsed.netloc,'/presentation','',''))
+
 def refresh(config):
+    destination=presentation_url(config)
     raw=collect(config)
     output=pathlib.Path(config['output'])
     temporary=output.with_suffix('.pending.flex')
@@ -83,7 +96,7 @@ def refresh(config):
             raise ValueError('Invalid authority identity')
         headers['Authorization']='Bearer '+token
     # Only the loopback OTriOS service can be a publication destination.
-    request=urllib.request.Request('http://127.0.0.1:8876/presentation',data=payload,
+    request=urllib.request.Request(destination,data=payload,
                                   headers=headers,method='POST')
     with urllib.request.build_opener(NoRedirect()).open(request,timeout=15) as response:
         revision=response.read(256).decode()

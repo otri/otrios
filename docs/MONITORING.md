@@ -23,8 +23,10 @@ This is deliberately a subset: no Grafana embedding, dashboard editor, arbitrary
 
 ## Data path and bounded replacement
 
-`scripts/collect-monitoring.py` runs on the photo frame and queries the existing
-Prometheus HTTPS API over Tailscale. It uses fixed, read-only queries and a
+`scripts/collect-monitoring.py` currently runs on the OrbStack Linux authority
+host and queries the existing Prometheus HTTPS API through the Mac's networking.
+The Frame deployment remains a recovery reference in [hosting](FRAME_HOSTING.md).
+The collector uses fixed, read-only queries and a
 private Basic-auth credential; neither browsers nor the native display receive
 that credential. It does not require SSH or the Mac. JSON is confined to this
 external adapter boundary and an optional private evidence cache.
@@ -72,8 +74,12 @@ The credential file contains `username` and `password`, is owned by the service
 user and has mode 0600. HTTPS is mandatory; redirects are rejected so credentials
 cannot be forwarded to another destination. Each response and the full window
 are bounded at 2 MiB, and collection has a 180-second request budget.
-The optional `evidence` path retains the private query window. Publication remains
-fixed to the trusted local `http://127.0.0.1:8876/presentation` endpoint.
+The optional `evidence` path retains the private query window. Publication defaults
+to the trusted local `http://127.0.0.1:8876/presentation` endpoint. An authority on
+another local port can set `authority_url` to its HTTP origin, such as
+`http://127.0.0.1:8894`. Only `127.0.0.1` and `[::1]` HTTP origins are accepted;
+credentials, remote hosts, paths, queries and fragments are rejected. The
+collector always publishes to `/presentation` and refuses redirects.
 
 `otrios-monitoring.timer` runs the one-shot service five minutes apart, starting
 30 seconds after boot. A failed collection leaves the prior complete view and

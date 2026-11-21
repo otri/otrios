@@ -1,11 +1,39 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-# Frame authority
+# Authority hosting
 
-The RK3126 hosts the Rust authority, signed browser/native release store and
-Cloudflare Tunnel for `https://otrios.otri.ca`. The existing native display uses
-the authority's trusted loopback listener. Prometheus and Grafana stay on Linode;
-a frame timer queries Prometheus directly over HTTPS/Tailscale and publishes a
-complete local Monitoring view. The Mac is only a builder and signing publisher.
+## Active OrbStack host
+
+Since 2026-11-22, OrbStack's Ubuntu ARM64 machine `otrios` on SPD Studio 1 serves
+`https://otrios.otri.ca`. It runs the Linux authority and Monitoring renderer;
+the restored Mac toolchain builds and signs releases. Prometheus and Grafana
+remain on Linode. Frame is offline and its cause of failure is unconfirmed.
+
+`otrios-local.service` uses trusted loopback port 8894 and public loopback port
+8877. `otrios-tunnel.service` exposes only the public listener through the existing
+dedicated OTriOS tunnel. Its credential was rotated during cutover; do not install
+the obsolete tunnel files supplied as handoff recovery references.
+
+The host root is `/home/otri/otrios`: `releases/` contains verified immutable code,
+`state.signed.apps/` contains current app data, `spaces.flex` is the current
+registry, and `private/` holds auth, sessions, collector configuration/binding and
+the latest Monitoring feed. Public preserves the previously served demos and
+confirmed roots; Operations remains closed to the restored human Admin. The
+preserved collector identity has a new authority-specific service binding, not
+viewing membership. `otrios-monitoring.timer` refreshes every five minutes.
+
+Enter with `orb -m otrios`; inspect `otrios-local`, `otrios-tunnel` and
+`otrios-monitoring.timer` using systemctl. Mac build/signing configuration is in
+`~/Library/Application Support/OTriOSDashboard-SPDStudio1/config.json`, with source
+at `~/Projects/otrios-spd-studio-1`. Use `--once --stage-only` for future builds
+until their Linux deployment is explicitly configured; no automatic watcher was
+started. Mac executables must not replace the Linux authority/renderer. Preserve
+the current publisher identity and coordinate with OTriProMax before publication.
+
+## Frame hardware deployment reference
+
+The remaining sections describe the RK3126 installation retained for recovery.
+It previously hosted the authority, signed release store, HTTPS tunnel and native
+display. Do not reactivate its public connector against its separate app state.
 
 ## Services and boundaries
 
