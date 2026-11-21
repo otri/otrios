@@ -3264,7 +3264,7 @@ fn playground_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
             c.node
                 .semantics
                 .as_ref()
-                .is_none_or(|s| s.label != "OTriOS" && s.label != "Live UI")
+                .is_none_or(|s| s.label != "OTriOS")
         })
         .filter(|c| {
             matches!(

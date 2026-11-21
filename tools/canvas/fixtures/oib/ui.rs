@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The Live UI companion uses the same canonical component graph and renderer.
+//! Internal slider fixture for OIB tests; never included in the shipped app catalog.
 use crate::authoring::*;
 use otrios_interfaces::canvas::Ui;
-#[path = "../oib-designer/components.rs"]
-// Independently packaged apps reuse this same canonical composition source.
+#[path = "../../../../apps/oib-designer/components.rs"]
+// Reuse the Designer composition helpers for internal tests.
 #[allow(clippy::duplicate_mod)]
 mod components;
 const VOLUME: StateField = StateField::normalized(1, "volume", 400);
@@ -61,9 +61,9 @@ pub fn description() -> Ui {
     )
     .flex_height();
     AppUi::new(
-        "live-ui",
-        "Live UI",
-        schema("live-ui-state-v2", &[VOLUME, BRIGHTNESS]),
+        "oib-test-ui",
+        "OIB test UI",
+        schema("oib-test-ui-state-v2", &[VOLUME, BRIGHTNESS]),
     )
     .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
     .with_composition(
@@ -77,7 +77,7 @@ pub fn description() -> Ui {
         Some("hierarchy-scroll"),
     )
     .build(
-        "Live UI",
+        "OIB test UI",
         vec![
             panel("hierarchy", "Hierarchy", [240., 656.]).frame([24., 120., 240., 656.]),
             panel("preview", "Runtime canvas", [568., 656.]).frame([288., 120., 568., 656.]),

@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-# Live OIB UI
+# OIB Designer
 
 OIB provides Space-owned reusable UI designs, shared edits and per-occurrence
-properties. **Live UI** and **OIB Designer** have separate app state and OIB
-collections. Space Admins edit designs; admitted participants receive the
+properties through **OIB Designer**. The earlier Live UI app is retired; its small
+slider example remains an internal test fixture. Space Admins edit designs; admitted participants receive the
 confirmed active result. Business values remain independent of UI properties.
 Public contracts are in `otrios_interfaces::oib`, reexported by the SDK's `oib`
 feature. Runtime implementation and tests live in `otrios-core`.
@@ -21,8 +21,7 @@ Designer imports SettingsPanel, LabeledSlider and LabeledToggle from the signed
 [OIB 2D library](../libraries/oib-2d/README.md). Shell, binding presets, business
 connections and grants remain app-owned. Imported structure is read-only; shared
 and occurrence literal overrides remain editable. Local wrappers and definitions
-use the ordinary bounded authoring operations. Live UI currently retains its
-local definitions and independent values.
+use the ordinary bounded authoring operations.
 
 The editor creates local components/presets, shapes, text and linked references;
 removes unused local objects; renames designs and instances; edits literals and
@@ -64,8 +63,8 @@ optional UI history excludes imported library bodies.
 Current app features are `otrios-oib-v2` and `otrios-oib-designer-v2`; imported
 libraries additionally require `otrios-oib-library-v1`; executable libraries add
 `otrios-component-behavior-v1`. Auto Layout requires `otrios-auto-layout-v1`
-and renderer layout v6. Business schemas remain
-`live-ui-state-v2` and `oib-designer-state-v2`. State protocol is **v32** and the
+and renderer layout v6. The business schema remains
+`oib-designer-state-v2`. State protocol is **v40** and the
 shared WebSocket retains the release-control **v1** opening envelope. Release
 discovery remains available independently of state recovery.
 

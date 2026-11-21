@@ -9,8 +9,6 @@ pub mod document;
 pub mod input;
 #[path = "../layout-lab/app.rs"]
 pub mod layouts;
-#[path = "../live-ui/app.rs"]
-pub mod live_ui;
 #[path = "../oib-designer/app.rs"]
 pub mod oib_designer;
 #[path = "../layout-text-scroll/app.rs"]
@@ -46,10 +44,6 @@ pub fn screens() -> Vec<crate::authoring::AppScreen> {
         (
             oib_designer::manifest(),
             oib_designer::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,
-        ),
-        (
-            live_ui::manifest(),
-            live_ui::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,
         ),
         (
             document::manifest(),

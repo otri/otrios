@@ -3,8 +3,9 @@
 
 OIB Designer is a Test Playground companion with `app:oib-designer/ui`,
 `app:oib-designer/state` and business schema `oib-designer-state-v2`. Its volume,
-brightness, audio-enabled and display-enabled fields are independent of Live UI's
-collection and values.
+brightness, audio-enabled and display-enabled fields are business values,
+independent of the document's design properties. The earlier Live UI companion
+has been retired; OIB Designer is the user-facing OIB authoring app.
 
 The deployed document imports SettingsPanel, LabeledSlider and LabeledToggle from
 the signed [OIB 2D library](../../libraries/oib-2d/README.md). Shell and the app's

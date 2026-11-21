@@ -10,7 +10,6 @@ apps/
   home/                         # Brass Relay, Test Playground and Monitoring
   brass-relay/                  # Shared lounge; local composer and room channel
   test-playground/              # Demo destinations and editable card order
-  live-ui/                      # Existing isolated OIB slider companion
   oib-designer/                 # Signed D1 nested settings companion
   component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
   layout-lab/                   # Reusable components and five-minute signal
@@ -235,15 +234,16 @@ collection linked from Test Playground. It uses signed Shell/SettingsPanel/
 LabeledSlider/LabeledToggle definitions, separate slider and enable fields, and
 empty tooling viewports for core-generated local hierarchy and selected inspector.
 It requires `otrios-oib-designer-v2`; runtime/host activation is an integration gate.
-Its schema does not replace `live-ui-state-v2`.
+The earlier Live UI companion has been retired. OIB Designer is the supported
+OIB authoring app; the small slider example remains only as an internal test fixture.
 
 ## Independent UI updates
 
-[Live OIB UI](../docs/OIB.md) supplies data-only property editing for the new
-Live UI companion app linked from Test Playground. Its named component defaults
-and instance overrides synchronize within its own Space-bound collection, without
+[OIB Designer](../docs/OIB.md) supplies component authoring and property editing.
+Its named component defaults and instance overrides synchronize within its
+Space-bound collection, without
 rebuilding or publishing a package for each edit. Existing demos remain separate
-attachments with unchanged schemas. General graph/class APIs remain future work.
+attachments with unchanged schemas.
 
 All apps use the same package factory and update contract. See
 [RFC 0013](../docs/rfcs/0013-app-ui-updates.md) for UI-only publishing, qualified

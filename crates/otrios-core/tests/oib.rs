@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
-#[path = "../../../apps/live-ui/app.rs"]
+#[path = "../../../tools/canvas/fixtures/oib/app.rs"]
 mod app;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
@@ -18,7 +18,7 @@ use otrios_interfaces::{
 };
 
 fn setup() -> (Ui, Document) {
-    assert_eq!(app::manifest().id, "live-ui");
+    assert_eq!(app::manifest().id, "oib-test-ui");
     setup_ui(app::ui(&[]))
 }
 fn setup_stacked() -> (Ui, Document) {
@@ -875,7 +875,7 @@ fn mounted_client(ui: &Ui, doc: &mut Document) -> (Client, Session) {
                 format: "otrios-app-catalog-v1".into(),
                 apps: vec![CatalogEntry {
                     app,
-                    path: "live-ui".into(),
+                    path: "oib-test-ui".into(),
                     ui_hash: hash(&bytes),
                     private: false,
                 }],

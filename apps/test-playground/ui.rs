@@ -27,16 +27,10 @@ pub fn description() -> Ui {
             vec![
                 button("OIB Designer")
                     .frame([880., 716., 216., 60.])
-                    .pin_right(184.)
+                    .pin_right(24.)
                     .pin_bottom(24.)
                     .key("oib-designer-link")
                     .navigate_to(Destination::app("oib-designer").route("oib-designer")),
-                button("Live UI")
-                    .frame([1112., 716., 144., 60.])
-                    .pin_right(24.)
-                    .pin_bottom(24.)
-                    .key("live-ui-link")
-                    .navigate_to(Destination::app("live-ui").route("live-ui")),
                 launch_card(
                     "component-playground",
                     "components",

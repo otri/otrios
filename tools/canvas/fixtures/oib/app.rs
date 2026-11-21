@@ -2,8 +2,8 @@
 mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
-        "live-ui",
-        "Live UI",
+        "oib-test-ui",
+        "OIB test UI",
         "canvas-app",
         &[
             "otrios-oib-v2",

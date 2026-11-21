@@ -20,7 +20,7 @@ records completed Safari/Frame acceptance, migration, rollback and data preserva
 [Live OIB UI](docs/OIB.md) adds Space-owned reusable components, per-instance
 overrides and live instance creation, duplication and removal through shared
 CRDT operations. The [O2 qualification](docs/experiments/live-oib-instances-2026-11-03.md)
-records the earlier Live UI companion app. Bounded graph authoring now uses the
+records the original live-editing experiment. Bounded graph authoring now uses the
 canonical [D2 model](docs/OIB_D2_COMPLETION.md); executable class/outlet APIs
 remain later work. Declared
 [component geometry](docs/experiments/live-slider-layout-2026-11-03.md) now changes

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Bounded CPU probe for Live UI input, scrolling and native frame diagnostics.
+//! Bounded CPU probe for OIB test UI input, scrolling and native frame diagnostics.
 //! No network, persistent app data or GPU; run the ARM build on Frame.
-#[path = "../../../apps/live-ui/app.rs"]
+#[path = "../../../tools/canvas/fixtures/oib/app.rs"]
 mod app;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         format: "otrios-app-catalog-v1".into(),
         apps: vec![CatalogEntry {
             app: manifest,
-            path: "live-ui".into(),
+            path: "oib-test-ui".into(),
             ui_hash: hash(&bytes),
             private: false,
         }],

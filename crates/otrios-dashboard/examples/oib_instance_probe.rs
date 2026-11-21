@@ -83,8 +83,10 @@ fn probe_client(catalog: &[u8], request: &Value) -> Result<Client, Box<dyn std::
     )?));
     client.admit_catalog(catalog)?;
     client.open(
-        request["ui_ref"].as_str().unwrap_or("app:live-ui/ui"),
-        request["state_ref"].as_str().unwrap_or("app:live-ui/state"),
+        request["ui_ref"].as_str().unwrap_or("app:oib-designer/ui"),
+        request["state_ref"]
+            .as_str()
+            .unwrap_or("app:oib-designer/state"),
     );
     Ok(client)
 }

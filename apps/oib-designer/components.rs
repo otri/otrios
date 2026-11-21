@@ -774,7 +774,7 @@ pub fn graph(sliders_only: bool) -> g::Document {
         styles: None,
         id: DocumentId(1),
         name: if sliders_only {
-            "Live UI"
+            "OIB test UI"
         } else {
             "Settings designer"
         }

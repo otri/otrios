@@ -2,14 +2,14 @@
 //! Canonical production graph admission, authoring and source-resolution checks. These are
 //! in-process checks, not authority-process, Linux IPC or live acceptance.
 #![cfg(feature = "canvas")]
-// Both independently packaged app descriptions reuse the same composition source.
+// Production Designer and an internal slider fixture share composition helpers.
 #![allow(clippy::duplicate_mod)]
 #[path = "../../../apps/oib-designer/app.rs"]
 mod app;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
-#[path = "../../../apps/live-ui/app.rs"]
-mod live_ui;
+#[path = "../../../tools/canvas/fixtures/oib/app.rs"]
+mod slider_fixture;
 use otrios_core::{
     canvas::{self, Document as StateDocument, Session, StateAdapter, StateSelection, oib},
     dashboard::layout::Layout,
@@ -208,9 +208,9 @@ fn semantic_property_paths_are_ordered_and_do_not_depend_on_names_or_renderer_ha
 #[test]
 fn signed_bindings_and_checked_semantics_use_distinct_numeric_fields() {
     let ui = ui();
-    let old = admitted(live_ui::ui(&[]));
-    assert_eq!(live_ui::manifest().id, "live-ui");
-    assert_eq!(old.state_schema.id, "live-ui-state-v2");
+    let old = admitted(slider_fixture::ui(&[]));
+    assert_eq!(slider_fixture::manifest().id, "oib-test-ui");
+    assert_eq!(old.state_schema.id, "oib-test-ui-state-v2");
     assert_eq!(old.state_schema.fields.len(), 2);
     assert_eq!(ui.state_schema.id, "oib-designer-state-v2");
     assert_eq!(

@@ -865,7 +865,7 @@ fn package_update_contract_retains_identity_policy_and_schema_without_content_pi
     );
 }
 
-#[path = "../../../../apps/live-ui/app.rs"]
+#[path = "../../../../tools/canvas/fixtures/oib/app.rs"]
 mod auto_layout_test_app;
 
 #[test]
@@ -888,7 +888,7 @@ fn source_only_auto_layout_requires_feature_in_bundle() {
     app.ui_ref = ui.ui_ref.clone();
     let entry = CatalogEntry {
         app,
-        path: "live-ui".into(),
+        path: "oib-test-ui".into(),
         private: true,
         ui_hash: hash(&bytes),
     };

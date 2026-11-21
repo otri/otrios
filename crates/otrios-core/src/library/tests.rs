@@ -13,7 +13,7 @@ use otrios_interfaces::{
     oib::{graph, library::FEATURE},
 };
 #[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
-#[path = "../../../../apps/live-ui/app.rs"]
+#[path = "../../../../tools/canvas/fixtures/oib/app.rs"]
 mod app;
 
 fn graph() -> Graph {
@@ -347,7 +347,7 @@ fn nested_package_binding_keeps_unrelated_payloads_and_checks_independent_trust(
     let bytes = canvas::encode_ui(&source).unwrap();
     let entry = CatalogEntry {
         app: app::manifest(),
-        path: "live-ui".into(),
+        path: "oib-test-ui".into(),
         ui_hash: hash(&bytes),
         private: false,
     };
