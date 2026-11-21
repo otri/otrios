@@ -59,30 +59,32 @@ on 2026-11-22. This plan does not change the deployed header.
 
 Use one global location row, with the account control consistently at its right:
 
-`OTriOS › Space › Collection › Current app                         Profile`
+`OTriOS › Current app                                            Profile`
+
+`OTriOS › Collection › Current app                               Profile`
 
 Root Home displays `OTriOS`, with Public and Operations as content sections.
-Within an app, show the actual selected Space's display name. The table uses the
-current Public/Operations placements; an app attached in another Space uses that
-Space's name. Space identity continues to travel in `?space=<id>` rather than
-becoming a fabricated `/public` or `/operations` route. Obtain Space names and
-visibility from admitted discovery metadata.
+Spaces are omitted from every breadcrumb. The visible path describes only the
+app hierarchy. Space identity continues to travel in `?space=<id>` for routing,
+admission and data selection. Ancestor navigation retains that selected Space;
+access checks and discovery visibility continue to apply. Space settings and
+membership remain accessible through their existing management controls.
 
 | Current canonical route | Proposed breadcrumb |
 | --- | --- |
 | `/` | **OTriOS** |
-| `/brass-relay` | OTriOS › Public › **The Brass Relay** |
-| `/oib-designer` | OTriOS › Public › **OIB Designer** |
-| `/test-playground` | OTriOS › Public › **Test Playground** |
-| `/test-playground/components` | OTriOS › Public › Test Playground › **Components** |
-| `/test-playground/layouts` | OTriOS › Public › Test Playground › **Layouts** |
-| `/test-playground/long-document` | OTriOS › Public › Test Playground › **Long Document** |
-| `/test-playground/text-panning` | OTriOS › Public › Test Playground › **Text Panning** |
-| `/test-playground/text-input` | OTriOS › Public › Test Playground › **Text Input** |
-| `/test-playground/animations-two-d` | OTriOS › Public › Test Playground › **2D Animations** |
-| `/test-playground/animations-three-d` | OTriOS › Public › Test Playground › **3D Animations** |
-| `/test-playground/bundle-counter` | OTriOS › Public › Test Playground › **Bundle Counter** |
-| `/monitoring` | OTriOS › Operations › **Monitoring** |
+| `/brass-relay` | OTriOS › **The Brass Relay** |
+| `/oib-designer` | OTriOS › **OIB Designer** |
+| `/test-playground` | OTriOS › **Test Playground** |
+| `/test-playground/components` | OTriOS › Test Playground › **Components** |
+| `/test-playground/layouts` | OTriOS › Test Playground › **Layouts** |
+| `/test-playground/long-document` | OTriOS › Test Playground › **Long Document** |
+| `/test-playground/text-panning` | OTriOS › Test Playground › **Text Panning** |
+| `/test-playground/text-input` | OTriOS › Test Playground › **Text Input** |
+| `/test-playground/animations-two-d` | OTriOS › Test Playground › **2D Animations** |
+| `/test-playground/animations-three-d` | OTriOS › Test Playground › **3D Animations** |
+| `/test-playground/bundle-counter` | OTriOS › Test Playground › **Bundle Counter** |
+| `/monitoring` | OTriOS › **Monitoring** |
 
 Both legacy aliases use their canonical destination's breadcrumb:
 
@@ -93,11 +95,11 @@ Both legacy aliases use their canonical destination's breadcrumb:
 
 - Render ancestors as links with one `›` separator; render the final item as the
   current page title. Each ancestor has a distinct destination. OTriOS opens the
-  launcher; the Space crumb opens that Space's existing app overview; a collection
-  crumb opens that collection in the same Space. Back follows the nearest
+  launcher; a collection crumb opens that collection in the same Space.
+  Back follows the nearest
   available admitted parent and preserves existing unsaved-change handling.
-- Build the row from the signed catalog's placement, admitted app titles and
-  current Space metadata. An absent attached parent uses the launcher's existing
+- Build the visible row from the signed catalog's placement and admitted app
+  titles. Use current Space metadata for admission and navigation context. An absent attached parent uses the launcher's existing
   nearest-attached-parent fallback. Respect access visibility throughout.
   Remove the stale authored Designer-to-Playground ancestor and supply Counter's
   actual Playground parent through this shared model.
@@ -118,7 +120,7 @@ Both legacy aliases use their canonical destination's breadcrumb:
 
 ### Views within a route
 
-Designer retains `OTriOS › Public › OIB Designer` while Library, Layers and
+Designer retains `OTriOS › OIB Designer` while Library, Layers and
 Inspect switch workspace panels. Its local scope row identifies the current
 document, component and instance; a component name cannot replace the global app
 title. Appearance and Edit/Test remain modes. Apply/Discard and property drafts
@@ -134,7 +136,7 @@ remains outside the breadcrumb path.
 
 Monitoring may preserve a fixed dashboard canvas matching the Frame design,
 scaled proportionally within the area below the shared header. Keep the global
-`OTriOS › Operations › Monitoring` row anchored and sized like every other app;
+`OTriOS › Monitoring` row anchored and sized like every other app;
 letterboxing belongs to dashboard content. The account control stays at normal
 header size. Fitting the dashboard must preserve its internal chart arrangement
 and leave header navigation independent of dashboard scaling.
@@ -159,7 +161,7 @@ appearance never removes functionality or changes what an action does.
 
 | Area | Required in both appearances |
 | --- | --- |
-| Global heading | Consistent return to OTriOS/Space, Space context and current app title, using Brass Relay's readable heading/navigation pattern |
+| Global heading | Consistent OTriOS/collection/app path, with Space context outside the breadcrumb, using Brass Relay's readable heading/navigation pattern |
 | Editing scope | Document/component/instance context, equivalent breadcrumbs and return-to-document behavior |
 | Workspace | Library, Layers and Inspect, with the same panel availability, selection and scrolling |
 | Editing lifecycle | New component, Undo, Redo, Discard, Apply, status and the same conflict/leave confirmations |
