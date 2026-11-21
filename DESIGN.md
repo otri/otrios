@@ -25,6 +25,32 @@ These supersede the earlier monochrome/SpaceX-inspired palette proposal. Home
 supplies visual references, not the complete Designer command set. Designer must
 retain equivalent navigation and capabilities in both appearances.
 
+## Home and experiment hierarchy
+
+Home presents a small set of primary destinations in each Space. For Public,
+those are **The Brass Relay**, **OIB Designer** and **Test Playground**. Home is
+the launcher itself, so it has no self-launching Home tile. Monitoring remains
+in the separately authorized Operations Space.
+
+Test Playground owns the experiment collection: Components, Layouts, Long
+Document, Text Panning, Text Input, 2D Animations, 3D Animations and Bundle Counter.
+Show these once inside that collection rather than duplicating all of them on
+Home. Keep OIB Designer as a primary authoring tool rather than a Playground
+experiment/shortcut.
+
+Use one navigation hierarchy to drive both collection views, shared card/icon
+components and heading breadcrumbs. Home displays primary entries; Test
+Playground displays its children. Installation, Space admission and independent
+app data remain separate from launcher placement: grouping an experiment must
+not uninstall it, detach its collection or reset its values.
+
+Navigation returns from an experiment to Test Playground, then to its Space/Home.
+Preserve useful direct links when establishing canonical routes. Collection Edit
+must retain reordering and access to child app information, sharing, export,
+replacement and removal under the same permissions; Home simplification must
+not make those functions unreachable. Apply the same hierarchy in Light/Dark,
+using the selected visual references rather than maintaining two app lists.
+
 ## Shared navigation and functional parity
 
 Use one Designer shell and command model with Light/Dark appearances. Command
