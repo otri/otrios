@@ -95,6 +95,12 @@ impl Viewport {
         self.bounds_dirty = false;
         Ok(())
     }
+    pub fn set_color(&mut self, color: [u8; 4]) {
+        self.color = color;
+        if let Some(reader) = &mut self.reader {
+            reader.set_color(color);
+        }
+    }
     pub fn touching(&self) -> bool {
         self.motion.touching()
     }

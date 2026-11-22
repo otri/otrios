@@ -4811,6 +4811,12 @@ impl Mount {
             .unwrap_or_else(|| self.sample_doc().typed_value(id))
     }
     fn invalidate(&mut self) {
+        if self.chat.is_some()
+            && self.breadcrumbs.is_some()
+            && let Some(document) = &mut self.text_document
+        {
+            document.set_color(self.shell_appearance.palette().text);
+        }
         if let Some(chat) = &mut self.chat {
             chat.prepare(self.viewport, self.keyboard.visible, self.font.clone());
         }

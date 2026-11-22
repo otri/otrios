@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Relay Light and rounded fields — 2026-11-22](relay-light-rendering-2026-11-22.md):
+  retained transcript foreground repaint, matching Canvas/HTML field curves and
+  explicit placeholder contrast.
+
 - [Browser interface density — 2026-11-22](phone-density-2026-11-22.md): CSS-pixel
   sizing and compact phone navigation for launcher/chat/Monitoring, with viewport
   and live scene checks; physical iPhone acceptance remains pending.

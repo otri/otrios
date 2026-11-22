@@ -508,6 +508,19 @@ impl Reader {
                 .clamp(1024 * 1024, JOB_RESERVE),
         )
     }
+    /// Repack paint-bearing glyph buffers without discarding wrapping, source
+    /// identity or the reading position. Held frames retain their old meshes;
+    /// existing allocation accounting bounds replacement work until they retire.
+    pub(crate) fn set_color(&mut self, color: [u8; 4]) -> bool {
+        if self.color == color {
+            return false;
+        }
+        self.color = color;
+        self.epoch += 1;
+        self.job = None;
+        self.pages.clear();
+        true
+    }
     pub fn resize(&mut self, width: f64, height: f64) -> Result<bool> {
         self.job_reserve = self.viewport_budget(width, height, [self.ink_top, self.ink_bottom])?;
         self.height = height;

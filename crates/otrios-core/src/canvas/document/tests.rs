@@ -547,3 +547,54 @@ fn emoji_sequences_keep_one_cluster_and_color_quad_through_wrapping() {
     assert_eq!(quad[14], 7.);
     assert!(quad[8] > 0.);
 }
+
+#[test]
+fn foreground_repaint_preserves_anchor_measurements_and_held_meshes() {
+    let mut r = Reader::new(
+        keyed(20, 32),
+        Arc::new(test_font()),
+        2.,
+        [239, 241, 237, 255],
+        340.,
+        300.,
+    )
+    .unwrap();
+    settle(&mut r);
+    r.jump_to(Anchor {
+        block: 7,
+        source_byte: 0,
+        viewport_y: -3.5,
+    })
+    .unwrap();
+    settle(&mut r);
+    let old = r.frame();
+    let anchor = r.anchor();
+    let offset = r.offset();
+    let measured = r.stats().measured_clusters;
+    let old_vertices = old.draws[0].chunk.mesh.glyph_vertices.clone();
+    assert!(r.set_color([44, 50, 43, 255]));
+    assert!(!r.set_color([44, 50, 43, 255]));
+    settle(&mut r);
+    let light = r.frame();
+    assert_ne!(old.epoch, light.epoch);
+    assert_eq!(anchor, r.anchor());
+    assert_eq!(offset, r.offset());
+    assert_eq!(
+        measured,
+        r.stats().measured_clusters,
+        "paint retains measured source widths"
+    );
+    let rgba = [44_f32, 50., 43., 255.].map(|v| v / 255.);
+    assert!(!light.draws.is_empty());
+    for draw in &light.draws {
+        for vertex in draw.chunk.mesh.glyph_vertices.chunks_exact(16) {
+            assert_eq!(&vertex[4..8], &rgba);
+        }
+    }
+    assert_eq!(old_vertices, old.draws[0].chunk.mesh.glyph_vertices);
+    assert!(r.set_color([239, 241, 237, 255]));
+    settle(&mut r);
+    assert_eq!(anchor, r.anchor());
+    assert_eq!(offset, r.offset());
+    assert_eq!(r.frame().draws[0].chunk.mesh.glyph_vertices[4], 239. / 255.);
+}

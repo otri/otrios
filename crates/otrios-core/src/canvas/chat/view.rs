@@ -81,8 +81,8 @@ impl Paint {
                 Rect::new(0., 0., r[2], r[3]),
                 Primitive::Superellipse {
                     radius: 12.,
-                    exponent: 4.,
-                    color: if primary { [235, 204, 148, 255] } else { LINE },
+                    exponent: 2.,
+                    color: if primary { BRASS } else { LINE },
                 },
             ),
             node(
@@ -90,7 +90,7 @@ impl Paint {
                 Rect::new(1.5, 1.5, r[2] - 3., r[3] - 3.),
                 Primitive::Superellipse {
                     radius: 10.5,
-                    exponent: 4.,
+                    exponent: 2.,
                     color,
                 },
             ),
