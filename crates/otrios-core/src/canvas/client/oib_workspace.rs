@@ -11,6 +11,7 @@ use otrios_interfaces::{
 };
 
 const BASE: u32 = 2_680_000_000;
+pub(super) const MODAL_ROOT: u32 = BASE + 500;
 pub(super) const TAB_LIBRARY: u32 = BASE + 1;
 pub(super) const TAB_LAYERS: u32 = BASE + 2;
 pub(super) const TAB_INSPECT: u32 = BASE + 3;
@@ -364,7 +365,7 @@ fn modal_overlay(
     let mut backdrop = background(BASE + 504, width, root_height, [0, 0, 0, 176], 0.);
     backdrop.responder = Some(TouchResponder::Consume);
     let mut overlay = canvas(
-        BASE + 500,
+        MODAL_ROOT,
         Rect::new(0., 0., width, root_height),
         vec![backdrop, card],
     );
@@ -635,7 +636,7 @@ fn scrolling_modal_overlay(
     let mut backdrop = background(BASE + 504, width, root_height, [0, 0, 0, 176], 0.);
     backdrop.responder = Some(TouchResponder::Consume);
     let mut overlay = canvas(
-        BASE + 500,
+        MODAL_ROOT,
         Rect::new(0., 0., width, root_height),
         vec![backdrop, card],
     );
@@ -649,7 +650,7 @@ pub(super) fn present_modal(
     keyboard: bool,
     appearance: Appearance,
 ) -> Result<(), String> {
-    root.children.retain(|node| node.id != BASE + 500);
+    root.children.retain(|node| node.id != MODAL_ROOT);
     if let Some(modal) = modal {
         let height = (root.frame.height - if keyboard { 240. } else { 0. }).max(1.);
         root.children.push(modal_overlay(

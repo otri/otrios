@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Target-to-parent responder delivery with bounded, snapshot-pinned pointer capture.
+pub mod focus;
 use super::scene::{Located, Scene};
 use otrios_interfaces::scene::*;
 use std::{collections::BTreeMap, sync::Arc};

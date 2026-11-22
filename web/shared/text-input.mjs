@@ -7,7 +7,7 @@ export function selection(input){
 }
 export function canReconcile(localRevision,frameRevision,composing){return !composing&&frameRevision>=localRevision;}
 export class TextInputs {
-  constructor(layer,send){this.layer=layer;this.send=send;this.fields=new Map();this.revision=0;this.focusedKey=null;this.frameRevision=0;this.frameSerial=null;new ResizeObserver(()=>this.resize()).observe(layer);document.addEventListener('selectionchange',()=>{for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);});}
+  constructor(layer,send,focusVisible=()=>false){this.layer=layer;this.send=send;this.focusVisible=focusVisible;this.fields=new Map();this.revision=0;this.focusedKey=null;this.frameRevision=0;this.frameSerial=null;this.focusProjection=null;new ResizeObserver(()=>this.resize()).observe(layer);document.addEventListener('selectionchange',()=>{for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);});}
   resize(){for(const s of this.fields.values())s.input.style.transform=`scale(${this.layer.getBoundingClientRect().width/s.extent[0]})`;}
   get composing(){return [...this.fields.values()].some(s=>s.composing);}
   clear(){for(const s of this.fields.values()){if(s.composing)this.emit(s,'text-composition',{active:false});s.composing=false;s.removed=true;s.input.value='';s.input.remove();}this.fields.clear();this.focusedKey=null;}
@@ -28,7 +28,7 @@ export class TextInputs {
     input.maxLength=d.max_bytes;
     if(d.multiline)input.placeholder='Message...';
     input.enterKeyHint=d.multiline?'send':'done';input.setAttribute('autocapitalize',d.secret?'none':'sentences');
-    input.addEventListener('focus',()=>{if(s.removed||this.syncingFocus)return;if(s.suspended){input.blur();return;}this.emit(s,'text-focus');s.sent=null;});
+    input.addEventListener('focus',()=>{if(s.removed||this.syncingFocus)return;if(s.suspended){input.blur();return;}this.emit(s,'text-focus',{visible:this.focusVisible()});s.sent=null;});
     input.addEventListener('input',e=>{if(!e.isComposing)this.commit(s);});
     input.addEventListener('scroll',()=>{if(!s.removed&&!s.suspended&&!s.composing&&document.activeElement===input)this.emit(s,'text-scroll',{scroll:input.scrollTop});});
     input.addEventListener('select',()=>{if(document.activeElement===input)this.commit(s);});
@@ -68,7 +68,6 @@ export class TextInputs {
     const revision=frame.inputRevision||0;
     if(revision<this.revision||revision<this.frameRevision)return;
     this.frameRevision=revision;if(frame.serial!==undefined)this.frameSerial=frame.serial;
-    const active=[...this.fields.values()].find(s=>s.input===document.activeElement);
     const wanted=new Set(frame.inputs.map(d=>`${frame.epoch}:${d.id}`));
     for(const [key,s] of this.fields)if(!wanted.has(key)){if(s.composing)this.emit(s,'text-composition',{active:false});s.composing=false;s.removed=true;s.input.value='';s.input.remove();this.fields.delete(key);}
     const labels=new Map(frame.controls.map(c=>[c.id,c.label]));
@@ -91,17 +90,26 @@ export class TextInputs {
         s.value=input.value;s.sent=JSON.stringify([input.value,d.cursor,d.anchor]);s.suspended=false;
       }
     }
-    const desired=frame.inputs.find(d=>d.focused);
-    const key=desired?`${frame.epoch}:${desired.id}`:null;
-    // Never autofocus the initial projection or steal focus from outside the
-    // editors. Core traversal chooses the next admitted field, not DOM order.
-    if(!this.composing&&revision>=this.revision){
-      const next=this.fields.get(key);
-      if(key!==this.focusedKey&&active&&active.epoch===frame.epoch&&next&&!next.input.disabled&&document.activeElement===active.input){
-        this.syncingFocus=true;
-        try{next.input.focus({preventScroll:true});}finally{this.syncingFocus=false;}
-      }
-      this.focusedKey=key;
-    }
+  }
+  // Focus ownership remains in the shared responder system. Native inputs only
+  // supply the platform keyboard, selection and IME for its selected responder.
+  mirrorFocus(frame,fallback){
+    const focus=frame.focus;if(!focus)return false;
+    const projection=JSON.stringify([frame.ui,frame.epoch,focus.revision]);
+    if(projection===this.focusProjection)return true;
+    if(document.querySelector?.('dialog[open]'))return false;
+    for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);
+    if(this.composing||(frame.inputRevision||0)<this.revision||
+      (frame.serial!==undefined&&this.frameSerial!==null&&frame.serial<this.frameSerial))return false;
+    const key=focus.id===null?null:`${frame.epoch}:${focus.id}`;
+    const next=this.fields.get(key);
+    if(frame.inputs?.some(d=>d.id===focus.id)&&!next)return false;
+    const target=next?.input||fallback;
+    if((focus.id!==null&&!target)||target?.disabled||next?.suspended)return false;
+    for(const [fieldKey,s]of this.fields)s.input.dataset.focusVisible=String(fieldKey===key&&focus.visible);
+    this.syncingFocus=true;
+    try{if(target&&document.activeElement!==target)target.focus({preventScroll:true});}
+    finally{this.syncingFocus=false;}
+    this.focusedKey=key;this.focusProjection=projection;return true;
   }
 }

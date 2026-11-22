@@ -42,7 +42,7 @@ function sendFrame(){
   const extent=Array.from(app.viewport_size());
   if(lastViewportExtent&&extent.some((value,index)=>value!==lastViewportExtent[index]))viewportRevision++;
   lastViewportExtent=extent;
-  const frame={appearance:app.appearance_preference(),appearanceDark:app.appearance_is_dark(),transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent,viewportPolicy:JSON.parse(app.viewport_policy()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const frame={appearance:app.appearance_preference(),appearanceDark:app.appearance_is_dark(),transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent,viewportPolicy:JSON.parse(app.viewport_policy()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats()),focus:JSON.parse(app.focus_state())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   const chunkMetadata=ui?JSON.parse(app.presentation_frame()):null,chunked=chunkMetadata!==null;
@@ -156,7 +156,7 @@ onmessage=async({data:m})=>{try{
   const pointerCommand=['pointer','pointer-batch'].includes(m.type);
   if(!pointerCommand)tick(performance.now(),Date.now()/1000);let changed=false;
   const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
-  if(['pointer','pointer-batch','activate','adjust','map-scroll'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
+  if(['pointer','pointer-batch','activate','adjust','map-scroll','focus-control','focus-next','focus-key'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
     case 'viewport':if(!m.preserveInput)app.cancel_input();if(m.layoutViewport)app.set_layout_viewport(...m.layoutViewport);changed=app.set_viewport(...m.size);changed=!!app.ui_ref()||changed;break;
     case 'reduced-motion':app.set_reduced_motion(!!m.reduced);changed=true;break;
@@ -172,12 +172,15 @@ onmessage=async({data:m})=>{try{
     case 'appearance':app.set_appearance(m.preference,m.systemDark);publish();break;
     case 'navigate':if(updateBusy&&app.catalog_update_pending())break;navigate(m.screen);changed=true;break;
     case 'back':changed=app.back();break;
-    case 'text-focus':changed=app.activate(m.epoch,m.id);break;
+    case 'focus-control':changed=app.focus_control(m.epoch,m.id,!!m.visible);break;
+    case 'focus-next':changed=app.focus_next(m.epoch,!!m.backward);break;
+    case 'focus-key':changed=app.focus_key(m.epoch,m.key);break;
+    case 'text-focus':changed=app.focus_control(m.epoch,m.id,!!m.visible);changed=app.activate(m.epoch,m.id)||changed;break;
     case 'text-input':changed=app.replace_text_input(m.epoch,m.id,m.text,m.cursor,m.anchor,!!m.selectionOnly);changed=app.scroll_text_input(m.epoch,m.id,m.scroll||0)||changed;break;
     case 'map-scroll':changed=Array.isArray(m.position)?app.scroll_at(m.epoch,m.delta,...m.position):app.scroll_map(m.epoch,m.delta);break;
     case 'text-scroll':changed=app.scroll_text_input(m.epoch,m.id,m.scroll);break;
     case 'text-enter':changed=app.text_input_key(m.epoch,m.id,'Enter');break;
-    case 'text-tab':changed=app.text_input_key(m.epoch,m.id,m.backward?'BackTab':'Tab');break;
+    case 'text-tab':changed=app.focus_next(m.epoch,!!m.backward);break;
     case 'text-cancel':changed=app.cancel_text_input(m.epoch,m.id);break;
     case 'text-blur':changed=app.blur_text_input(m.epoch,m.id);break;
     case 'text-composition':if(m.epoch===app.epoch())composition=m.active?{epoch:m.epoch,id:m.id}:null;break;

@@ -3,6 +3,7 @@
 use super::text_viewport::TextViewport;
 use super::*;
 pub(super) mod breadcrumbs;
+mod focus;
 mod host_access;
 mod host_map;
 mod host_moves;
@@ -267,6 +268,7 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    responder_focus: Mutex<crate::dashboard::input::focus::Focus>,
     component_runtime: Arc<super::component_behavior::Runtime>,
     transfer_caps: super::host_ui::transfers::Capabilities,
     transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
@@ -1617,11 +1619,13 @@ impl Client {
         std::mem::take(&mut self.collection_revoked)
     }
     pub fn effect_vertices(&self) -> Result<Vec<f32>> {
+        self.sync_responder_focus()?;
         let mut vertices = self
             .active
             .as_ref()
             .and_then(|m| m.chat.as_ref())
             .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())?;
+        self.append_focus_vertices(&mut vertices)?;
         if let Some(m) = &self.active {
             let color = m
                 .shell_appearance
@@ -3558,7 +3562,26 @@ impl Client {
         self.pointer_at(epoch, event, at)
     }
     /// Preserve source sample time independently of worker delivery/animation time.
-    pub fn pointer_at(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
+    pub fn pointer_at(&mut self, epoch: u32, event: PointerEvent, at: u64) -> Result<bool> {
+        let mut changed = false;
+        if epoch == self.epoch() && self.active.is_some() && event.phase == PointerPhase::Down {
+            let scene = self.scene()?;
+            let id = scene
+                .hit_path(event.position)
+                .iter()
+                .rev()
+                .find(|n| n.node.semantics.is_some())
+                .map(|n| n.node.id);
+            if let Some(id) = id {
+                changed = self.focus_control(epoch, id, false)?;
+            } else {
+                let current = self.focus_state()?.id;
+                changed = self.select_responder_focus(current, false)?;
+            }
+        }
+        Ok(self.pointer_at_inner(epoch, event, at)? || changed)
+    }
+    fn pointer_at_inner(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
         if epoch == self.epoch()
             && let Some(changed) = self.leave_pointer(event)?
         {
@@ -3838,6 +3861,18 @@ impl Client {
         Ok(changed)
     }
     pub fn activate(&mut self, epoch: u32, id: u32) -> Result<bool> {
+        if epoch != self.epoch() || self.active.is_none() {
+            return Ok(false);
+        }
+        self.sync_responder_focus()?;
+        if !self.focus_allows_activation(id)? {
+            return Ok(false);
+        }
+        let visible = self.responder_focus.lock().unwrap().state().visible;
+        let changed = self.focus_control(epoch, id, visible)?;
+        Ok(self.activate_inner(epoch, id)? || changed)
+    }
+    fn activate_inner(&mut self, epoch: u32, id: u32) -> Result<bool> {
         if epoch == self.epoch()
             && let Some(changed) = self.leave_activate(id)?
         {
@@ -4090,7 +4125,10 @@ impl Client {
     }
     /// Reject stale host events after navigation, a modal change or focus loss.
     pub fn edit_text_input(&mut self, epoch: u32, id: u32, edit: &Edit) -> Result<bool> {
-        if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
+        if epoch != self.epoch()
+            || self.focus_state()?.id != Some(id)
+            || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused)
+        {
             return Ok(false);
         }
         self.hardware_edit(edit)
@@ -4156,6 +4194,9 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
+        if let Edit::Tab { backward } = edit {
+            return self.focus_next(self.epoch(), *backward);
+        }
         if self.active.as_ref().is_some_and(Mount::local_modal_open) {
             return Ok(false);
         };
@@ -4187,22 +4228,6 @@ impl Client {
             return Ok(false);
         };
         match edit {
-            Edit::Tab { backward } => {
-                if let Some(Presentation::Editor { fields }) = &m.ui.presentation {
-                    let i = fields.iter().position(|f| *f == field).unwrap_or(0);
-                    m.focus = Some(
-                        fields[(i + if *backward { fields.len() - 1 } else { 1 }) % fields.len()],
-                    );
-                    for view in m.text_views.values_mut() {
-                        view.cancel();
-                    }
-                    m.keyboard.focus();
-                    m.keyboard_pointer = None;
-                    m.input.cancel_all();
-                    m.invalidate();
-                    return Ok(true);
-                }
-            }
             Edit::Enter => {
                 for view in m.text_views.values_mut() {
                     view.cancel();

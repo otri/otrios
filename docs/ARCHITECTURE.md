@@ -74,3 +74,29 @@ collection queries/transactions and Linux shared-memory IPC remain future work.
 Follow the [modern app pattern and retirement map](MODERN_APP_PATTERN.md) for new
 app work. It separates the production target from current prototype evidence and
 lists which legacy paths should be deleted at each cutover.
+
+## Shared responder focus
+
+Canvas owns the first responder, keyboard traversal and modal focus scopes in
+`dashboard::input::focus`. Its targets bind the scene node, semantic label and
+responder action; a removed or rebound control cannot inherit saved focus.
+Opening a modal saves its opener, restricts focus to the modal controls and
+selects a valid initial responder. Closing restores a still-valid opener.
+Navigation between apps or Spaces resets that local focus domain. Host panels
+retain the Home domain across their temporary mount replacements.
+
+Pointer selection and semantic activation update that same focus owner. Tab
+traverses shared semantic order, activates text editing when appropriate and
+commits/blurs the old editor before leaving it. Non-text Enter/Space activation
+still uses the existing target-to-ancestor responder delivery. Software keyboard
+keys deliver edits to the text first responder without taking focus themselves.
+The shared effects layer paints keyboard focus on native and web presentations.
+
+The browser mirrors the revisioned local focus projection instead of choosing
+its own initial target, trapping Tab in DOM order or remembering an opener by
+label. Native HTML fields provide platform selection, IME and the phone keyboard;
+when their opaque surface covers the shared ring, they project its visible state.
+Focus mirroring waits for acknowledged edits and completed composition, and does
+not reclaim focus from an external sign-in dialog or on an unchanged heartbeat.
+This is host-local presentation state, not a change to the negotiated state wire
+protocol. Native physical-keyboard device discovery remains outside this change.

@@ -4096,6 +4096,7 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
     );
     for viewport in [[320., 568.], [390., 720.], [430., 932.], [720., 390.]] {
         let mut c = Client::default();
+        c.set_software_keyboard(false);
         activate(&mut c, brass_relay::ui(&[]), "brass-phone-dialog", vec![]);
         c.set_viewport(viewport).unwrap();
         c.set_font(font.clone());
@@ -4141,7 +4142,52 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
             .unwrap()
             .node
             .id;
-        edit(&mut c, "Chat identity", 0, 0);
+        let identity = c
+            .scene()
+            .unwrap()
+            .controls()
+            .into_iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Chat identity")
+            })
+            .unwrap()
+            .node
+            .id;
+        c.focus_control(c.epoch(), identity, true).unwrap();
+        c.focus_key(c.epoch(), "Enter").unwrap();
+        let modal_focus = c.focus_state().unwrap();
+        assert!(modal_focus.modal && modal_focus.visible);
+        assert_ne!(modal_focus.id, Some(back));
+        assert!(!c.focus_control(c.epoch(), back, true).unwrap());
+        let controls = c
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .map(|n| n.node.id)
+            .collect::<Vec<_>>();
+        for _ in 0..controls.len() {
+            c.focus_next(c.epoch(), false).unwrap();
+            assert!(controls.contains(&c.focus_state().unwrap().id.unwrap()));
+        }
+        assert_eq!(
+            c.focus_state().unwrap().id,
+            modal_focus.id,
+            "{:?}",
+            c.scene()
+                .unwrap()
+                .controls()
+                .iter()
+                .map(|n| (n.node.id, &n.node.semantics))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !c.effect_vertices().unwrap().is_empty(),
+            "shared keyboard focus is painted"
+        );
         let scene = c.scene().unwrap();
         assert!(c.resource_usage().chat.as_ref().unwrap().modal);
         for background in [
@@ -4249,6 +4295,9 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
             "background composer is not an input behind the dialog"
         );
         edit(&mut c, "Cancel profile", 0, 0);
+        let restored = c.focus_state().unwrap();
+        assert_eq!(restored.id, Some(identity));
+        assert!(!restored.modal && restored.visible);
         while c.chat_outgoing().unwrap().is_some() {}
         edit(&mut c, "Commands", 0, 0);
         assert!(c.resource_usage().chat.as_ref().unwrap().modal);
@@ -4669,7 +4718,7 @@ fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() 
     assert_eq!(updated[0].value, "a😀é");
     assert_eq!((updated[0].cursor, updated[0].anchor), (4, 1));
     assert!(!c.keyboard_visible());
-    c.activate(epoch, node(&c, "Edit profile")).unwrap();
+    c.activate(epoch, node(&c, "Chat identity")).unwrap();
     let profile = c.text_inputs().unwrap();
     assert_eq!(profile.len(), 1);
     assert_ne!(profile[0].id, id);
@@ -5253,6 +5302,8 @@ fn native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene()
         key.origin[1] + key.node.frame.height * key.scale / 2.,
     ];
     let mut composer = Composer::default();
+    let first_responder = client.focus_state().unwrap().id;
+    assert!(first_responder.is_some());
     let before = composer.compose(&mut client, &font).unwrap().clone();
     client
         .pointer_at(
@@ -5265,6 +5316,11 @@ fn native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene()
             101,
         )
         .unwrap();
+    assert_eq!(
+        client.focus_state().unwrap().id,
+        first_responder,
+        "software keys deliver to the text first responder without taking focus"
+    );
     let pressed = composer.compose(&mut client, &font).unwrap().clone();
     assert!(
         !pressed.effects.is_empty(),

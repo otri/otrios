@@ -201,6 +201,18 @@ impl CanvasApp {
     pub fn editing(&self) -> bool {
         self.inner.editing()
     }
+    pub fn focus_state(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.focus_state()?).map_err(|e| e.to_string())
+    }
+    pub fn focus_control(&mut self, epoch: u32, id: u32, visible: bool) -> Result<bool, String> {
+        self.inner.focus_control(epoch, id, visible)
+    }
+    pub fn focus_next(&mut self, epoch: u32, backward: bool) -> Result<bool, String> {
+        self.inner.focus_next(epoch, backward)
+    }
+    pub fn focus_key(&mut self, epoch: u32, key: &str) -> Result<bool, String> {
+        self.inner.focus_key(epoch, key)
+    }
     pub fn text_inputs(&self) -> Result<String, String> {
         serde_json::to_string(&self.inner.text_inputs()?).map_err(|e| e.to_string())
     }

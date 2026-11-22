@@ -109,11 +109,13 @@ test('Enter transports one raw snapshot and one explicit Enter without publicati
     assert.equal(document.activeElement,multiline?field:null);
   }
 });
+function projectFocus(bridge,frame,fallback){bridge.accept(frame);return bridge.mirrorFocus(frame,fallback);}
 function twoFields(){
   const f=fixture({multiline:false});
   const make=(revision,focused=42)=>{
     const frame=f.frame('hello',revision),d=frame.inputs[0];
     frame.inputs=[{...d,focused:focused===42},{...d,id:17,value:'width',cursor:2,anchor:4,focused:focused===17}];
+    frame.focus={id:focused,visible:true,modal:false,revision};
     return frame;
   };
   // Flush the native focus snapshot so the next projection is acknowledged.
@@ -128,20 +130,23 @@ test('Tab and ShiftTab flush raw text then direction; acknowledged core focus ov
     assert.deepEqual(types(sent),['text-input','text-tab']);assert.equal(sent[1].backward,backward);
     assert.equal(document.activeElement,field);
     const revision=sent[1].inputRevision;
-    bridge.accept(make(revision-1,17));assert.equal(document.activeElement,field);assert.equal(field.value,'Sound');
-    bridge.accept(make(revision,17));assert.equal(document.activeElement,next);
+    projectFocus(bridge,make(revision-1,17));assert.equal(document.activeElement,field);assert.equal(field.value,'Sound');
+    projectFocus(bridge,make(revision,17));assert.equal(document.activeElement,next);
     assert.deepEqual(types(sent),['text-input','text-tab'],'core focus synchronization emits no redundant focus/blur/Replace');
     assert.equal(next.selectionStart,2);assert.equal(next.selectionEnd,4);
-    bridge.accept(make(revision-1,42));assert.equal(document.activeElement,next);
+    projectFocus(bridge,make(revision-1,42));assert.equal(document.activeElement,next);
   }
 });
 test('focus reconciliation preserves composition, queued native selection, and external focus',()=>{
   const {bridge,field,next,sent,make}=twoFields();field.dispatchEvent(new Event('compositionstart'));
-  bridge.accept(make(sent.at(-1).inputRevision,17));assert.equal(document.activeElement,field);
-  field.dispatchEvent(new Event('compositionend'));bridge.accept(make(sent.at(-1).inputRevision,17));assert.equal(document.activeElement,next);
+  projectFocus(bridge,make(sent.at(-1).inputRevision,17));assert.equal(document.activeElement,field);
+  field.dispatchEvent(new Event('compositionend'));projectFocus(bridge,make(sent.at(-1).inputRevision,17));assert.equal(document.activeElement,next);
   next.setSelectionRange(0,1);const old=sent.at(-1).inputRevision;
-  bridge.accept(make(old,42));assert.equal(document.activeElement,next);assert.equal(next.selectionEnd,1);
-  next.blur();const external=new Field();external.focus();bridge.accept(make(sent.at(-1).inputRevision,42));assert.equal(document.activeElement,external);
+  projectFocus(bridge,make(old,42));assert.equal(document.activeElement,next);assert.equal(next.selectionEnd,1);
+  next.blur();const external=new Field();external.focus();
+  // External login dialogs keep their own platform focus while open.
+  document.querySelector=selector=>selector==='dialog[open]'?external:null;
+  assert.equal(projectFocus(bridge,make(sent.at(-1).inputRevision,42)),false);assert.equal(document.activeElement,external);
 });
 test('cancelled and retired fields cannot be restored by old projections or retarget late DOM events',()=>{
   for(const epoch of [7,8]){
@@ -159,8 +164,8 @@ test('cancelled and retired fields cannot be restored by old projections or reta
 });
 test('same-revision stale frame cannot reverse acknowledged core focus',()=>{
   const {bridge,field,next,sent,make}=twoFields();key(field,'Tab');const revision=sent.at(-1).inputRevision;
-  bridge.accept({...make(revision,17),serial:12n});assert.equal(document.activeElement,next);
-  bridge.accept({...make(revision,42),serial:11n});assert.equal(document.activeElement,next);
+  projectFocus(bridge,{...make(revision,17),serial:12n});assert.equal(document.activeElement,next);
+  projectFocus(bridge,{...make(revision,42),serial:11n});assert.equal(document.activeElement,next);
 });
 test('secret single-line controls retain browser password and iOS font/scale attributes',()=>{
   const {field}=fixture({secret:true,multiline:false});assert.equal(field.type,'password');assert.equal(field.autocomplete,'current-password');assert.equal(field.spellcheck,false);
@@ -175,14 +180,27 @@ test('IME Tab remains native and ShiftEnter retains multiline behavior',()=>{
   const event=Object.assign(new Event('beforeinput',{cancelable:true}),{inputType:'insertLineBreak'});field.dispatchEvent(event);
   assert.equal(event.defaultPrevented,false);assert.deepEqual(types(sent),[]);
 });
-test('desired focus never crosses epochs or focuses a disabled or missing surface',()=>{
-  for(const mode of ['epoch','disabled','missing']){
+test('desired focus never focuses a disabled or missing surface',()=>{
+  for(const mode of ['disabled','missing']){
     const {bridge,field,sent,make}=twoFields();key(field,'Tab');const revision=sent.at(-1).inputRevision;
     const frame=make(revision,17);
-    if(mode==='epoch')frame.epoch=8;
     if(mode==='disabled')frame.authRequired=true;
     if(mode==='missing')frame.inputs=frame.inputs.filter(d=>d.id!==17);
-    bridge.accept(frame);
+    assert.equal(projectFocus(bridge,frame),false);
     assert.notEqual(document.activeElement,bridge.fields.get(`${frame.epoch}:17`)?.input);
   }
+});
+
+test('shared focus revision alone moves between editors and proxies without synthetic editing events',()=>{
+  const {bridge,field,next,sent,make}=twoFields();sent.length=0;
+  const revision=bridge.revision,frame=make(revision,17);
+  frame.focus.revision=100;
+  assert.equal(projectFocus(bridge,frame),true);assert.equal(document.activeElement,next);
+  assert.equal(next.dataset.focusVisible,'true');assert.equal(field.dataset.focusVisible,'false');
+  assert.deepEqual(types(sent),[]);
+  const external=new Field();external.focus();sent.length=0;
+  assert.equal(bridge.mirrorFocus(frame),true);assert.equal(document.activeElement,external,'stable frames do not reclaim focus');
+  const proxy=new Field();
+  assert.equal(bridge.mirrorFocus({...frame,inputRevision:bridge.revision,focus:{id:99,visible:false,modal:false,revision:101}},proxy),true);
+  assert.equal(document.activeElement,proxy);assert.equal(next.dataset.focusVisible,'false');assert.deepEqual(types(sent),[]);
 });
