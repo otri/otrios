@@ -2740,6 +2740,91 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
     let epoch = client.epoch();
     let limit = client.resource_usage().map_scroll.unwrap().limit[1];
     assert!(limit > 500.);
+    // Icon paint must retain its scroll position when its hit target is clipped.
+    let icon = |client: &Client| {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|c| {
+                c.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Edit Space: Household")
+            })
+            .unwrap();
+        let paint = control.node.children.first().unwrap();
+        (
+            control.node.id,
+            scene.path(paint.id).unwrap().last().unwrap().origin[1],
+        )
+    };
+    let (icon_id, paint_y) = icon(&client);
+    let scene = client.scene().unwrap();
+    let divider = scene.path(4_100_100_100).unwrap();
+    let divider = divider.last().unwrap();
+    let map_top = divider.origin[1] + divider.node.frame.height;
+    assert_eq!(map_top, 96., "Home reserves no empty breadcrumb row");
+    assert!(
+        scene.path(icon_id).unwrap().iter().any(|n| {
+            n.origin[1] == map_top
+                && matches!(
+                    n.node.primitive,
+                    otrios_interfaces::scene::Primitive::Canvas { clip: true }
+                )
+        }),
+        "the map flows directly beneath the divider"
+    );
+    assert!(client.scroll_map(epoch, 20.).unwrap());
+    let (_, clipped_paint_y) = icon(&client);
+    assert_eq!(
+        paint_y - clipped_paint_y,
+        20.,
+        "pencil follows the Space while clipping its target"
+    );
+    let scene = client.scene().unwrap();
+    let top_fade = scene.path(4_200_000_016).unwrap();
+    assert_eq!(top_fade.last().unwrap().origin[1], map_top);
+    let target = scene.path(icon_id).unwrap();
+    let target = target.last().unwrap();
+    assert!(
+        scene
+            .hit_path([target.origin[0] + 24., map_top + 4.])
+            .iter()
+            .any(|n| n.node.id == icon_id),
+        "the top fade passes input to the visible pencil target"
+    );
+    assert!(
+        scene
+            .path(icon_id)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+            .height
+            < 48.
+    );
+    client.set_appearance("dark", true).unwrap();
+    let scene = client.scene().unwrap();
+    assert!(matches!(
+        scene
+            .path(4_200_000_017)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .primitive,
+        otrios_interfaces::scene::Primitive::Superellipse {
+            color: [23, 27, 32, _],
+            ..
+        }
+    ));
+    assert!(client.scroll_map(epoch, -20.).unwrap());
+    assert!(
+        client.scene().unwrap().path(4_200_000_016).is_none(),
+        "top fade clears at the start"
+    );
     assert!(labels(&client).contains(&"Counter in Household".into()));
     for unwanted in ["Scroll up", "Scroll down"] {
         assert!(!labels(&client).contains(&unwanted.into()));

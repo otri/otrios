@@ -5911,6 +5911,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         root.children
             .insert(root.children.len().min(1), backdrop.clone());
     }
+    breadcrumbs::present_host_icons(&mut root, m);
     present_text_views(m, scene, &mut root);
     if let Some(designer) = &m.designer {
         designer.present(

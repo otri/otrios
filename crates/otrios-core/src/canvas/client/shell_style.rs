@@ -49,7 +49,9 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         use otrios_interfaces::theme::*;
         if trail.host {
             match color {
-                [247, 246, 240, 255] => p.background,
+                [247, 246, 240, alpha] => {
+                    [p.background[0], p.background[1], p.background[2], alpha]
+                }
                 [255, 254, 250, 255] => p.surface,
                 [44, 50, 43, 255] => p.text,
                 [109, 116, 105, 255] => p.muted,

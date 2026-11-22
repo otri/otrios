@@ -169,18 +169,9 @@ fn replace(root: &mut SceneNode, id: u32, node: &SceneNode) -> bool {
 pub(in crate::canvas) fn compact_extra(width: f32) -> f32 {
     if width < 600. { 36. } else { 0. }
 }
-pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
-    let Some(trail) = &mount.breadcrumbs else {
-        return;
-    };
-    fn remove_account_actions(node: &mut SceneNode, ui: &Ui) {
-        node.children.retain(|child| !matches!(child.responder,Some(TouchResponder::Activate(Action::AppEvent(control))) if ui.handlers.iter().any(|h|h.control==control&&h.operation==Operation::SignOut)));
-        for child in &mut node.children {
-            remove_account_actions(child, ui);
-        }
-    }
-    remove_account_actions(root, &mount.ui);
-    if trail.host {
+/// Supply icon paint before scroll clipping adjusts control frames and children.
+pub(super) fn present_host_icons(root: &mut SceneNode, mount: &Mount) {
+    if mount.breadcrumbs.as_ref().is_some_and(|trail| trail.host) {
         fn edit_icons(node: &mut SceneNode, color: [u8; 4]) {
             let label = node
                 .semantics
@@ -219,6 +210,18 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         }
         edit_icons(root, mount.shell_appearance.palette().text);
     }
+}
+pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
+    let Some(trail) = &mount.breadcrumbs else {
+        return;
+    };
+    fn remove_account_actions(node: &mut SceneNode, ui: &Ui) {
+        node.children.retain(|child| !matches!(child.responder,Some(TouchResponder::Activate(Action::AppEvent(control))) if ui.handlers.iter().any(|h|h.control==control&&h.operation==Operation::SignOut)));
+        for child in &mut node.children {
+            remove_account_actions(child, ui);
+        }
+    }
+    remove_account_actions(root, &mount.ui);
 
     let designer = mount.designer.as_ref().filter(|d| d.focus_layout());
     let palette = mount.shell_appearance.palette();
@@ -453,7 +456,8 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
             .iter()
             .position(|n| {
                 n.frame.y == 0.
-                    && n.frame.height == super::super::host_ui::map_top(mount.viewport[0])
+                    && n.frame.height
+                        == super::super::host_ui::map_top(mount.viewport[0], trail.items.len() > 1)
             })
             .map(|index| index + 1)
     } else {

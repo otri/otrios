@@ -14,9 +14,12 @@ const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
 const WHITE: [u8; 4] = [255, 254, 250, 255];
-pub(super) const TOP: f32 = 112.;
-pub(super) fn top(width: f32) -> f32 {
-    TOP + crate::canvas::client::breadcrumbs::compact_extra(width)
+pub(super) fn top(width: f32, nested: bool) -> f32 {
+    96. + if nested {
+        crate::canvas::client::breadcrumbs::compact_extra(width)
+    } else {
+        0.
+    }
 }
 pub(super) const FOOT: f32 = 80.;
 #[derive(Clone, Debug)]
@@ -1135,7 +1138,7 @@ fn map_body<'a>(
     let launcher = model.launcher(snapshot);
     let snapshot = &launcher;
     let [w, h] = viewport;
-    let top = self::top(w);
+    let top = self::top(w, model.collection.is_some());
     let mut b = Builder {
         font,
         nodes: vec![],
@@ -1155,7 +1158,7 @@ fn map_body<'a>(
                     || s.role == Some(Role::Admin) && snapshot.identity.is_some())
         })
         .collect::<Vec<_>>();
-    let margin = if w < 500. { 16. } else { 28. };
+    let margin = if w < 500. { 12. } else { 24. };
     let gap = 20.;
     let available = (w - margin * 2.).max(1.);
     let cols = ((available + gap) / 160.).floor().clamp(1., 6.) as usize;

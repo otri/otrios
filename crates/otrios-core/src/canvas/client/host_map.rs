@@ -347,7 +347,8 @@ impl Client {
             if epoch != self.epoch() || self.host.drag.is_some() {
                 return Ok(None);
             }
-            if event.position[1] < super::super::host_ui::map_top(viewport[0])
+            if event.position[1]
+                < super::super::host_ui::map_top(viewport[0], self.host.collection.is_some())
                 || event.position[1] >= viewport[1]
             {
                 return Ok(None);
@@ -630,7 +631,7 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
 }
 
 /// Clip semantic controls on the presented clone, never the canonical layout.
-/// A quiet edge fade appears only while there is more map content below.
+/// Thin edge fades indicate hidden content above and below without blocking input.
 pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::text_scroll::Info) {
     use crate::dashboard::components::background;
     use otrios_interfaces::scene::Rect;
@@ -640,20 +641,27 @@ pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::t
         for child in &mut root.children {
             crate::dashboard::scene::clip_controls(child, [0., 0.], bounds);
         }
-        if info.offset[1] + 0.5 < info.limit[1] {
-            let fade_height = 80_f32.min(bounds[1]);
-            let step_height = fade_height / 16.;
+        let fade_height = 24_f32.min(bounds[1] / 2.);
+        let step_height = fade_height / 16.;
+        for (top, visible) in [
+            (true, info.offset[1] > 0.5),
+            (false, info.offset[1] + 0.5 < info.limit[1]),
+        ] {
+            if !visible {
+                continue;
+            }
             for step in 0..16 {
+                let alpha = if top { 16 - step } else { step + 1 };
                 let mut fade = background(
-                    4_200_000_000 + step,
+                    4_200_000_000 + if top { 16 } else { 0 } + step,
                     bounds[0],
                     step_height,
-                    [247, 246, 240, ((step + 1) * 255 / 16) as u8],
+                    [247, 246, 240, (alpha * 255 / 16) as u8],
                     0.,
                 );
                 fade.frame = Rect::new(
                     0.,
-                    bounds[1] - fade_height + step as f32 * step_height,
+                    if top { 0. } else { bounds[1] - fade_height } + step as f32 * step_height,
                     bounds[0],
                     step_height,
                 );

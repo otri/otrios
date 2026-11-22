@@ -231,6 +231,6 @@ pub(super) fn render(
     map::render(snapshot, model, draft, sign_in, sign_out, viewport, font)
 }
 
-pub(in crate::canvas) fn map_top(width: f32) -> f32 {
-    map::top(width)
+pub(in crate::canvas) fn map_top(width: f32, nested: bool) -> f32 {
+    map::top(width, nested)
 }
