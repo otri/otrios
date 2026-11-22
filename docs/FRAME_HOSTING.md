@@ -6,7 +6,8 @@
 Since 2026-11-22, OrbStack's Ubuntu ARM64 machine `otrios` on SPD Studio 1 serves
 `https://otrios.otri.ca`. It runs the Linux authority and Monitoring renderer;
 the restored Mac toolchain builds and signs releases. Prometheus and Grafana
-remain on Linode. Frame is offline and its cause of failure is unconfirmed.
+remain on Linode. Frame is online as a native display subscriber; it no longer
+hosts an authority, tunnel or Monitoring collector.
 
 `otrios-local.service` uses trusted loopback port 8894 and public loopback port
 8877. `otrios-tunnel.service` exposes only the public listener through the existing
@@ -27,13 +28,48 @@ Enter with `orb -m otrios`; inspect `otrios-local`, `otrios-tunnel` and
 at `~/Projects/otrios-spd-studio-1`. Use `--once --stage-only` for future builds
 until their Linux deployment is explicitly configured; no automatic watcher was
 started. Mac executables must not replace the Linux authority/renderer. Preserve
-the current publisher identity and coordinate with OTriProMax before publication.
+the current publisher identity.
 
-## Frame hardware deployment reference
+## Active Frame subscriber
 
-The remaining sections describe the RK3126 installation retained for recovery.
-It previously hosted the authority, signed release store, HTTPS tunnel and native
-display. Do not reactivate its public connector against its separate app state.
+Frame (`SPD-DASH-0001`, Tailscale `100.73.221.26`) runs only the existing direct
+KMS/GLES2 display and touch client. `/etc/otrios-dashboard.conf` sets both
+`DASHBOARD_URL` and `DASHBOARD_CODE_URL` to `https://otrios.otri.ca`. Its native
+service waits for network/Tailscale and does not pull in a local authority.
+Remote sessions use HTTPS/WSS with an explicit matching Origin; the existing
+private device identity supplies authentication independently of that Origin.
+
+Keep `/etc/otrios-dashboard.identity`, the pinned publisher public key, Linux
+and graphics libraries, and the accepted touch firmware/udev mapping. The
+supervisor and `session-bootstrap` live in `/opt/otrios-dashboard`; verified code
+and the valid local-app namespace live in `/var/lib/otrios-dashboard`. Initialize
+a missing namespace with the installed `device-apps.py init` as `kiosk`; do not
+copy obsolete app-removal records from the retired server setup. Guest identity,
+Transfers and touch calibration backups are preserved.
+
+The retired `/opt/otrios-authority`, `/etc/otrios-authority` and
+`/var/lib/otrios-authority` trees and authority/tunnel/collector units were removed
+on 2026-11-22. Deploy future signed code to the OrbStack authority; Frame follows
+its release events and verifies native bytes using its existing publisher key.
+The 128 MiB native cache remains disposable. Network loss leaves cached code
+available; live synchronization and fresh remote data require connectivity.
+
+For focused hardware acceptance, use `scripts/check-frame-release.py` with the
+existing pinned SSH config, the published `--pointer`, an `--output` path, and
+`--subscriber-origin https://otrios.otri.ca`. Do not pass `--resume-monitoring`:
+that collector now belongs on OrbStack. The check verifies the signed cache,
+running executable, confirmed state, remote health and absence of old hosting
+roles. Physical gestures require separate hands-on acceptance.
+
+See [the cutover record](experiments/frame-subscriber-2026-11-22.md) for release
+and validation evidence.
+
+## Historical Frame authority deployment reference
+
+The remaining sections describe the former RK3126 authority installation for
+recovery reference, including its former loopback URLs and server-role paths.
+Those roles and paths are no longer installed on Frame. Do not reactivate its
+old public connector or restore its separate app state.
 
 ## Services and boundaries
 

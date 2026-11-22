@@ -2,8 +2,8 @@
 # Direct native host; enable this service for boot after deployment acceptance.
 [Unit]
 Description=OTriOS direct KMS/GBM GLES2 dashboard
-After=otrios-authority.service tailscaled.service
-Wants=tailscaled.service otrios-authority.service
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
 StartLimitIntervalSec=0
 
 [Service]

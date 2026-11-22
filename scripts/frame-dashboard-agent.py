@@ -198,7 +198,7 @@ def qualify(base,cache,key,openssl,release=None,limit=CACHE_BYTES,pins=()):
         data=fetch(base,root+path,MAX_BINARY);verify_binary(data,item)
         atomic(stage/'dashboard-native',data,0o700)
         for remote,local,item in resource_items(manifest):
-            limit=resource_limit(local);data=fetch(base,root+remote,limit);verify_font(data,item,limit)
+            item_limit=resource_limit(local);data=fetch(base,root+remote,item_limit);verify_font(data,item,item_limit)
             (stage/local).parent.mkdir(parents=True,exist_ok=True);atomic(stage/local,data)
         atomic(stage/'manifest.json',raw);atomic(stage/'manifest.sig',sig)
         stage.rename(dest)

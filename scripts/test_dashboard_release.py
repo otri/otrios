@@ -211,6 +211,19 @@ class SignedReleases(unittest.TestCase):
             _,exe=agent.qualify('https://example.com',self.cache,self.public,OPENSSL,candidate,limit=used+required,pins=(self.id,))
             self.assertEqual(exe.read_bytes(),self.native.read_bytes())
             self.assertLessEqual(agent.cache_size(self.cache),used+required)
+    def test_download_keeps_whole_cache_budget_separate_from_resource_limits(self):
+        from unittest.mock import patch
+        # A fresh native download may exceed an individual resource's 1 MiB
+        # limit while remaining well inside the admitted artifact-cache budget.
+        (self.web/'app.js').write_text('remote subscriber')
+        self.native.write_bytes(self.native.read_bytes()+b'x'*(2*1024*1024))
+        candidate=self.publish()['id']
+        def fetch(base,path,limit):return (self.out/path.removeprefix('/releases/')).read_bytes()
+        with patch.object(agent,'fetch',side_effect=fetch):
+            _,exe=agent.qualify('https://example.com',self.cache,self.public,OPENSSL,candidate,limit=8*1024*1024,pins=(self.id,))
+        self.assertEqual(exe.stat().st_size,self.native.stat().st_size)
+        self.assertTrue((self.cache/self.id/'dashboard-native').exists())
+        self.assertLessEqual(agent.cache_size(self.cache),8*1024*1024)
     def test_modified_native_bytes_are_rejected(self):
         (self.cache/self.id/'dashboard-native').write_bytes(self.native.read_bytes()+b'changed')
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
