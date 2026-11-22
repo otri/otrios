@@ -3138,6 +3138,7 @@ impl Client {
         if let Some(mount) = &mut self.active {
             mount.sync_panel_scroll()?;
         }
+        self.apply_restored_editor_focus()?;
         Ok(())
     }
     pub fn scene(&self) -> Result<Arc<Scene>> {
@@ -3651,7 +3652,8 @@ impl Client {
                 changed = self.select_responder_focus(current, false)?;
             }
         }
-        Ok(self.pointer_at_inner(epoch, event, at)? || changed)
+        let delivered = self.pointer_at_inner(epoch, event, at)?;
+        Ok(self.apply_restored_editor_focus()? || delivered || changed)
     }
     fn pointer_at_inner(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
         if epoch == self.epoch()
@@ -3947,7 +3949,8 @@ impl Client {
         }
         let visible = self.responder_focus.lock().unwrap().state().visible;
         let changed = self.focus_control(epoch, id, visible)?;
-        Ok(self.activate_inner(epoch, id)? || changed)
+        let activated = self.activate_inner(epoch, id)?;
+        Ok(self.apply_restored_editor_focus()? || activated || changed)
     }
     fn activate_inner(&mut self, epoch: u32, id: u32) -> Result<bool> {
         if epoch == self.epoch()
@@ -4209,8 +4212,11 @@ impl Client {
     }
     /// Reject stale host events after navigation, a modal change or focus loss.
     pub fn edit_text_input(&mut self, epoch: u32, id: u32, edit: &Edit) -> Result<bool> {
-        if epoch != self.epoch()
-            || self.focus_state()?.id != Some(id)
+        if epoch != self.epoch() {
+            return Ok(false);
+        }
+        self.apply_restored_editor_focus()?;
+        if self.focus_state()?.id != Some(id)
             || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused)
         {
             return Ok(false);
@@ -4278,6 +4284,7 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
+        self.apply_restored_editor_focus()?;
         if let Edit::Tab { backward } = edit {
             return self.focus_next(self.epoch(), *backward);
         }
@@ -4402,6 +4409,10 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        let changed = self.back_inner()?;
+        Ok(self.apply_restored_editor_focus()? || changed)
+    }
+    fn back_inner(&mut self) -> Result<bool> {
         if self
             .active
             .as_ref()

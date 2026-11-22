@@ -26,11 +26,19 @@ pub struct Focus {
     domain: String,
     scopes: Vec<Scope>,
     target: Option<Target>,
+    restored: Option<Target>,
     state: State,
 }
 impl Focus {
     pub fn state(&self) -> State {
         self.state
+    }
+    /// A scope pop restores ownership and requires the mutable client to resume
+    /// any corresponding editor lifecycle before projecting focus to a host.
+    pub fn take_restored(&mut self) -> Option<Target> {
+        self.restored
+            .take()
+            .filter(|target| self.target.as_ref() == Some(target))
     }
     fn publish(&mut self) {
         let id = self.target.as_ref().map(|t| t.id);
@@ -60,6 +68,7 @@ impl Focus {
             self.domain = domain.into();
             self.scopes.clear();
             self.target = None;
+            self.restored = None;
             self.visible(false);
             self.state.revision = self.state.revision.wrapping_add(1);
         }
@@ -69,11 +78,13 @@ impl Focus {
             .zip(scopes)
             .take_while(|(a, b)| a.id == **b)
             .count();
+        let restoring = self.scopes.len() > common;
         while self.scopes.len() > common {
             let previous = self.scopes.pop().unwrap();
             self.target = previous.opener;
             self.visible(previous.visible);
         }
+        let restore_target = restoring.then(|| self.target.clone()).flatten();
         let entering = scopes.len() > common;
         for id in scopes.iter().skip(common) {
             self.scopes.push(Scope {
@@ -97,6 +108,11 @@ impl Focus {
                 self.target = eligible.first().cloned();
             }
         }
+        if entering {
+            self.restored = None;
+        } else if restoring {
+            self.restored = restore_target.filter(|target| self.target.as_ref() == Some(target));
+        }
         self.publish();
     }
     pub fn select(&mut self, eligible: &[Target], id: Option<NodeId>, visible: bool) -> bool {
@@ -111,6 +127,7 @@ impl Focus {
             self.state.revision = self.state.revision.wrapping_add(1);
         }
         self.target = target;
+        self.restored = None;
         self.visible(visible);
         self.publish();
         before != self.state
@@ -159,6 +176,12 @@ mod tests {
         assert_eq!(focus.state().id, Some(5));
         focus.reconcile("app", &[10], &[target(3), target(4)], None);
         assert_eq!(focus.state().id, Some(4));
+        assert_eq!(focus.take_restored(), Some(target(4)));
+        assert_eq!(
+            focus.take_restored(),
+            None,
+            "restoration is applied exactly once"
+        );
         focus.reconcile("app", &[], &root, None);
         assert_eq!(focus.state().id, Some(1));
         assert!(focus.state().visible);
@@ -168,6 +191,11 @@ mod tests {
         rebound[1].responder = TouchResponder::Activate(Action::AppEvent(99));
         focus.reconcile("app", &[], &rebound, None);
         assert_eq!(focus.state().id, None);
+        assert_eq!(
+            focus.take_restored(),
+            None,
+            "a rebound opener cannot resume editing"
+        );
         assert!(!focus.state().visible);
         focus.reconcile("other app", &[], &root, None);
         assert_eq!(focus.state().id, None);

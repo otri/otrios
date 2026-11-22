@@ -143,6 +143,48 @@ impl Client {
             .reconcile(&domain, &scopes, &targets, preferred);
         Ok(())
     }
+    /// Complete a restored first responder's local editing lifecycle. A modal
+    /// return is not another activation: in particular it must not re-send a
+    /// command, acquire another draft lease or replay an event.
+    pub(super) fn apply_restored_editor_focus(&mut self) -> Result<bool> {
+        self.sync_responder_focus()?;
+        let Some(target) = self.responder_focus.lock().unwrap().take_restored() else {
+            return Ok(false);
+        };
+        if !self.focus_targets()?.contains(&target)
+            || !self
+                .text_inputs()?
+                .iter()
+                .any(|input| input.id == target.id && !input.focused)
+        {
+            return Ok(false);
+        }
+        let chat_command = self.active.as_ref().and_then(|mount| {
+            let TouchResponder::Activate(Action::AppEvent(control)) = target.responder else {
+                return None;
+            };
+            let Operation::Chat(command) = mount.handler(control)?.operation else {
+                return None;
+            };
+            Some(command)
+        });
+        if let Some(command) = chat_command {
+            let mount = self.active.as_mut().ok_or("No Canvas")?;
+            if mount
+                .chat
+                .as_mut()
+                .is_some_and(|chat| chat.restore_input_focus(command))
+            {
+                mount.keyboard.focus();
+                mount.invalidate();
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        // Generic and Designer text-field activation is the local focus
+        // operation itself. It never invokes the field's submit action.
+        self.activate_inner(self.epoch(), target.id)
+    }
     /// Stable first-responder projection for accessibility and platform IME hosts.
     pub fn focus_state(&self) -> Result<State> {
         self.sync_responder_focus()?;

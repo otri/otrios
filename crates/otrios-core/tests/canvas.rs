@@ -5651,3 +5651,194 @@ fn fixed_chat_controls_work_with_older_descriptions_and_reject_publisher_remappi
         assert!(error.contains("Chat host controls"), "{error}");
     }
 }
+
+#[test]
+fn modal_return_restores_text_editing_without_replaying_activation_or_submission() {
+    use otrios_interfaces::{
+        chat::{Event, Member, Profile},
+        keyboard::Edit,
+        scene::{PointerEvent, PointerPhase},
+    };
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    for software_keyboard in [false, true] {
+        for dismissal in ["close", "back", "pointer"] {
+            let mut client = Client::default();
+            client.set_font(font.clone());
+            client.set_software_keyboard(software_keyboard);
+            activate(
+                &mut client,
+                brass_relay::ui(&[]),
+                "modal-editor-return",
+                vec![],
+            );
+            client
+                .set_viewport(if software_keyboard {
+                    [1280., 800.]
+                } else {
+                    [390., 720.]
+                })
+                .unwrap();
+            client
+                .receive_chat(
+                    &chat::encode_event(&Event::Welcome {
+                        you: Member {
+                            profile: Profile {
+                                id: "a".repeat(32),
+                                name: "Captain Focus".into(),
+                                avatar: 0,
+                            },
+                            generation: 1,
+                            admin: false,
+                        },
+                        temporary: false,
+                        credential: None,
+                        epoch: 1,
+                        members: vec![],
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let epoch = client.epoch();
+            let composer = node(&client, "Message composer");
+            client.activate(epoch, composer).unwrap();
+            while client.chat_outgoing().unwrap().is_some() {}
+            assert!(
+                client
+                    .edit_text_input(
+                        epoch,
+                        composer,
+                        &Edit::Replace {
+                            text: "/help".into(),
+                            cursor: 5,
+                            anchor: 5,
+                            selection_only: false
+                        }
+                    )
+                    .unwrap()
+            );
+            assert!(
+                client
+                    .edit_text_input(epoch, composer, &Edit::Enter)
+                    .unwrap()
+            );
+            assert!(client.focus_state().unwrap().modal);
+            while client.chat_outgoing().unwrap().is_some() {}
+            match dismissal {
+                "close" => {
+                    client
+                        .activate(epoch, node(&client, "Close dialog"))
+                        .unwrap();
+                }
+                "back" => {
+                    client.back().unwrap();
+                }
+                _ => {
+                    let scene = client.scene().unwrap();
+                    let close = scene
+                        .controls()
+                        .into_iter()
+                        .find(|n| {
+                            n.node
+                                .semantics
+                                .as_ref()
+                                .is_some_and(|s| s.label == "Close dialog")
+                        })
+                        .unwrap();
+                    let position = [
+                        close.origin[0] + close.node.frame.width * close.scale / 2.,
+                        close.origin[1] + close.node.frame.height * close.scale / 2.,
+                    ];
+                    for phase in [PointerPhase::Down, PointerPhase::Up] {
+                        client
+                            .pointer_at(
+                                epoch,
+                                PointerEvent {
+                                    id: 81,
+                                    phase,
+                                    position,
+                                },
+                                200,
+                            )
+                            .unwrap();
+                    }
+                }
+            }
+            assert_eq!(client.focus_state().unwrap().id, Some(composer));
+            assert!(!client.focus_state().unwrap().modal);
+            assert!(
+                client
+                    .text_inputs()
+                    .unwrap()
+                    .iter()
+                    .any(|input| input.id == composer && input.focused),
+                "{software_keyboard}/{dismissal}: restored owner must also be an editing responder"
+            );
+            assert_eq!(client.keyboard_visible(), software_keyboard);
+            assert!(
+                client.chat_outgoing().unwrap().is_none(),
+                "restoration must not re-acquire a draft lease or submit a command"
+            );
+            assert!(
+                client
+                    .edit_text_input(
+                        epoch,
+                        composer,
+                        &Edit::Replace {
+                            text: "k".into(),
+                            cursor: 1,
+                            anchor: 1,
+                            selection_only: false
+                        }
+                    )
+                    .unwrap(),
+                "{software_keyboard}/{dismissal}: first native editor change must be accepted"
+            );
+            assert!(client.hardware_edit(&Edit::Commit("!".into())).unwrap());
+            assert_eq!(
+                client
+                    .text_inputs()
+                    .unwrap()
+                    .iter()
+                    .find(|i| i.id == composer)
+                    .unwrap()
+                    .value,
+                "k!"
+            );
+            assert_eq!(client.chat_info().unwrap().pending, 0);
+            assert_eq!(client.chat_info().unwrap().event_animations, 0);
+        }
+    }
+    // A normal single-line Enter is an intentional end to editing, not a modal
+    // return. Rendering must not turn it back into an editing session.
+    let mut client = Client::default();
+    client.set_font(font.clone());
+    client.set_software_keyboard(false);
+    activate(
+        &mut client,
+        input_lab::ui(&[]),
+        "single-line-editor-stop",
+        vec![],
+    );
+    let field = client.text_inputs().unwrap()[0].id;
+    client.activate(client.epoch(), field).unwrap();
+    client
+        .edit_text_input(client.epoch(), field, &Edit::Enter)
+        .unwrap();
+    presentation::Composer::default()
+        .compose(&mut client, &font)
+        .unwrap();
+    assert!(!client.editing());
+    assert!(
+        !client
+            .text_inputs()
+            .unwrap()
+            .iter()
+            .any(|input| input.focused)
+    );
+}

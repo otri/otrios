@@ -1013,6 +1013,21 @@ impl Client {
         };
         Some(input)
     }
+    pub(crate) fn restore_input_focus(&mut self, command: u16) -> bool {
+        let focus = match (self.panel, command) {
+            (Panel::None, 1) => Focus::Compose,
+            (Panel::Profile, 8) => Focus::Name,
+            (Panel::Auth, 15) => Focus::Username,
+            (Panel::Auth, 16) => Focus::Password,
+            _ => return false,
+        };
+        self.focus = Some(focus);
+        self.refresh_text_layouts();
+        if focus == Focus::Compose {
+            self.follow_caret();
+        }
+        true
+    }
     pub(crate) fn blur_input(&mut self) {
         self.focus = None;
     }
