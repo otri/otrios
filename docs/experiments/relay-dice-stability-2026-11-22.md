@@ -57,3 +57,26 @@ public test messages were posted. Acceptance, verification and inspected
 before/after captures are retained in
 `~/Library/Application Support/OTriOSOrbStack/checks/relay-dice-stability-*`.
 The authority, tunnel and Monitoring timer remain active; the builder is stopped.
+
+## Narrower dice lens follow-up
+
+`d11ab2e` increases the minimum dice camera distance from 12 to 48 world units,
+with matched focal length preserving size on the centre plane. Distance also
+scales with the larger viewport dimension and die scale so unusually large
+viewports do not restore the wide-angle edge distortion. Projection, face
+visibility, shadows and whole-die paint ordering share this distance.
+
+The existing `perspective_dice_faces_cover_their_silhouette` test passed (one
+focused case). Matching posed fixtures at the left, centre and right of a
+1280 × 800 viewport were rendered and visually inspected. Mac tooling/browser
+release Wasm and ARMv7 client builds passed. The physics and event contracts
+were not modified. No broad preflight or physical iPhone/Frame test was run.
+
+Signed release
+`177c579c06f6f97a8596ec0eae6d0c65ab3d0d2be1d86bc13f932fa4cd55b7d6`
+is active on Mac and VM. Complete signatures/digests, bundle closures and import
+guard passed; all 85 authority files, app contracts and catalog bytes are
+unchanged. Live HTTP checks confirmed healthy state, current navigation pinning
+and signed app/worker/bindings/Wasm bytes. Compatible prior release is retained
+in `code-rollback/relay-dice-camera-baseline.json`. Evidence is saved under
+`~/Library/Application Support/OTriOSOrbStack/checks/relay-dice-camera-*`.
