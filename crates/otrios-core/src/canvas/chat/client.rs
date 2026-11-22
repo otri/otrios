@@ -90,7 +90,6 @@ pub struct Client {
     pub(super) password: TextBuffer,
     pub(super) avatar: u8,
     pub(super) avatar_page: u8,
-    pub(super) member_page: usize,
     pub(super) selected: Option<Member>,
     pub(super) effects: u8,
     pub(super) native: bool,
@@ -106,7 +105,8 @@ pub struct Client {
     pub(super) wall: u64,
     pub(super) particles: Vec<Particle>,
     pub(super) input_view: super::super::text_viewport::TextViewport,
-    pub(super) help_view: super::super::text_viewport::TextViewport,
+    pub(super) dialog_view: super::super::text_viewport::TextViewport,
+    roster_pressed: Option<String>,
     pub(super) new_messages: usize,
     pub(super) older: bool,
     pub(super) history_wait: bool,
@@ -174,7 +174,6 @@ impl Default for Client {
             password: TextBuffer::with_limit(1024),
             avatar: 0,
             avatar_page: 0,
-            member_page: 0,
             selected: None,
             effects: 2,
             native: false,
@@ -190,7 +189,8 @@ impl Default for Client {
             wall: 0,
             particles: vec![],
             input_view: Default::default(),
-            help_view: Default::default(),
+            dialog_view: Default::default(),
+            roster_pressed: None,
             new_messages: 0,
             older: false,
             history_wait: false,
@@ -331,12 +331,22 @@ impl Client {
         self.viewport = [size[0], super::view::room_height(size, keyboard)];
         self.font = font;
         self.refresh_text_layouts();
-        if self.panel == Panel::Help {
-            let help = self.handbook_layout();
-            self.help_view
-                .bounds(help.content_height, help.frame.height);
+        let content = match self.panel {
+            Panel::Help => {
+                let help = self.handbook_layout();
+                Some((help.content_height, help.frame.height))
+            }
+            Panel::Members => {
+                let roster = self.roster_layout();
+                Some((roster.content_height, roster.frame.height))
+            }
+            _ => None,
+        };
+        if let Some((height, viewport)) = content {
+            self.dialog_view.bounds(height, viewport);
         } else {
-            self.help_view = Default::default();
+            self.dialog_view = Default::default();
+            self.roster_pressed = None;
         }
     }
     pub(crate) fn native(&mut self, native: bool) {
@@ -918,7 +928,7 @@ impl Client {
             self.notice.clear();
         }
         self.refresh_text_layouts();
-        let moving = self.input_view.tick(now) | self.help_view.tick(now);
+        let moving = self.input_view.tick(now) | self.dialog_view.tick(now);
         let mut emitted = false;
         if let Some(anchor) = self.pending_spark.take() {
             if let Some(position) = self.spark_origin(&anchor) {
@@ -989,29 +999,33 @@ impl Client {
         self.focus = None;
     }
     pub(crate) fn dialog_scroll_info(&self) -> Option<super::super::text_scroll::Info> {
-        (self.panel == Panel::Help).then(|| super::super::text_scroll::Info {
-            offset: [0., self.help_view.offset],
-            limit: [0., self.help_view.limit()],
-            active: self.help_view.animating(),
-            velocity: [0., self.help_view.velocity()],
+        matches!(self.panel, Panel::Help | Panel::Members).then(|| {
+            super::super::text_scroll::Info {
+                offset: [0., self.dialog_view.offset],
+                limit: [0., self.dialog_view.limit()],
+                active: self.dialog_view.animating(),
+                velocity: [0., self.dialog_view.velocity()],
+            }
         })
     }
     pub(crate) fn dialog_touching(&self) -> bool {
-        self.help_view.active()
+        self.dialog_view.active()
     }
     pub(crate) fn cancel_dialog_scroll(&mut self) {
-        self.help_view.cancel();
+        self.dialog_view.cancel();
+        self.roster_pressed = None;
     }
     pub(crate) fn scroll_dialog(&mut self, delta: f32) -> Option<bool> {
-        if self.panel != Panel::Help {
+        if !matches!(self.panel, Panel::Help | Panel::Members) {
             return None;
         }
-        let before = self.help_view.offset;
-        self.help_view.cancel();
+        let before = self.dialog_view.offset;
+        self.dialog_view.cancel();
+        self.roster_pressed = None;
         if delta.is_finite() {
-            self.help_view.offset = (before + delta).clamp(0., self.help_view.limit());
+            self.dialog_view.offset = (before + delta).clamp(0., self.dialog_view.limit());
         }
-        Some(before != self.help_view.offset)
+        Some(before != self.dialog_view.offset)
     }
     pub(crate) fn host_scroll(&mut self, offset: f32) -> bool {
         if self.focus != Some(Focus::Compose) || !offset.is_finite() {
@@ -1156,6 +1170,8 @@ impl Client {
             }
             2 => self.send()?,
             3 => {
+                self.dialog_view = Default::default();
+                self.roster_pressed = None;
                 self.panel = Panel::Members;
                 self.focus = None;
             }
@@ -1223,6 +1239,8 @@ impl Client {
                 }
             }
             19 => {
+                self.dialog_view = Default::default();
+                self.roster_pressed = None;
                 self.panel = Panel::Help;
                 self.focus = None;
             }
@@ -1257,11 +1275,8 @@ impl Client {
                     self.panel = Panel::None;
                 }
             }
-            190 => self.member_page = self.member_page.saturating_sub(1),
-            191 => {
-                self.member_page =
-                    (self.member_page + 1).min(self.members.len().saturating_sub(1) / 8)
-            }
+            // Retired roster paging commands are harmless for an old queued control.
+            190 | 191 => {}
             _ => return Err("Unknown room UI action".into()),
         }
         Ok(Action::Changed)
@@ -1277,8 +1292,11 @@ impl Client {
         Ok(())
     }
     pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
-        if self.panel == Panel::Help {
-            let frame = self.handbook_layout().frame;
+        if matches!(self.panel, Panel::Help | Panel::Members) {
+            let roster = (self.panel == Panel::Members).then(|| self.roster_layout());
+            let frame = roster
+                .as_ref()
+                .map_or_else(|| self.handbook_layout().frame, |r| r.frame);
             let [x, y] = event.position;
             if event.phase == PointerPhase::Down {
                 if x < frame.x
@@ -1288,14 +1306,38 @@ impl Client {
                 {
                     return None;
                 }
-                self.help_view.down(event.id, y, now);
-            } else if self.help_view.owns(event.id) {
+                if self.dialog_view.active() {
+                    return Some(false);
+                }
+                self.roster_pressed = roster
+                    .as_ref()
+                    .and_then(|r| {
+                        r.rows.iter().find(|row| {
+                            let at = y - frame.y + self.dialog_view.offset;
+                            at >= row.top && at < row.top + row.height
+                        })
+                    })
+                    .map(|row| self.members[row.index].profile.id.clone());
+                self.dialog_view.down(event.id, y, now);
+            } else if self.dialog_view.owns(event.id) {
                 match event.phase {
-                    PointerPhase::Move => self.help_view.motion(y, now),
+                    PointerPhase::Move => self.dialog_view.motion(y, now),
                     PointerPhase::Up => {
-                        self.help_view.up(y, now);
+                        let dragged = self.dialog_view.up(y, now);
+                        let pressed = self.roster_pressed.take();
+                        if !dragged
+                            && let Some(id) = pressed
+                            && let Some(member) = self.members.iter().find(|m| m.profile.id == id)
+                        {
+                            self.selected = Some(member.clone());
+                            self.panel = Panel::Person;
+                            self.focus = None;
+                        }
                     }
-                    PointerPhase::Cancel => self.help_view.cancel(),
+                    PointerPhase::Cancel => {
+                        self.dialog_view.cancel();
+                        self.roster_pressed = None;
+                    }
                     _ => {}
                 }
             } else {
@@ -1546,6 +1588,151 @@ mod tests {
                 .contains_key(&BlockId { object: 1, part: 0 })
         );
         assert!(retained.text().contains("A clockwork pigeon!"));
+    }
+    #[test]
+    fn roster_scrolls_all_members_with_bounded_scenes_and_stable_tap_identity() {
+        use crate::dashboard::components::canvas;
+        use crate::dashboard::scene::Scene;
+        use otrios_interfaces::scene::{Primitive, Rect};
+        let font = Arc::new(
+            Font::from_zstd(
+                include_bytes!("../../../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                crate::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        );
+        let members: Vec<_> = (0..68)
+            .map(|i| Member {
+                profile: Profile {
+                    id: format!("{i:032x}"),
+                    name: if i == 67 {
+                        "W".repeat(96)
+                    } else if i == 66 {
+                        "衣".repeat(32)
+                    } else {
+                        format!("Captain {i}")
+                    },
+                    avatar: i % 64,
+                },
+                generation: 1,
+                admin: i % 4 == 0,
+            })
+            .collect();
+        for size in [[320., 568.], [390., 720.], [1280., 800.]] {
+            let mut c = Client {
+                managed: true,
+                panel: Panel::Members,
+                members: members.clone(),
+                ..Client::default()
+            };
+            c.prepare(size, false, Some(font.clone()));
+            let base = Scene::new(canvas(0, Rect::new(0., 0., size[0], size[1]), vec![])).unwrap();
+            let layout = c.roster_layout();
+            let limit = c.dialog_scroll_info().unwrap().limit[1];
+            assert!(limit > 1000.);
+            for row in &layout.rows {
+                c.scroll_dialog(row.top.min(limit) - c.dialog_view.offset);
+                let scene = c.scene(&base, size, false).unwrap();
+                assert!(
+                    !scene
+                        .controls()
+                        .iter()
+                        .any(|n| n.node.semantics.as_ref().is_some_and(|s| matches!(
+                            s.label.as_str(),
+                            "Previous members" | "Next members"
+                        )))
+                );
+                let body = scene.path(60002).unwrap();
+                let body = body.last().unwrap();
+                let controls = scene.controls();
+                assert!(controls.len() < 128);
+                for node in &body.node.children {
+                    if node.semantics.is_none() {
+                        continue;
+                    }
+                    let path = scene.path(node.id).unwrap();
+                    let p = path.last().unwrap();
+                    assert!(
+                        p.origin[1] >= body.origin[1]
+                            && p.origin[1] + node.frame.height
+                                <= body.origin[1] + body.node.frame.height + 0.01
+                    );
+                    for child in &node.children {
+                        if let Primitive::Text { value, scale, .. } = &child.primitive {
+                            assert!(
+                                font.text_width(value, *scale as f32) <= child.frame.width + 0.1
+                            );
+                        }
+                    }
+                }
+            }
+            c.scroll_dialog(-f32::MAX);
+            let frame = c.roster_layout().frame;
+            let start = [frame.x + 80., frame.y + 20.];
+            c.pointer(
+                PointerEvent {
+                    id: 8,
+                    phase: PointerPhase::Down,
+                    position: start,
+                },
+                100,
+            );
+            assert!(c.dialog_touching());
+            let id = c.members[0].profile.id.clone();
+            c.members.reverse();
+            c.prepare(size, false, Some(font.clone()));
+            c.pointer(
+                PointerEvent {
+                    id: 8,
+                    phase: PointerPhase::Up,
+                    position: start,
+                },
+                120,
+            );
+            assert_eq!(
+                c.selected.as_ref().unwrap().profile.id,
+                id,
+                "a reorder during a tap cannot select another person"
+            );
+            c.panel = Panel::Members;
+            c.prepare(size, false, Some(font.clone()));
+            c.pointer(
+                PointerEvent {
+                    id: 9,
+                    phase: PointerPhase::Down,
+                    position: start,
+                },
+                200,
+            );
+            c.pointer(
+                PointerEvent {
+                    id: 9,
+                    phase: PointerPhase::Move,
+                    position: [start[0], start[1] - 120.],
+                },
+                250,
+            );
+            c.pointer(
+                PointerEvent {
+                    id: 9,
+                    phase: PointerPhase::Up,
+                    position: [start[0], start[1] - 120.],
+                },
+                300,
+            );
+            assert_eq!(c.panel, Panel::Members, "a drag must not open a member");
+            assert!(c.dialog_view.offset > 0.);
+            c.cancel_dialog_scroll();
+            assert!(!c.dialog_touching());
+            assert!(c.queue.is_empty(), "roster input never sends chat edits");
+            c.members = members[..1].to_vec();
+            c.prepare(size, false, Some(font.clone()));
+            assert!(
+                c.roster_layout().panel_height < 320.,
+                "small rosters do not leave a screen of blank space"
+            );
+            c.scene(&base, size, false).unwrap();
+        }
     }
     #[test]
     fn every_avatar_fits_the_shared_inline_source_budget() {

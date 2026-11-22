@@ -130,7 +130,13 @@ impl Paint {
             None
         } else {
             Some(SwitchSemantics {
-                label: label.chars().take(90).collect(),
+                label: label
+                    .graphemes(true)
+                    .scan(0, |bytes, g| {
+                        *bytes += g.len();
+                        (*bytes <= 90).then_some(g)
+                    })
+                    .collect(),
                 checked: false,
             })
         };
@@ -213,6 +219,21 @@ pub(super) struct Handbook {
     pub footer: f32,
     pub stacked: bool,
 }
+pub(super) struct RosterRow {
+    pub index: usize,
+    pub top: f32,
+    pub height: f32,
+    pub lines: Vec<String>,
+}
+pub(super) struct Roster {
+    pub frame: Rect,
+    pub panel_height: f32,
+    pub summary: Vec<String>,
+    pub summary_y: f32,
+    pub rows: Vec<RosterRow>,
+    pub content_height: f32,
+    pub footer: Option<f32>,
+}
 impl Client {
     pub(crate) fn effect_vertices(&self) -> Result<Vec<f32>> {
         if self.panel != Panel::None || self.kicked.is_some() || self.particles.is_empty() {
@@ -289,6 +310,71 @@ impl Client {
             lines.push(self.fitted_label(&rest, width - 112., scale));
         }
         (lines, scale, height)
+    }
+    pub(super) fn roster_layout(&self) -> Roster {
+        let [w, h] = self.viewport;
+        let pw = 720_f32.min(w - 48.);
+        let x = (w - pw) / 2.;
+        let y = if h < 720. {
+            20.
+        } else {
+            100_f32.min((h - 200.).max(20.))
+        };
+        let (title, _, title_height) = self.dialog_title("Operators on the wire", pw);
+        let line_height = self
+            .font
+            .as_ref()
+            .map_or(28., |font| font.metrics().line_height(2.));
+        let summary = self.wrapped_label(
+            &format!(
+                "{} online · @ {}",
+                self.members.len(),
+                if self.managed { "Moderator" } else { "Admin" }
+            ),
+            pw - 48.,
+            2,
+        );
+        let summary_y = y + (32. + title.len() as f32 * title_height).max(84.) + 8.;
+        let top = summary_y + summary.len() as f32 * line_height + 16.;
+        let mut rows = Vec::new();
+        let mut at = 0.;
+        for (index, member) in self.members.iter().enumerate() {
+            let label = format!(
+                "{}{}",
+                if member.admin { "@ " } else { "" },
+                member.profile.name
+            );
+            let lines = self.wrapped_label(&label, pw - 110., 2);
+            let height = (lines.len() as f32 * line_height + 20.).max(52.);
+            rows.push(RosterRow {
+                index,
+                top: at,
+                height,
+                lines,
+            });
+            at += height + 8.;
+        }
+        let content_height = (at - 8.).max(0.);
+        let footer_height = if self.managed { 0. } else { 76. };
+        let panel_height = (top - y + content_height.max(52.) + 24. + footer_height)
+            .clamp(200., 650.)
+            .min((h - y - 24.).max(200.));
+        let frame = Rect::new(
+            x + 24.,
+            top,
+            pw - 48.,
+            (y + panel_height - 24. - footer_height - top).max(1.),
+        );
+        let footer = (!self.managed).then_some(y + panel_height - 68.);
+        Roster {
+            frame,
+            panel_height,
+            summary,
+            summary_y,
+            rows,
+            content_height,
+            footer,
+        }
     }
     pub(super) fn handbook_layout(&self) -> Handbook {
         let [w, h] = self.viewport;
@@ -1089,8 +1175,8 @@ impl Client {
                         676_f32
                     }
                 }
-                Panel::Members
-                | Panel::Dispatches
+                Panel::Members => self.roster_layout().panel_height,
+                Panel::Dispatches
                 | Panel::Dispatch
                 | Panel::Destinations
                 | Panel::Publish
@@ -1281,51 +1367,92 @@ impl Client {
                     );
                 }
                 Panel::Members => {
-                    p.text(
-                        x + 24.,
-                        y + 82.,
-                        pw - 48.,
-                        &format!(
-                            "{} on the wire - @ means {}",
-                            self.members.len(),
-                            if self.managed { "Moderator" } else { "Admin" }
-                        ),
-                        2,
-                        MUTED,
-                    );
-                    for (i, member) in self
-                        .members
-                        .iter()
-                        .enumerate()
-                        .skip(self.member_page * 8)
-                        .take(8)
-                    {
-                        p.member(
-                            100 + i as u16,
+                    let layout = self.roster_layout();
+                    let line_height = self
+                        .font
+                        .as_ref()
+                        .map_or(28., |font| font.metrics().line_height(2.));
+                    for (i, line) in layout.summary.iter().enumerate() {
+                        p.text(
                             x + 24.,
-                            y + 128. + (i % 8) as f32 * 56.,
+                            layout.summary_y + i as f32 * line_height,
                             pw - 48.,
-                            member,
+                            line,
+                            2,
+                            MUTED,
                         );
                     }
-                    p.button(
-                        190,
-                        [x + 24., y + ph - 62., 72., 44.],
-                        "Previous members",
-                        "<",
-                        false,
-                    );
-                    p.button(
-                        191,
-                        [x + 108., y + ph - 62., 72., 44.],
-                        "Next members",
-                        ">",
-                        false,
-                    );
-                    if !self.managed {
+                    let start = p.nodes.len();
+                    for row in &layout.rows {
+                        if row.top + row.height <= self.dialog_view.offset
+                            || row.top >= self.dialog_view.offset + layout.frame.height
+                        {
+                            continue;
+                        }
+                        let member = &self.members[row.index];
+                        let label = format!(
+                            "{}{}",
+                            if member.admin {
+                                if self.managed { "Moderator " } else { "Admin " }
+                            } else {
+                                ""
+                            },
+                            member.profile.name
+                        );
+                        p.button(
+                            100 + row.index as u16,
+                            [
+                                0.,
+                                row.top - self.dialog_view.offset,
+                                layout.frame.width,
+                                row.height,
+                            ],
+                            &label,
+                            "",
+                            false,
+                        );
+                        let id = p.id();
+                        let mut icon = avatar(member.profile.avatar, id, 36.);
+                        icon.frame.x = 8.;
+                        icon.frame.y = (row.height - 36.) / 2.;
+                        let text_ids: Vec<_> = row.lines.iter().map(|_| p.id()).collect();
+                        let button = p.nodes.last_mut().unwrap();
+                        button.children.push(icon);
+                        let text_top = (row.height - row.lines.len() as f32 * line_height) / 2.;
+                        for (i, line) in row.lines.iter().enumerate() {
+                            button.children.push(text(
+                                text_ids[i],
+                                Rect::new(
+                                    54.,
+                                    text_top + i as f32 * line_height,
+                                    layout.frame.width - 62.,
+                                    line_height,
+                                ),
+                                line,
+                                2,
+                                if member.admin { BRASS } else { TEXT },
+                            ));
+                        }
+                    }
+                    if layout.rows.is_empty() {
+                        p.text(0., 8., layout.frame.width, "No one is connected.", 2, MUTED);
+                    }
+                    let mut rows: Vec<_> = p.nodes.drain(start..).collect();
+                    for row in &mut rows {
+                        crate::dashboard::scene::clip_controls(
+                            row,
+                            [0., 0.],
+                            [layout.frame.width, layout.frame.height],
+                        );
+                    }
+                    let mut body = canvas(60002, layout.frame, rows);
+                    body.primitive = Primitive::Canvas { clip: true };
+                    p.nodes.push(body);
+                    if let Some(footer) = layout.footer {
+                        let width = (pw - 48.).min(256.);
                         p.button(
                             14,
-                            [x + pw - 280., y + ph - 62., 256., 44.],
+                            [x + pw - 24. - width, footer, width, 44.],
                             if self.you.as_ref().is_some_and(|m| m.admin) {
                                 "Sign out admin"
                             } else {
@@ -1397,7 +1524,7 @@ impl Client {
                     for (line, at) in &layout.lines {
                         p.text(
                             0.,
-                            *at - self.help_view.offset,
+                            *at - self.dialog_view.offset,
                             layout.frame.width,
                             line,
                             2,
