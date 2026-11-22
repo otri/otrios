@@ -6,6 +6,9 @@ use std::{
     sync::OnceLock,
 };
 
+#[path = "effects/locomotive.rs"]
+mod locomotive;
+
 type V3 = [f32; 3];
 type Color = [f32; 4];
 fn add(a: V3, b: V3) -> V3 {
@@ -195,9 +198,16 @@ struct Canvas {
 }
 impl Canvas {
     fn triangle(&mut self, a: [f32; 2], b: [f32; 2], c: [f32; 2], color: Color) {
-        // Sutherland-Hodgman clipping also bounds every retained vertex. Input
-        // overlays remain decorative; no scene node or responder is allocated.
-        let mut polygon = vec![a, b, c];
+        self.gradient_triangle([a, b, c], [color; 3]);
+    }
+    fn gradient_triangle(&mut self, points: [[f32; 2]; 3], colors: [Color; 3]) {
+        // Clip both position and colour: feathered clouds remain smooth at the
+        // viewport edge, and decorative triangles never allocate responders.
+        let mut polygon: Vec<[f32; 6]> = points
+            .into_iter()
+            .zip(colors)
+            .map(|(p, c)| [p[0], p[1], c[0], c[1], c[2], c[3]])
+            .collect();
         for (axis, bound, lower) in [
             (0, 0., true),
             (0, self.viewport[0], false),
@@ -209,33 +219,28 @@ impl Canvas {
             }
             let mut clipped = Vec::with_capacity(7);
             let mut previous = *polygon.last().unwrap();
-            let mut previous_inside = if lower {
-                previous[axis] >= bound
-            } else {
-                previous[axis] <= bound
+            let inside = |p: [f32; 6]| {
+                if lower {
+                    p[axis] >= bound
+                } else {
+                    p[axis] <= bound
+                }
             };
             for point in polygon {
-                let inside = if lower {
-                    point[axis] >= bound
-                } else {
-                    point[axis] <= bound
-                };
-                if inside != previous_inside {
+                if inside(point) != inside(previous) {
                     let t = (bound - previous[axis]) / (point[axis] - previous[axis]);
-                    clipped.push([mix(previous[0], point[0], t), mix(previous[1], point[1], t)]);
+                    clipped.push(std::array::from_fn(|i| mix(previous[i], point[i], t)));
                 }
-                if inside {
+                if inside(point) {
                     clipped.push(point);
                 }
                 previous = point;
-                previous_inside = inside;
             }
             polygon = clipped;
         }
         for i in 1..polygon.len().saturating_sub(1) {
             for p in [polygon[0], polygon[i], polygon[i + 1]] {
-                self.vertices
-                    .extend([p[0], p[1], color[0], color[1], color[2], color[3]]);
+                self.vertices.extend(p);
             }
         }
     }
@@ -263,7 +268,7 @@ impl Canvas {
 
 pub(super) fn duration(event: &MessageEvent) -> u64 {
     match event {
-        MessageEvent::Steam { .. } => 4800,
+        MessageEvent::Steam { .. } => 6800,
         MessageEvent::Boop { .. } => 5600,
         MessageEvent::Salute { .. } => 4000,
         MessageEvent::Dice { .. } => 4300,
@@ -306,43 +311,82 @@ pub(super) fn vertices(
     }
     canvas.vertices
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Wisp {
+    birth: f32,
+    phase: f32,
+    drift: f32,
+    size: f32,
+    shade: f32,
+}
+fn wisp(seed: u32, index: u32) -> Wisp {
+    // Independent per-wisp random streams never depend on which wisps happen
+    // to be visible. The former shared stream skipped shade samples before a
+    // birth and reassigned later particles' parameters, causing visible jumps.
+    let mut random = Random(seed.wrapping_add(index.wrapping_mul(7919)));
+    Wisp {
+        birth: 0.9 + index as f32 * 0.14,
+        phase: random.range(0., TAU),
+        drift: random.range(-0.20, -0.06),
+        size: random.range(0.065, 0.11),
+        shade: random.range(-0.025, 0.025),
+    }
+}
 fn steam(canvas: &mut Canvas, seed: u32, t: f32, _at: [f32; 2], dark: bool, quiet: bool) {
+    locomotive::draw(canvas, t, quiet);
     let [w, h] = canvas.viewport;
-    let mut random = Random(seed);
-    for _ in 0..if quiet { 8 } else { 20 } {
-        let delay = random.range(0., 1.05);
-        let age = t - delay;
-        let spread = random.range(-0.18, 1.18);
-        let drift = random.range(-0.22, 0.22);
-        let phase = random.range(0., TAU);
-        let size = random.range(0.12, 0.25);
-        if !(0. ..3.7).contains(&age) {
+    for i in 0..if quiet { 10 } else { 20 } {
+        let wisp = wisp(seed, if quiet { i * 2 } else { i });
+        let age = t - wisp.birth;
+        if !(0. ..3.2).contains(&age) {
             continue;
         }
-        let f = age / 3.7;
-        let radius = w * (size + f * if quiet { 0.32 } else { 0.53 });
-        let p = [
-            w * (spread + drift * f + (f * 5. + phase).sin() * 0.035),
-            h + radius * 0.35 - f * (h + radius * 2.5),
+        let f = age / 3.2;
+        let source =
+            locomotive::stage(wisp.birth, canvas.viewport, quiet).project([1.15, 1.84, 0.]);
+        let radius = w * (wisp.size + smooth(f) * if quiet { 0.50 } else { 0.85 });
+        let curl = (f * 4. + wisp.phase).sin() - wisp.phase.sin();
+        let center = [
+            source[0] + w * (wisp.drift * f + curl * f * 0.10),
+            source[1] - h * f * 0.55,
         ];
         let alpha =
-            smooth(f / 0.12) * (1. - smooth((f - 0.55) / 0.45)) * if quiet { 0.55 } else { 1.15 };
-        let shade = if dark { 0.87 } else { 0.58 } + random.range(-0.035, 0.035);
-        // Wide translucent shells soften the cloud edge without textures,
-        // blur passes, screen-size render targets or unbounded particle state.
-        for (factor, opacity) in [
-            (1.45, 0.045),
-            (1.20, 0.065),
-            (1., 0.10),
-            (0.75, 0.13),
-            (0.48, 0.18),
-        ] {
-            canvas.ellipse_steps(
-                p,
-                [radius * factor, radius * factor * 0.84],
-                [shade, shade + 0.012, shade + 0.022, alpha * opacity],
-                32,
-            );
+            smooth(age / 0.28) * (1. - smooth((f - 0.50) / 0.50)) * if quiet { 0.28 } else { 0.42 };
+        let shade = if dark { 0.87 } else { 0.63 } + wisp.shade;
+        // Radial vertex-alpha ramps replace concentric hard-edged shells.
+        // A coherent low-frequency curl deforms the whole wisp continuously.
+        let point = |r: f32, angle: f32| {
+            let shape = 1. + 0.08 * (angle * 3. + wisp.phase + f * 2.).sin();
+            [
+                center[0] + angle.cos() * radius * r * shape,
+                center[1] + angle.sin() * radius * r * shape * 0.80,
+            ]
+        };
+        let color = |r: f32| {
+            [
+                shade,
+                shade + 0.012,
+                shade + 0.022,
+                alpha * (1. - smooth(r)),
+            ]
+        };
+        for ring in 0..4 {
+            let r0 = ring as f32 / 4.;
+            let r1 = (ring + 1) as f32 / 4.;
+            for j in 0..24 {
+                let a = j as f32 / 24. * TAU;
+                let b = (j + 1) as f32 / 24. * TAU;
+                canvas.gradient_triangle(
+                    [point(r0, a), point(r1, a), point(r1, b)],
+                    [color(r0), color(r1), color(r1)],
+                );
+                if ring > 0 {
+                    canvas.gradient_triangle(
+                        [point(r0, a), point(r1, b), point(r0, b)],
+                        [color(r0), color(r1), color(r0)],
+                    );
+                }
+            }
         }
     }
 }
@@ -709,6 +753,163 @@ struct Body {
     scale: f32,
     alpha: f32,
 }
+#[derive(Clone)]
+struct Particle {
+    p: V3,
+    v: V3,
+    initial: Q,
+    roll: f32,
+}
+fn contacts(particles: &mut [Particle], radius: f32, impulses: bool) {
+    for _ in 0..if impulses { 4 } else { 24 } {
+        for i in 0..particles.len() {
+            let (left, right) = particles.split_at_mut(i + 1);
+            let a = &mut left[i];
+            for b in right {
+                let delta = sub(b.p, a.p);
+                let distance = dot(delta, delta).sqrt();
+                let diameter = 2. * radius;
+                if distance >= diameter {
+                    continue;
+                }
+                let normal = if distance > 1e-5 {
+                    mul(delta, 1. / distance)
+                } else {
+                    [1., 0., 0.]
+                };
+                let correction = mul(normal, (diameter - distance + 0.0001) * 0.5);
+                a.p = sub(a.p, correction);
+                b.p = add(b.p, correction);
+                let closing = dot(sub(b.v, a.v), normal);
+                if impulses && closing < 0. {
+                    // Equal masses, bounded restitution and a little tangential
+                    // friction. Collision proxies enclose every rotating vertex.
+                    let impulse = mul(normal, -closing * 0.81);
+                    a.v = sub(a.v, impulse);
+                    b.v = add(b.v, impulse);
+                    let tangent = sub(sub(b.v, a.v), mul(normal, dot(sub(b.v, a.v), normal)));
+                    a.v = add(a.v, mul(tangent, 0.035));
+                    b.v = sub(b.v, mul(tangent, 0.035));
+                }
+            }
+        }
+    }
+}
+fn bodies(
+    seed: u32,
+    values: &[u8],
+    mesh: &[Face],
+    t: f32,
+    viewport: [f32; 2],
+    origin: [f32; 2],
+    quiet: bool,
+) -> Vec<Body> {
+    let count = values.len();
+    if count == 0 || count > 10 {
+        return vec![];
+    }
+    let columns = count.min(5);
+    let rows = count.div_ceil(columns);
+    let scale = (viewport[0] / (columns as f32 + 1.) * 0.5).clamp(18., 46.);
+    let radius = mesh
+        .iter()
+        .flat_map(|f| &f.points)
+        .map(|p| dot(*p, *p).sqrt())
+        .fold(0_f32, f32::max)
+        + 0.015;
+    let floor = origin[1].clamp(
+        (rows as f32 * scale * 2.4 + 90.).min(viewport[1] * 0.7),
+        (viewport[1] - 58.).max(100.),
+    );
+    let bound = (viewport[0] / (2. * scale) - radius).max(radius);
+    let mut particles: Vec<_> = (0..count)
+        .map(|index| {
+            let mut random = Random(seed.wrapping_add(index as u32 * 7919));
+            let p = [
+                -viewport[0] / (2. * scale) - 1.6 - (index % columns) as f32 * 2.35,
+                random.range(if quiet { 1.6 } else { 2.4 }, if quiet { 2.2 } else { 3.9 })
+                    + (index / columns) as f32 * 2.4,
+                random.range(-0.7, 0.7),
+            ];
+            let v = [
+                random.range(if quiet { 5.0 } else { 6.4 }, if quiet { 6.2 } else { 8.6 }),
+                random.range(2., 4.6),
+                random.range(-1.3, 1.3),
+            ];
+            let initial = Q::axis(
+                norm([
+                    random.range(-1., 1.),
+                    random.range(-1., 1.),
+                    random.range(-1., 1.),
+                ]),
+                random.range(0., TAU),
+            );
+            Particle {
+                p,
+                v,
+                initial,
+                roll: 0.,
+            }
+        })
+        .collect();
+    let dt = 1. / 120.;
+    for _ in 0..(t.min(2.8) / dt).floor() as usize {
+        for p in &mut particles {
+            p.v[1] -= if quiet { 15. } else { 11. } * dt;
+            p.p = add(p.p, mul(p.v, dt));
+            p.roll += p.v[0] * dt / 0.72;
+            if p.p[1] < radius {
+                p.p[1] = radius;
+                p.v[1] = p.v[1].abs() * 0.53;
+                p.v[0] *= 0.78;
+                p.v[2] *= 0.78;
+            }
+            if p.p[0] > bound || (p.p[0] < -bound && p.v[0] < 0.) {
+                p.p[0] = p.p[0].clamp(-bound, bound);
+                p.v[0] *= -0.72;
+            }
+            if p.p[2].abs() > 2.2 {
+                p.p[2] = p.p[2].clamp(-2.2, 2.2);
+                p.v[2] *= -0.6;
+            }
+        }
+        contacts(&mut particles, radius, true);
+    }
+    let settle = smooth((t - 1.85) / 0.95);
+    let rotations: Vec<_> = values.iter().map(|n| resting(mesh, *n)).collect();
+    for (i, p) in particles.iter_mut().enumerate() {
+        let target_x = (i % columns) as f32 - (columns as f32 - 1.) * 0.5;
+        let rest_height = mesh
+            .iter()
+            .flat_map(|f| &f.points)
+            .map(|p| -rotations[i].rotate(*p)[1])
+            .fold(0_f32, f32::max);
+        p.p[0] = mix(p.p[0], (target_x * 2.35).clamp(-bound, bound), settle);
+        p.p[1] = mix(
+            p.p[1],
+            rest_height + (rows - 1 - i / columns) as f32 * 2.4,
+            settle,
+        );
+        p.p[2] = mix(p.p[2], 0., settle);
+    }
+    // Keep the entire transition into the authoritative result layout clear of
+    // intersections too; independent interpolation would undo the simulation.
+    contacts(&mut particles, radius, false);
+    particles
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| Body {
+            center: p.p,
+            rotation: Q::axis(norm([0.12, 0.17, -1.]), p.roll)
+                .product(p.initial)
+                .blend(rotations[i], settle),
+            floor,
+            scale,
+            alpha: (1. - (t - 3.55).max(0.) / 0.75).clamp(0., 1.),
+        })
+        .collect()
+}
+#[cfg(test)]
 fn body(
     seed: u32,
     index: usize,
@@ -720,89 +921,9 @@ fn body(
     origin: [f32; 2],
     quiet: bool,
 ) -> Body {
-    let mut random = Random(seed.wrapping_add(index as u32 * 7919));
-    let columns = count.min(5);
-    let rows = count.div_ceil(columns);
-    let scale = (viewport[0] / (columns as f32 + 1.) * 0.5).clamp(18., 46.);
-    let row = index / columns;
-    let col = index % columns;
-    let target_x = (col as f32 - (columns as f32 - 1.) * 0.5) * 2.1;
-    let floor = origin[1].clamp(
-        (rows as f32 * scale * 2.2 + 90.).min(viewport[1] * 0.7),
-        (viewport[1] - 58.).max(100.),
-    ) - (rows - 1 - row) as f32 * scale * 2.25;
-    let bound = (viewport[0] / (2. * scale) - 1.1).max(0.1);
-    let launch_x = -viewport[0] / (2. * scale) - 1.6 - index as f32 * 0.18;
-    let mut p = [
-        launch_x,
-        random.range(if quiet { 1.6 } else { 2.4 }, if quiet { 2.2 } else { 3.9 }),
-        random.range(-0.7, 0.7),
-    ];
-    let mut v = [
-        random.range(if quiet { 3.8 } else { 4.8 }, if quiet { 4.6 } else { 6.2 }),
-        random.range(2., 4.6),
-        random.range(-1.3, 1.3),
-    ];
-    let dt = 1. / 120.;
-    let time = t.min(2.8);
-    let steps = (time / dt).floor() as usize;
-    for step in 0..steps {
-        v[1] -= if quiet { 15. } else { 11. } * dt;
-        for axis in 0..3 {
-            p[axis] += v[axis] * dt;
-        }
-        if p[1] < 1. {
-            p[1] = 1.;
-            v[1] = v[1].abs() * 0.53;
-            v[0] *= 0.78;
-            v[2] *= 0.78;
-        }
-        // A die may begin outside the left edge while entering. The left
-        // wall applies only once it is travelling back toward that edge.
-        if p[0] > bound || (p[0] < -bound && v[0] < 0.) {
-            p[0] = p[0].clamp(-bound, bound);
-            v[0] *= -0.72;
-        }
-        if p[2].abs() > 1.2 {
-            p[2] = p[2].clamp(-1.2, 1.2);
-            v[2] *= -0.6;
-        }
-        if step > 240 {
-            v[0] *= 0.99;
-            v[2] *= 0.99;
-        }
-    }
-    let initial = Q::axis(
-        norm([
-            random.range(-1., 1.),
-            random.range(-1., 1.),
-            random.range(-1., 1.),
-        ]),
-        random.range(0., TAU),
-    );
-    // World +Y projects upward. A negative Z roll therefore moves a top
-    // marking toward screen-right: clockwise, matching left-to-right travel.
-    // The small oblique components give it a genuine three-dimensional tumble.
-    let travel = p[0] - launch_x;
-    let spin = Q::axis(norm([0.12, 0.17, -1.]), travel / 0.72).product(initial);
-    let final_rotation = resting(mesh, value);
-    let settle = smooth((t - 1.85) / 0.95);
-    let rest_height = mesh
-        .iter()
-        .flat_map(|f| &f.points)
-        .map(|p| -final_rotation.rotate(*p)[1])
-        .fold(0_f32, f32::max);
-    p[0] = mix(p[0], target_x.clamp(-bound, bound), settle);
-    p[1] = mix(p[1], rest_height, settle);
-    p[2] = mix(p[2], 0., settle);
-    Body {
-        center: p,
-        rotation: spin.blend(final_rotation, settle),
-        floor,
-        scale,
-        alpha: (1. - (t - 3.55).max(0.) / 0.75).clamp(0., 1.),
-    }
+    bodies(seed, &vec![value; count], mesh, t, viewport, origin, quiet).remove(index)
 }
+
 fn project(body: &Body, p: V3, width: f32) -> [f32; 2] {
     let p = add(body.rotation.rotate(p), body.center);
     let depth = 12. / (12. - p[2]).max(4.);
@@ -926,23 +1047,11 @@ fn dice(
     }
     let mesh = if sides == 20 { d20() } else { cube() };
     let mut faces = vec![];
-    let bodies: Vec<_> = rolls
+    let values: Vec<_> = rolls
         .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            body(
-                seed,
-                i,
-                rolls.len(),
-                mesh,
-                if sides == 6 || sides == 20 { *n } else { 1 },
-                t,
-                canvas.viewport,
-                origin,
-                quiet,
-            )
-        })
+        .map(|n| if sides == 6 || sides == 20 { *n } else { 1 })
         .collect();
+    let bodies = bodies(seed, &values, mesh, t, canvas.viewport, origin, quiet);
     for body in &bodies {
         let depth = 12. / (12. - body.center[2]).max(4.);
         let at = [
@@ -1016,6 +1125,54 @@ fn dice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dice_exchange_impulses_and_remain_separated_through_settling() {
+        let particle = |x, velocity| Particle {
+            p: [x, 2., 0.],
+            v: [velocity, 0., 0.],
+            initial: Q::axis([0., 0., 1.], 0.),
+            roll: 0.,
+        };
+        let mut pair = [particle(-0.7, 2.), particle(0.7, -2.)];
+        contacts(&mut pair, 1., true);
+        assert!(
+            pair[0].v[0] < 0. && pair[1].v[0] > 0.,
+            "a head-on collision rebounds"
+        );
+        for mesh in [cube(), d20()] {
+            let diameter = 2.
+                * (mesh
+                    .iter()
+                    .flat_map(|f| &f.points)
+                    .map(|p| dot(*p, *p).sqrt())
+                    .fold(0_f32, f32::max)
+                    + 0.015);
+            for count in [2, 10] {
+                for seed in [19, 42, 77] {
+                    for step in 0..=28 {
+                        let bodies = bodies(
+                            seed,
+                            &vec![1; count],
+                            mesh,
+                            step as f32 / 10.,
+                            [390., 720.],
+                            [195., 550.],
+                            false,
+                        );
+                        for i in 0..count {
+                            for b in &bodies[i + 1..] {
+                                let d = sub(b.center, bodies[i].center);
+                                assert!(
+                                    dot(d, d).sqrt() >= diameter - 0.025,
+                                    "rotating die bounds intersect: count={count} seed={seed} step={step}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn dice_meshes_settle_to_the_recorded_face() {
         assert_eq!(d20().len(), 20);
