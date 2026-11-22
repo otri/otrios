@@ -1686,6 +1686,11 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
         .unwrap();
     let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
     let id = focus_property(&mut client, 3);
+    assert_eq!(
+        client.focus_state().unwrap().id,
+        Some(id),
+        "Designer local controls are focus targets, not software keyboard keys"
+    );
     let root = client.active.as_ref().unwrap().doc.oib_root();
     let epoch = client.epoch();
     assert!(

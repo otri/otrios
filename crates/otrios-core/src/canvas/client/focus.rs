@@ -56,7 +56,7 @@ impl Client {
             .filter_map(|owner| {
                 let m = self.active.as_ref()?;
                 let key = match owner.node.responder {
-                    Some(TouchResponder::Activate(Action::KeyboardKey(_))) => true,
+                    Some(TouchResponder::Activate(Action::KeyboardKey(key))) => key != u16::MAX,
                     Some(TouchResponder::Activate(Action::AppEvent(control))) => m
                         .handler(control)
                         .is_some_and(|h| matches!(h.operation, Operation::Key(_))),
@@ -96,7 +96,7 @@ impl Client {
                 .as_ref()
                 .is_some_and(|d| d.keyboard_key(id).is_some())
                 || path.last().is_some_and(|n| match n.node.responder {
-                    Some(TouchResponder::Activate(Action::KeyboardKey(_))) => true,
+                    Some(TouchResponder::Activate(Action::KeyboardKey(key))) => key != u16::MAX,
                     Some(TouchResponder::Activate(Action::AppEvent(c))) => m
                         .handler(c)
                         .is_some_and(|h| matches!(h.operation, Operation::Key(_))),
