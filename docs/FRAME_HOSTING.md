@@ -38,6 +38,10 @@ KMS/GLES2 display and touch client. `/etc/otrios-dashboard.conf` sets both
 service waits for network/Tailscale and does not pull in a local authority.
 Remote sessions use HTTPS/WSS with an explicit matching Origin; the existing
 private device identity supplies authentication independently of that Origin.
+The existing `frame-household` identity is a Member of the closed Operations
+Space, so Monitoring opens without interactive sign-in and survives native
+restarts. It has no Operations administration grant; the collector identity and
+its upload binding remain separate.
 
 Keep `/etc/otrios-dashboard.identity`, the pinned publisher public key, Linux
 and graphics libraries, and the accepted touch firmware/udev mapping. The

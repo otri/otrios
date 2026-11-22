@@ -30,8 +30,10 @@ At qualification, the code rollback was retained at
 For the current release, read `/release` or the opening `/session` hello;
 the qualification hash above is historical.
 
-One Rust service on the Rockchip photo frame serves code and state. Cloudflare Tunnel reaches its public
-loopback listener on 8877; the local display and collector use trusted 8876.
+One Rust service on the OrbStack Linux host serves code and state. Cloudflare
+Tunnel reaches its public loopback listener on 8877; the local collector uses
+trusted 8894. Frame subscribes through the public HTTPS/WSS origin using its
+existing device credential.
 Remote administration uses pinned SSH over Tailscale. Public
 requests never forward to the trusted listener. State recovery failure leaves
 signed code and release negotiation available. A whole-process crash affects both.
@@ -104,8 +106,10 @@ JSON. Verification has one worker slot, 20 attempts/minute globally and 128
 sessions. Reaching that bound rejects a new login rather than evicting an existing
 browser; replacing the current browser token does not consume another slot. Passwords/tokens do not enter URLs, document state or logs. The browser
 uses standard password fields and reconnects its single session after login to
-acquire the new cookie. The native Frame uses its private token file on the
-loopback listener; loopback access itself grants no managed admission.
+acquire the new cookie. The native Frame uses its private token file over HTTPS/WSS to the OrbStack
+authority. Its existing `frame-household` identity has Member access to the
+closed Operations Space, allowing Monitoring without interactive sign-in.
+Native authentication does not imply Space membership or administration.
 Only immutable public artifacts enter disposable caches; documents and private
 Monitoring views remain in RAM. See [client storage](CLIENT_STORAGE.md).
 
