@@ -61,9 +61,53 @@ pub enum Kind {
     Action,
     Notice,
 }
+/// Recorded presentation intent. Results are decided by the authority; replay
+/// uses the same bounded description and never sends a new command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum MessageEvent {
+    Steam {
+        seed: u32,
+    },
+    Boop {
+        seed: u32,
+        target: Profile,
+    },
+    Salute {
+        seed: u32,
+        target: Profile,
+    },
+    Dice {
+        seed: u32,
+        sides: u8,
+        rolls: Vec<u8>,
+    },
+}
+impl MessageEvent {
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::Steam { .. } => true,
+            Self::Boop { target, .. } | Self::Salute { target, .. } => {
+                target.id.len() == 32
+                    && target.id.bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+                    && !target.name.trim().is_empty()
+                    && target.name.len() <= 96
+                    && !target.name.starts_with(['@', '+', '/'])
+                    && !target.name.chars().any(|c| c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+                    && target.avatar < AVATARS
+            }
+            Self::Dice { sides, rolls, .. } => {
+                (2..=100).contains(sides) && (1..=10).contains(&rolls.len())
+                    && rolls.iter().all(|roll| (1..=*sides).contains(roll))
+            }
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<MessageEvent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assets: Vec<Asset>,
     pub sequence: u64,
@@ -184,9 +228,8 @@ pub enum Event {
         expires: u64,
     },
     Effect {
-        participant: String,
-        kind: String,
-        target: Option<String>,
+        sequence: u64,
+        event: MessageEvent,
     },
     Permissions {
         admin: bool,

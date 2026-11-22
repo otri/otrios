@@ -8,6 +8,35 @@ use std::sync::{
 };
 use tokio::sync::{broadcast, mpsc};
 const COOKIE: &str = "__Host-otrios_guest";
+const BROWSER_COOKIE: &str = "__Host-otrios_browser";
+const BROWSER_COOKIE_SECONDS: u64 = 400 * 24 * 60 * 60;
+
+/// A chat-local bearer identity. It never supplies a Space/authentication grant.
+pub(super) fn browser_identity(headers: &HeaderMap) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let token = named_cookie(headers, BROWSER_COOKIE)?;
+    Some(format!(
+        "browser:{}",
+        otrios_core::canvas::hex(&Sha256::digest(token.as_bytes()))
+    ))
+}
+pub(super) fn ensure_browser_cookie(
+    headers: &HeaderMap,
+    response: &mut Response,
+) -> Result<(), ()> {
+    // Renew the same secret rather than replacing its participant on each visit.
+    let token = if let Some(token) = named_cookie(headers, BROWSER_COOKIE) {
+        token
+    } else {
+        let mut bytes = [0; 32];
+        getrandom::fill(&mut bytes).map_err(|_| ())?;
+        otrios_core::canvas::hex(&bytes)
+    };
+    response.headers_mut().append(header::SET_COOKIE,
+        format!("{BROWSER_COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={BROWSER_COOKIE_SECONDS}").parse().map_err(|_| ())?);
+    Ok(())
+}
+
 pub(super) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -231,11 +260,14 @@ fn recovered(
     }
 }
 pub(super) fn cookie(headers: &HeaderMap) -> Option<String> {
+    named_cookie(headers, COOKIE)
+}
+fn named_cookie(headers: &HeaderMap, expected: &str) -> Option<String> {
     let mut result = None;
     for header in headers.get_all(header::COOKIE) {
         for part in header.to_str().ok()?.split(';') {
             if let Some((name, value)) = part.trim().split_once('=')
-                && name == COOKIE
+                && name == expected
             {
                 if result.is_some()
                     || value.len() != 64
@@ -312,5 +344,54 @@ pub(super) async fn identity(State(app): State<Arc<App>>, headers: HeaderMap) ->
             StatusCode::SERVICE_UNAVAILABLE,
             "Guest identity temporarily unavailable",
         ),
+    }
+}
+
+#[cfg(test)]
+mod browser_identity_tests {
+    use super::*;
+    #[test]
+    fn browser_identity_cookie_renews_the_same_private_bearer_without_replacing_auth_cookie() {
+        let mut first = binary("application/json", vec![], false);
+        first.headers_mut().append(
+            header::SET_COOKIE,
+            "auth=retained; Secure; HttpOnly".parse().unwrap(),
+        );
+        ensure_browser_cookie(&HeaderMap::new(), &mut first).unwrap();
+        let values = first
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), 2);
+        let browser = values
+            .iter()
+            .find(|v| v.starts_with(BROWSER_COOKIE))
+            .unwrap();
+        for flag in [
+            "Path=/",
+            "Secure",
+            "HttpOnly",
+            "SameSite=Strict",
+            "Max-Age=34560000",
+        ] {
+            assert!(browser.contains(flag));
+        }
+        let pair = browser.split(';').next().unwrap();
+        let mut request = HeaderMap::new();
+        request.insert(header::COOKIE, pair.parse().unwrap());
+        let principal = browser_identity(&request).unwrap();
+        assert!(principal.starts_with("browser:") && principal.len() == 72);
+        assert!(!principal.contains(pair.split('=').nth(1).unwrap()));
+        let mut second = binary("application/json", vec![], false);
+        ensure_browser_cookie(&request, &mut second).unwrap();
+        assert_eq!(second.headers()[header::SET_COOKIE], *browser);
+        assert_eq!(browser_identity(&request).unwrap(), principal);
+        request.append(header::COOKIE, pair.parse().unwrap());
+        assert!(
+            browser_identity(&request).is_none(),
+            "ambiguous bearer cookies are not identities"
+        );
     }
 }

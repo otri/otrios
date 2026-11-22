@@ -389,6 +389,7 @@ mod tests {
                     messages: vec![InitialMessage {
                         revision: [1; 32],
                         message: Message {
+                            event: None,
                             assets: vec![asset],
                             sequence: 1,
                             at: 1_000_000,

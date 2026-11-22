@@ -33,12 +33,27 @@ pub(super) struct Receipt {
 #[derive(Serialize, Deserialize)]
 pub(super) enum Entry {
     Guest(Guest),
-    Sent { message: Message, receipt: Receipt },
-    Kick { guest: Guest, message: Message },
+    /// Trusted host proved this browser session and the authenticated principal.
+    BrowserIdentityAdopted {
+        participant: String,
+        browser: String,
+        identity: String,
+    },
+    Sent {
+        message: Message,
+        receipt: Receipt,
+    },
+    Kick {
+        guest: Guest,
+        message: Message,
+    },
     Message(Message),
     Receipt(Receipt),
     Sequence(u64),
-    Redacted { sequence: u64, revision: [u8; 32] },
+    Redacted {
+        sequence: u64,
+        revision: [u8; 32],
+    },
 }
 pub(super) struct Journal {
     // A stable sidecar inode spans atomic data-file replacement during

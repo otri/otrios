@@ -190,6 +190,7 @@ mod tests {
     use super::*;
     fn message(sequence: u64) -> Message {
         Message {
+            event: None,
             sequence,
             at: 1_000_000 + sequence,
             sender: Profile {

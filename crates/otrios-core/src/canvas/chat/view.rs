@@ -236,8 +236,8 @@ pub(super) struct Roster {
     pub footer: Option<f32>,
 }
 impl Client {
-    pub(crate) fn effect_vertices(&self) -> Result<Vec<f32>> {
-        if self.panel != Panel::None || self.kicked.is_some() || self.particles.is_empty() {
+    pub(crate) fn effect_vertices(&self, dark: bool) -> Result<Vec<f32>> {
+        if self.panel != Panel::None || self.kicked.is_some() {
             return Ok(vec![]);
         }
         let [w, h] = self.viewport;
@@ -268,7 +268,12 @@ impl Client {
             );
         }
         let scene = Scene::new(canvas(8_000_000, Rect::new(0., 0., w, h), p.nodes))?;
-        Ok(crate::dashboard::render_scene(&scene).vertices)
+        let mut vertices = crate::dashboard::render_scene(&scene).vertices;
+        vertices.extend(
+            self.replay
+                .vertices(self.now, dark, self.effects == 1, self.effects != 0),
+        );
+        Ok(vertices)
     }
     fn wrapped_label(&self, value: &str, width: f32, scale: u32) -> Vec<String> {
         let measure = |value: &str| {
@@ -400,7 +405,8 @@ impl Client {
             .map_or(28., |font| font.metrics().line_height(2.));
         for entry in [
             "/me action - send a stage direction",
-            "/roll 2d6 - consult the probability engine",
+            "/roll 2d6 or /dice 1d20 - throw replayable dice",
+            "/boop name - a springy brass greeting",
             "/salute name - tip your hat",
             "/steam - a small puff from the boiler",
             "/nick name - change your calling card",

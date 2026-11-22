@@ -73,6 +73,7 @@ pub(super) fn subscribe(
     active: apps::Activation,
     live: watch::Receiver<Option<apps::Activation>>,
     key: Option<String>,
+    browser_identity: Option<String>,
     space: Option<String>,
 ) -> Peer {
     let (input, receiver) = mpsc::channel(8);
@@ -86,6 +87,7 @@ pub(super) fn subscribe(
         active.clone(),
         live,
         key,
+        browser_identity,
         space,
         receiver,
         sender,
@@ -112,6 +114,7 @@ async fn worker(
     active: apps::Activation,
     mut live: watch::Receiver<Option<apps::Activation>>,
     key: Option<String>,
+    browser_identity: Option<String>,
     space: Option<String>,
     mut input: mpsc::Receiver<Input>,
     output: mpsc::Sender<Packet>,
@@ -218,6 +221,7 @@ async fn worker(
                         })
                     } else {
                         let identity = scope.identity.clone();
+                        let browser_identity = browser_identity.clone();
                         let result = if !permitted {
                             Err("This Space does not permit that chat action".into())
                         } else if identity.is_none()
@@ -254,7 +258,15 @@ async fn worker(
                                 let mut events = room.set_admin(id, moderate);
                                 events.extend(match command {
                                     wire::Command::Join { credential: None } => {
-                                        if let Some(identity) = identity.as_deref() {
+                                        if let Some(browser) = browser_identity.as_deref() {
+                                            room.join_browser(
+                                                id,
+                                                browser,
+                                                identity.as_deref(),
+                                                moderate,
+                                                time,
+                                            )?
+                                        } else if let Some(identity) = identity.as_deref() {
                                             room.join_admitted(id, identity, moderate, time)?
                                         } else {
                                             // The current Space Edit/Comment grant admitted

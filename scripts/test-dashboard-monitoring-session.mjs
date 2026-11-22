@@ -67,3 +67,10 @@ test('discovery refresh cannot reset a pending first sign-in',async()=>{
   await h.session.refresh();assert.equal(h.calls.length,1);assert.deepEqual(h.states.at(-1),{authenticated:false,pending:true});
   finish(reply(true));await login;assert.equal(h.session.authenticated,true);assert.deepEqual(h.calls.map(c=>c.method||'GET'),['POST','GET']);
 });
+
+test('persistent browser identity readiness is reported without granting account access',async()=>{
+  const h=harness(async()=>({ok:false,status:401,json:async()=>({monitoring:false,browser_identity:true})}));
+  await h.session.refresh();
+  assert.equal(h.session.authenticated,false);assert.equal(h.session.browserIdentity,true);
+  assert.deepEqual(h.states,[{authenticated:false,browserIdentity:true}]);
+});

@@ -48,6 +48,9 @@ pub fn read_message(row: &Snapshot) -> Result<Message> {
     super::check(bytes, MAX_MESSAGE_BYTES)?;
     let message: Message = flexbuffers::from_slice(bytes).map_err(err)?;
     super::validate_message_assets(&message.assets)?;
+    if message.event.as_ref().is_some_and(|event| !event.valid()) {
+        return Err("Invalid message event".into());
+    }
     Ok(message)
 }
 pub(super) fn canonical_row(message: &Message) -> Result<Snapshot> {
@@ -174,6 +177,7 @@ mod tests {
         let mut pinned = None;
         for sequence in 1..=10 {
             let message = Message {
+                event: None,
                 assets: vec![],
                 sequence,
                 at: 1_000_000,

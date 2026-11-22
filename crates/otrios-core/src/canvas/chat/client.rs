@@ -104,6 +104,7 @@ pub struct Client {
     pub(super) now: u64,
     pub(super) wall: u64,
     pub(super) particles: Vec<Particle>,
+    pub(super) replay: super::replay::Replay,
     pub(super) input_view: super::super::text_viewport::TextViewport,
     pub(super) dialog_view: super::super::text_viewport::TextViewport,
     roster_pressed: Option<String>,
@@ -147,6 +148,9 @@ pub struct Info {
     pub lease_generation: u64,
     pub kicked: bool,
     pub modal: bool,
+    pub event_animations: usize,
+    pub replay_controls: usize,
+    pub last_live_event: u64,
 }
 impl Default for Client {
     fn default() -> Self {
@@ -189,6 +193,7 @@ impl Default for Client {
             now: 0,
             wall: 0,
             particles: vec![],
+            replay: Default::default(),
             input_view: Default::default(),
             dialog_view: Default::default(),
             roster_pressed: None,
@@ -291,6 +296,9 @@ impl Client {
             let message = &row.message;
             profile(&message.sender)?;
             super::validate_message_assets(&message.assets)?;
+            if message.event.as_ref().is_some_and(|event| !event.valid()) {
+                return Err("Invalid recorded chat event".into());
+            }
             super::authority::text(&message.text, 2304, 1200, 18)?;
             if message.sequence <= previous
                 || (!message.nonce.is_empty() && !super::valid_hex(&message.nonce, 16))
@@ -384,6 +392,9 @@ impl Client {
             lease_generation: self.collection.generation(),
             kicked: self.kicked.is_some(),
             modal: self.panel != Panel::None,
+            event_animations: self.replay.status().0,
+            replay_controls: self.replay_controls().len(),
+            last_live_event: self.replay.status().1,
         }
     }
     pub fn recent_messages(&self) -> Vec<Message> {
@@ -590,6 +601,7 @@ impl Client {
         if reduced {
             self.effects = 0;
             self.particles.clear();
+            self.replay.stop();
         }
     }
     pub fn outgoing(&mut self, credential: Option<String>) -> Result<Option<Vec<u8>>> {
@@ -835,10 +847,13 @@ impl Client {
                     self.drafts.remove(&participant);
                 }
             }
-            Event::Effect { kind, .. } => self.emit(
-                kind == "steam",
-                [self.viewport[0] * 0.5, self.viewport[1] - 100.],
-            ),
+            Event::Effect { sequence, event } => {
+                if !event.valid() || sequence == 0 {
+                    return Err("Invalid live chat event".into());
+                }
+                self.replay
+                    .live(sequence, event, self.now, self.effects != 0);
+            }
             Event::Permissions { admin } => {
                 if let Some(you) = &mut self.you {
                     you.admin = admin;
@@ -921,6 +936,7 @@ impl Client {
         }
         self.now = now;
         self.wall = wall;
+        let replaying = self.replay.tick(now);
         let old = self.particles.len();
         self.particles.retain(|p| now.saturating_sub(p.at) < 900);
         let drafts = self.drafts.len();
@@ -942,7 +958,7 @@ impl Client {
         }
         (
             date_changed || drafts != self.drafts.len() || clear || moving,
-            old != 0 || emitted,
+            old != 0 || emitted || replaying,
         )
     }
     fn emit(&mut self, steam: bool, position: [f32; 2]) {
@@ -1238,6 +1254,7 @@ impl Client {
                 self.effects = (self.effects + 1) % 3;
                 if self.effects == 0 {
                     self.particles.clear();
+                    self.replay.stop();
                 }
             }
             19 => {
@@ -1550,6 +1567,7 @@ mod tests {
                 avatar: 7,
             },
             kind: Kind::Message,
+            event: None,
             text: "A clockwork pigeon!".into(),
             nonce: format!("{sequence:032x}"),
         }

@@ -1624,7 +1624,10 @@ impl Client {
             .active
             .as_ref()
             .and_then(|m| m.chat.as_ref())
-            .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())?;
+            .map_or_else(
+                || Ok(vec![]),
+                |chat| chat.effect_vertices(self.appearance_is_dark()),
+            )?;
         self.append_focus_vertices(&mut vertices)?;
         if let Some(m) = &self.active {
             let color = m
@@ -3144,6 +3147,64 @@ impl Client {
     pub fn scene(&self) -> Result<Arc<Scene>> {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
+    pub fn control_ids(&self) -> Result<Vec<u32>> {
+        let mut ids = self
+            .scene()?
+            .controls()
+            .iter()
+            .map(|c| c.node.id)
+            .collect::<Vec<_>>();
+        if let Some(chat) = self.active.as_ref().and_then(|m| m.chat.as_ref()) {
+            ids.extend(chat.replay_controls().iter().map(|c| c.id));
+        }
+        Ok(ids)
+    }
+    pub fn control_label(&self, id: u32) -> Result<String> {
+        if let Some(c) = self
+            .active
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .and_then(|chat| chat.replay_controls().iter().find(|c| c.id == id))
+        {
+            return Ok(c.label.clone());
+        }
+        Ok(self
+            .scene()?
+            .controls()
+            .iter()
+            .find(|c| c.node.id == id)
+            .and_then(|c| c.node.semantics.as_ref())
+            .map_or_else(String::new, |s| s.label.clone()))
+    }
+    pub fn control_bounds(&self, id: u32) -> Result<Option<[f32; 4]>> {
+        if let Some(c) = self
+            .active
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .and_then(|chat| chat.replay_controls().iter().find(|c| c.id == id))
+        {
+            return Ok(Some(c.bounds));
+        }
+        Ok(self
+            .scene()?
+            .controls()
+            .iter()
+            .find(|c| c.node.id == id)
+            .map(|c| {
+                [
+                    c.origin[0],
+                    c.origin[1],
+                    c.node.frame.width * c.scale,
+                    c.node.frame.height * c.scale,
+                ]
+            }))
+    }
+    pub(crate) fn semantic_overlay_revision(&self) -> u64 {
+        self.active
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .map_or(0, |chat| chat.replay_revision())
+    }
     pub fn edit_oib(&mut self, changes: &[(u64, Option<Value>)]) -> Result<bool> {
         let mount = self.active.as_mut().ok_or("No Canvas")?;
         if mount.binding.as_ref().is_some_and(|b| !b.ui_editable) {
@@ -3566,12 +3627,27 @@ impl Client {
         let mut changed = false;
         if epoch == self.epoch() && self.active.is_some() && event.phase == PointerPhase::Down {
             let scene = self.scene()?;
-            let id = scene
-                .hit_path(event.position)
-                .iter()
-                .rev()
-                .find(|n| n.node.semantics.is_some())
-                .map(|n| n.node.id);
+            let replay_scene = self
+                .active
+                .as_ref()
+                .and_then(|m| m.chat.as_ref())
+                .map(|chat| chat.replay_scene())
+                .transpose()?;
+            let replay_id = replay_scene.as_ref().and_then(|s| {
+                s.hit_path(event.position)
+                    .iter()
+                    .rev()
+                    .find(|n| n.node.semantics.is_some())
+                    .map(|n| n.node.id)
+            });
+            let id = replay_id.or_else(|| {
+                scene
+                    .hit_path(event.position)
+                    .iter()
+                    .rev()
+                    .find(|n| n.node.semantics.is_some())
+                    .map(|n| n.node.id)
+            });
             if let Some(id) = id {
                 changed = self.focus_control(epoch, id, false)?;
             } else {
@@ -3681,11 +3757,16 @@ impl Client {
             self.scene()?
         };
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        let replayed = if let Some(chat) = &mut m.chat {
+            chat.replay_pointer(event)?
+        } else {
+            false
+        };
         if let Some(reader) = &mut m.text_document {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 reader.cancel();
             } else if let Some(changed) = reader.pointer(&scene, event, at) {
-                return Ok(changed);
+                return Ok(changed || replayed);
             }
         }
         if let Some(chat) = &mut m.chat
@@ -3873,6 +3954,13 @@ impl Client {
         Ok(self.activate_inner(epoch, id)? || changed)
     }
     fn activate_inner(&mut self, epoch: u32, id: u32) -> Result<bool> {
+        if epoch == self.epoch()
+            && let Some(m) = &mut self.active
+            && let Some(chat) = &mut m.chat
+            && chat.replay_controls().iter().any(|c| c.id == id)
+        {
+            return chat.replay_activate(id);
+        }
         if epoch == self.epoch()
             && let Some(changed) = self.leave_activate(id)?
         {
@@ -4533,6 +4621,11 @@ impl Client {
         } else {
             false
         };
+        let replays_changed = if let (Some(chat), Some(doc)) = (&mut m.chat, &m.text_document) {
+            chat.sync_replays(doc)
+        } else {
+            false
+        };
         // The host's renderer credit coalesces paint requests. Input/physics
         // clocks do not impose a second, app-specific presentation cadence.
         let paint = u8::from(chat_changed)
@@ -4555,7 +4648,7 @@ impl Client {
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
         }
-        Ok(oib_changed || changed || feedback_changed || paint != 0)
+        Ok(oib_changed || changed || feedback_changed || replays_changed || paint != 0)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active.as_mut().map_or_else(Vec::new, |m| {

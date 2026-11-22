@@ -3,9 +3,9 @@
 export class MonitoringSession {
   constructor({fetcher=globalThis.fetch.bind(globalThis),onStatus=()=>{}}={}){
     Object.assign(this,{fetcher,onStatus});
-    this.authenticated=false;this.pendingEpoch=null;this.epoch=0;this.refreshVersion=0;this.mutations=Promise.resolve();
+    this.authenticated=false;this.browserIdentity=false;this.pendingEpoch=null;this.epoch=0;this.refreshVersion=0;this.mutations=Promise.resolve();
   }
-  status(extra={}){this.onStatus({authenticated:this.authenticated,...extra});}
+  status(extra={}){this.onStatus({authenticated:this.authenticated,...(this.browserIdentity?{browserIdentity:true}:{}),...extra});}
   async refresh(){
     // A cookie mutation owns authentication until its authoritative follow-up.
     // Background discovery must not re-enable/reset the pending sign-in form.
@@ -16,9 +16,9 @@ export class MonitoringSession {
     // A proxy/server outage is not an authoritative revocation. Keep the last
     // confirmed status; protected data remains independently checked by authority.
     if(!response.ok&&response.status!==401)throw Error('Sign-in status is temporarily unavailable.');
-    const authenticated=response.ok&&(await response.json()).monitoring===true;
+    const state=await response.json(),authenticated=response.ok&&state.monitoring===true;
     if(epoch!==this.epoch||version!==this.refreshVersion)return;
-    this.authenticated=authenticated;this.status();
+    this.authenticated=authenticated;this.browserIdentity=state.browser_identity===true;this.status();
   }
   mutate(method,body){
     const operation=()=>this.fetcher('/auth/session',{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-OTriOS-Request':'session'},...(body?{body:JSON.stringify(body)}:{})});

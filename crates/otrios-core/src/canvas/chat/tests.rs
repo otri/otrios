@@ -917,3 +917,194 @@ fn binary_attachment_codec_is_bounded_and_does_not_expand_each_byte_into_a_scala
         .is_err()
     );
 }
+
+#[test]
+fn recorded_events_are_durable_authoritative_and_retry_safe() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    let (profile, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    let commands = [
+        "/roll 2d6".to_owned(),
+        "/dice 1d20".to_owned(),
+        format!("/boop {}", profile.name),
+        format!("/salute {}", profile.name),
+        "/steam".to_owned(),
+    ];
+    let mut recorded = vec![];
+    for (index, command) in commands.iter().enumerate() {
+        let at = now + index as u64 * 1100;
+        let deliveries = room
+            .handle(1, send(command, index as u64 + 1, at), at)
+            .unwrap();
+        let (sequence, effect) = deliveries
+            .iter()
+            .find_map(|d| match &d.event {
+                Event::Effect { sequence, event } => Some((*sequence, event.clone())),
+                _ => None,
+            })
+            .unwrap();
+        assert!(effect.valid());
+        let initial: Initial = flexbuffers::from_slice(&room.initial_snapshot().unwrap()).unwrap();
+        let message = initial
+            .messages
+            .into_iter()
+            .find(|m| m.message.sequence == sequence)
+            .unwrap()
+            .message;
+        assert_eq!(message.event, Some(effect.clone()));
+        match &effect {
+            MessageEvent::Dice { sides, rolls, .. } => {
+                assert_eq!(rolls.len(), if index == 0 { 2 } else { 1 });
+                assert_eq!(*sides, if index == 0 { 6 } else { 20 });
+                assert!(rolls.iter().all(|r| (1..=*sides).contains(r)));
+                let total: u16 = rolls.iter().map(|r| u16::from(*r)).sum();
+                assert!(message.text.ends_with(&format!("= {total}")));
+            }
+            MessageEvent::Boop { target, .. } => {
+                assert_eq!(target, &profile);
+                assert!(message.text.contains(" boops "));
+            }
+            MessageEvent::Salute { target, .. } => {
+                assert_eq!(target, &profile);
+                assert!(message.text.contains("tips a brass-trimmed hat"));
+            }
+            MessageEvent::Steam { .. } => assert!(message.text.contains("puff of steam")),
+        }
+        recorded.push((sequence, message));
+        let retried = room
+            .handle(1, send(command, index as u64 + 1, at), at + 1)
+            .unwrap();
+        assert!(
+            matches!(retried.as_slice(), [Delivery { event: Event::Receipt { sequence: s, .. }, .. }] if *s == sequence)
+        );
+    }
+    drop(room);
+    let mut recovered = Room::open(Some(p.clone()), now + 6000).unwrap();
+    recovered
+        .join(2, Some(&token), false, now + 6000, true)
+        .unwrap();
+    let snapshot: Initial =
+        flexbuffers::from_slice(&recovered.initial_snapshot().unwrap()).unwrap();
+    for (sequence, original) in &recorded {
+        assert_eq!(
+            &snapshot
+                .messages
+                .iter()
+                .find(|m| m.message.sequence == *sequence)
+                .unwrap()
+                .message,
+            original,
+            "restart retains the exact result, target and seed"
+        );
+    }
+    let retry = recovered
+        .handle(2, send(&commands[0], 1, now), now + 6001)
+        .unwrap();
+    assert!(
+        matches!(retry.as_slice(), [Delivery { event: Event::Receipt { sequence: s, .. }, .. }] if *s == recorded[0].0)
+    );
+    assert_eq!(snapshot.messages.len(), recorded.len());
+    drop(recovered);
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn recorded_events_keep_legacy_message_bytes_and_reject_unbounded_payloads() {
+    #[derive(serde::Serialize)]
+    struct LegacyMessage {
+        assets: Vec<Asset>,
+        sequence: u64,
+        at: u64,
+        sender: Profile,
+        kind: Kind,
+        text: String,
+        nonce: String,
+    }
+    // Empty legacy attachment fields were omitted in the original contract.
+    #[derive(serde::Serialize)]
+    struct OldPlain {
+        sequence: u64,
+        at: u64,
+        sender: Profile,
+        kind: Kind,
+        text: String,
+        nonce: String,
+    }
+    let plain = OldPlain {
+        sequence: 7,
+        at: 1000,
+        sender: Profile {
+            id: "ab".repeat(16),
+            name: "Legacy Operator".into(),
+            avatar: 1,
+        },
+        kind: Kind::Notice,
+        text: "A prior dispatch".into(),
+        nonce: "cd".repeat(16),
+    };
+    let old = flexbuffers::to_vec(&plain).unwrap();
+    let decoded: Message = flexbuffers::from_slice(&old).unwrap();
+    assert!(decoded.event.is_none());
+    assert_eq!(
+        flexbuffers::to_vec(&decoded).unwrap(),
+        old,
+        "old canonical message rows do not acquire a serialized null event"
+    );
+    let with_asset = LegacyMessage {
+        assets: vec![Asset {
+            name: "legacy.txt".into(),
+            sha256: "ab".repeat(32),
+            bytes: 1,
+        }],
+        sequence: plain.sequence,
+        at: plain.at,
+        sender: plain.sender,
+        kind: plain.kind,
+        text: plain.text,
+        nonce: plain.nonce,
+    };
+    let old = flexbuffers::to_vec(&with_asset).unwrap();
+    let decoded: Message = flexbuffers::from_slice(&old).unwrap();
+    assert!(decoded.event.is_none());
+    assert_eq!(flexbuffers::to_vec(&decoded).unwrap(), old);
+    for effect in [
+        MessageEvent::Dice {
+            seed: 1,
+            sides: 6,
+            rolls: vec![],
+        },
+        MessageEvent::Dice {
+            seed: 1,
+            sides: 6,
+            rolls: vec![1; 11],
+        },
+        MessageEvent::Dice {
+            seed: 1,
+            sides: 6,
+            rolls: vec![7],
+        },
+        MessageEvent::Dice {
+            seed: 1,
+            sides: 101,
+            rolls: vec![1],
+        },
+        MessageEvent::Boop {
+            seed: 1,
+            target: Profile {
+                id: "bad".into(),
+                name: "Invalid".into(),
+                avatar: 1,
+            },
+        },
+    ] {
+        assert!(!effect.valid());
+        let message = Message {
+            event: Some(effect),
+            ..decoded.clone()
+        };
+        let row = history::canonical_row(&message).unwrap();
+        assert!(read_message(&row).is_err());
+    }
+}

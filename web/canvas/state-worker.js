@@ -15,10 +15,11 @@ let viewportRevision=0,lastViewportExtent=null,lastTextGeneration=0,lastPaint=0,
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
-let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
+let browserIdentityReady=false,chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
 let chatLogKey='',spacesSending=false,signingOut=false,transferActor;
 function pumpSpaces(){if(transportReady&&!spacesSending){const bytes=app?.spaces_outgoing();if(bytes){spacesSending=true;postMessage({type:'spaces-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function pumpChat(){
+  if(app?.space_managed()&&!browserIdentityReady)return;
   if(app?.screen()==='brass-relay'&&!app.space_managed()&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
   if(transportReady&&!chatSending){const bytes=app?.chat_outgoing();if(bytes){chatSending=true;postMessage({type:'chat-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 }
@@ -95,8 +96,10 @@ function release(message){
 }
 function applyAuthenticationStatus(state){
       if(!state.authenticated&&authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}
-      const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
-      if(signedIn){if(app.auth_required())app.retry_mount();postMessage({type:'transport-reconnect'});}
+      const signedIn=state.authenticated&&!authenticated,identityReady=!!state.browserIdentity&&!browserIdentityReady;authenticated=state.authenticated;
+      browserIdentityReady=!!state.browserIdentity;
+      if(signedIn&&app.auth_required())app.retry_mount();
+      if(signedIn||identityReady)postMessage({type:'transport-reconnect'});
       const accessChanged=app.set_private_access(authenticated);
       const chromeChanged=app.set_session_controls(authenticated)||accessChanged;
       postMessage({type:'monitoring-auth',...state});publish(chromeChanged);

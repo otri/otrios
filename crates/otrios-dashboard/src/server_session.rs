@@ -83,6 +83,7 @@ async fn open(
         None
     };
     let guest = chat::cookie(&headers);
+    let browser_identity = chat::browser_identity(&headers);
     // Most session frames are small. Avoid reserving the library's 128 KiB
     // read buffer for every idle peer; complete messages retain the same bounds.
     ws.read_buffer_size(4096)
@@ -90,7 +91,17 @@ async fn open(
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            peer(app, socket, public, key, control_only, guest, space).await
+            peer(
+                app,
+                socket,
+                public,
+                key,
+                control_only,
+                guest,
+                browser_identity,
+                space,
+            )
+            .await
         })
 }
 async fn send(output: &mut SplitSink<WebSocket, Message>, message: Message) -> bool {
@@ -203,6 +214,7 @@ enum Event {
     Heartbeat,
     Activation,
 }
+#[allow(clippy::too_many_arguments)]
 async fn peer(
     app: Arc<App>,
     socket: WebSocket,
@@ -210,6 +222,7 @@ async fn peer(
     key: Option<String>,
     control_only: bool,
     guest: Option<String>,
+    browser_identity: Option<String>,
     space: Option<String>,
 ) {
     let (mut output, mut input) = socket.split();
@@ -428,6 +441,7 @@ async fn peer(
                                     active,
                                     live.clone(),
                                     key.clone(),
+                                    browser_identity.clone(),
                                     space.clone(),
                                 ));
                             }

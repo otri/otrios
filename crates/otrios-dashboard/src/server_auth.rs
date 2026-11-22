@@ -314,7 +314,7 @@ fn mutation(app: &App, headers: &HeaderMap) -> bool {
             .is_some_and(|v| v == "session")
 }
 fn set_cookie(result: &mut Response, token: &str) {
-    result.headers_mut().insert(
+    result.headers_mut().append(
         header::SET_COOKIE,
         format!(
             "{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={COOKIE_SECONDS}"
@@ -324,19 +324,30 @@ fn set_cookie(result: &mut Response, token: &str) {
     );
 }
 pub async fn session(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let Some(auth) = &app.auth else {
-        return denied();
+    let authenticated = match &app.auth {
+        Some(auth) => auth.key(&headers).await.is_some(),
+        None => false,
     };
-    if auth.key(&headers).await.is_some() {
-        let mut result = response(StatusCode::OK, json!({"monitoring":true}));
-        if let Some(token) = cookie(&headers) {
-            set_cookie(&mut result, &token);
-        }
-        result
-    } else {
-        denied()
+    let mut result = response(
+        if authenticated {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        },
+        json!({"monitoring":authenticated,"browser_identity":true}),
+    );
+    if chat::ensure_browser_cookie(&headers, &mut result).is_err() {
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Browser identity is temporarily unavailable",
+        );
     }
+    if authenticated && let Some(token) = cookie(&headers) {
+        set_cookie(&mut result, &token);
+    }
+    result
 }
+
 pub async fn login(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
     if !mutation(&app, &headers) {
         return failure(StatusCode::FORBIDDEN, "Origin rejected");

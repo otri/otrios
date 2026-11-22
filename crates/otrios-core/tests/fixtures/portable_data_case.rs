@@ -128,6 +128,7 @@ pub fn build() -> Json {
     let asset_hash = canvas::hex(&canvas::hash(asset));
     let messages = vec![
         chat::Message {
+            event: None,
             sequence: 1,
             at: 1_700_000_000_001,
             sender: chat::Profile {
@@ -145,6 +146,7 @@ pub fn build() -> Json {
             }],
         },
         chat::Message {
+            event: None,
             sequence: 4,
             at: 1_700_000_000_004,
             sender: chat::Profile {

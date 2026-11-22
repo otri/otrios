@@ -2,7 +2,7 @@
 use super::journal::{Entry, Guest, Journal, Receipt};
 use super::{
     COLLECTION, Command, Event, Initial, InitialMessage, Kind, MAX_INITIAL_BYTES, MESSAGE_FIELD,
-    Member, Message, Profile, Result, err, random,
+    Member, Message, MessageEvent, Profile, Result, err, random,
 };
 use std::{
     collections::BTreeMap,
@@ -46,7 +46,7 @@ impl Delivery {
         }
     }
 }
-type Parsed = (Kind, String, Option<(String, Option<String>)>);
+type Parsed = (Kind, String, Option<MessageEvent>);
 struct Connection {
     id: String,
     admin: bool,
@@ -227,6 +227,13 @@ impl Room {
             Entry::Guest(guest) => {
                 self.restore_guest(guest)?;
             }
+            Entry::BrowserIdentityAdopted {
+                participant,
+                browser,
+                identity,
+            } => {
+                self.adopt_browser_identity(&participant, &browser, &identity)?;
+            }
             Entry::Sent { message, receipt } => {
                 self.add_message(message)?;
                 if (receipt.epoch.saturating_add(2)).saturating_mul(EPOCH) > now {
@@ -295,6 +302,9 @@ impl Room {
     }
     fn prepare_message(&self, message: &Message) -> Result<super::history::Prepared> {
         super::validate_message_assets(&message.assets)?;
+        if message.event.as_ref().is_some_and(|event| !event.valid()) {
+            return Err("Invalid immutable message event".into());
+        }
         text(&message.text, 2304, 1200, 18)?;
         name(&message.sender.name)?;
         if !super::valid_hex(&message.sender.id, 16)
@@ -347,9 +357,16 @@ impl Room {
     }
     fn prune(&mut self, now: u64) {
         self.guests.retain(|id, g| {
-            g.authority_identity.is_some()
+            g.authority_identity
+                .as_deref()
+                .is_some_and(|identity| !Self::browser_principal(identity))
                 || g.cooldown > now
-                || now.saturating_sub(g.last_seen_unix_ms) < 30 * DAY
+                || now.saturating_sub(g.last_seen_unix_ms)
+                    < if g.authority_identity.is_some() {
+                        400 * DAY
+                    } else {
+                        30 * DAY
+                    }
                 || self.memberships.contains_key(id)
         });
         self.receipts
@@ -427,6 +444,96 @@ impl Room {
         }
         self.new_identity(now, Some(identity.into()))
             .map(|(profile, _)| profile)
+    }
+    fn browser_principal(identity: &str) -> bool {
+        identity
+            .strip_prefix("browser:")
+            .is_some_and(|digest| super::valid_hex(digest, 32))
+    }
+    fn adopt_browser_identity(
+        &mut self,
+        participant: &str,
+        browser: &str,
+        identity: &str,
+    ) -> Result<()> {
+        if !Self::browser_principal(browser)
+            || !crate::spaces::valid_identity(identity)
+            || Self::browser_principal(identity)
+            || self
+                .guests
+                .values()
+                .any(|guest| guest.authority_identity.as_deref() == Some(identity))
+            || self
+                .guests
+                .get(participant)
+                .is_none_or(|guest| guest.authority_identity.as_deref() != Some(browser))
+        {
+            return Err("Invalid browser identity adoption".into());
+        }
+        self.guests
+            .get_mut(participant)
+            .expect("validated browser participant")
+            .authority_identity = Some(identity.into());
+        Ok(())
+    }
+    /// The host proves a persistent HttpOnly browser bearer and, independently,
+    /// any authenticated account. Neither browser identity nor this profile is
+    /// a Space grant. Existing account profiles always win on other browsers.
+    pub fn join_browser(
+        &mut self,
+        connection: u64,
+        browser: &str,
+        identity: Option<&str>,
+        moderate: bool,
+        now: u64,
+    ) -> Result<Vec<Delivery>> {
+        if self.connections.len() >= 68 && !self.connections.contains_key(&connection) {
+            return Err("Room full".into());
+        }
+        if !Self::browser_principal(browser)
+            || identity
+                .is_some_and(|id| !crate::spaces::valid_identity(id) || Self::browser_principal(id))
+        {
+            return Err("Invalid admitted browser identity".into());
+        }
+        self.prune(now);
+        let mut retired = vec![];
+        if let Some(identity) = identity {
+            let existing = self
+                .guests
+                .values()
+                .any(|guest| guest.authority_identity.as_deref() == Some(identity));
+            if !existing
+                && let Some(participant) = self
+                    .guests
+                    .values()
+                    .find(|guest| guest.authority_identity.as_deref() == Some(browser))
+                    .map(|guest| guest.profile.id.clone())
+            {
+                let entry = Entry::BrowserIdentityAdopted {
+                    participant: participant.clone(),
+                    browser: browser.into(),
+                    identity: identity.into(),
+                };
+                self.persist(&entry, now)?;
+                self.adopt_browser_identity(&participant, browser, identity)?;
+                // Old anonymous sockets must re-admit after ownership changes;
+                // sharing a browser cookie is not an authenticated account grant.
+                let old = self
+                    .connections
+                    .iter()
+                    .filter(|(_, c)| c.id == participant)
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>();
+                for old in old {
+                    retired.extend(self.abandon(old, now));
+                }
+            }
+            retired.extend(self.join_admitted(connection, identity, moderate, now)?);
+            Ok(retired)
+        } else {
+            self.join_admitted(connection, browser, false, now)
+        }
     }
     fn new_identity(
         &mut self,
@@ -792,8 +899,15 @@ impl Room {
                 if avatar >= super::AVATARS {
                     return Err("Unknown avatar".into());
                 }
+                let managed = self.guests[&id].authority_identity.is_some();
                 if self.guests.iter().any(|(other, g)| {
                     *other != id && g.profile.name.to_lowercase() == display.to_lowercase()
+                        // Pre-browser managed guests were never issued a resume
+                        // credential. Their offline aliases must not be reserved
+                        // forever. Bound browser/account aliases remain protected;
+                        // immutable transcript author identities are untouched.
+                        && (!managed || g.authority_identity.is_some()
+                            || self.connections.values().any(|connection| connection.id == *other))
                 }) {
                     let shortened = display.graphemes(true).take(18).collect::<String>();
                     display = format!("{} {}", shortened, &id[..4]);
@@ -874,6 +988,7 @@ impl Room {
                 guest.cooldown = now + 60_000;
                 guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 let message = Message {
+                    event: None,
                     assets: vec![],
                     sequence: self
                         .sequence
@@ -1040,6 +1155,7 @@ impl Room {
             rate.effects += 1;
         }
         let message = Message {
+            event: effect.clone(),
             assets,
             sequence: self
                 .sequence
@@ -1086,11 +1202,10 @@ impl Room {
                 expires: now,
             }));
         }
-        if let Some((kind, target)) = effect {
+        if let Some(event) = effect {
             events.push(Delivery::all(Event::Effect {
-                participant: id,
-                kind,
-                target,
+                sequence: message.sequence,
+                event,
             }));
         }
         Ok(events)
@@ -1105,27 +1220,49 @@ impl Room {
         }
         let (cmd, arg) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
         let arg = arg.trim();
+        let seed = || -> Result<u32> {
+            let mut bytes = [0; 4];
+            getrandom::fill(&mut bytes).map_err(err)?;
+            Ok(u32::from_le_bytes(bytes))
+        };
+        let target = || {
+            self.members()
+                .into_iter()
+                .find(|member| member.profile.name.to_lowercase() == arg.to_lowercase())
+                .map(|member| member.profile)
+                .ok_or("Use a full name from Members")
+        };
         match cmd {
             "/me" if !arg.is_empty() => Ok((Kind::Action, arg.into(), None)),
             "/shrug" => Ok((Kind::Message, format!("{arg} ¯\\_(ツ)_/¯"), None)),
             "/steam" => Ok((
                 Kind::Notice,
                 format!("{who} releases a dignified puff of steam."),
-                Some(("steam".into(), None)),
+                Some(MessageEvent::Steam { seed: seed()? }),
             )),
-            "/salute" | "/boop" => {
-                let target = self
-                    .members()
-                    .into_iter()
-                    .find(|m| m.profile.name.to_lowercase() == arg.to_lowercase())
-                    .ok_or("Use a full name from Members")?;
+            "/salute" => {
+                let target = target()?;
                 Ok((
                     Kind::Notice,
-                    format!("{who} tips a brass-trimmed hat to {}.", target.profile.name),
-                    Some(("salute".into(), Some(target.profile.id))),
+                    format!("{who} tips a brass-trimmed hat to {}.", target.name),
+                    Some(MessageEvent::Salute {
+                        seed: seed()?,
+                        target,
+                    }),
                 ))
             }
-            "/roll" => {
+            "/boop" => {
+                let target = target()?;
+                Ok((
+                    Kind::Notice,
+                    format!("{who} boops {}.", target.name),
+                    Some(MessageEvent::Boop {
+                        seed: seed()?,
+                        target,
+                    }),
+                ))
+            }
+            "/roll" | "/dice" => {
                 let notation = if arg.is_empty() { "1d20" } else { arg };
                 let (n, d) = notation
                     .split_once('d')
@@ -1144,20 +1281,24 @@ impl Room {
                             break;
                         }
                     }
-                    rolls.push(u16::from(byte[0] % sides + 1));
+                    rolls.push(byte[0] % sides + 1);
                 }
-                let total = rolls.iter().sum::<u16>();
+                let total = rolls.iter().map(|roll| u16::from(*roll)).sum::<u16>();
                 Ok((
                     Kind::Notice,
                     format!(
                         "{who} rolls {notation}: {} = {total}",
                         rolls
                             .iter()
-                            .map(u16::to_string)
+                            .map(u8::to_string)
                             .collect::<Vec<_>>()
                             .join(" + ")
                     ),
-                    None,
+                    Some(MessageEvent::Dice {
+                        seed: seed()?,
+                        sides,
+                        rolls,
+                    }),
                 ))
             }
             "/topic" if admin && !arg.is_empty() => {

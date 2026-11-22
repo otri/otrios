@@ -150,6 +150,19 @@ impl Viewport {
             stats
         })
     }
+    /// Visible source block anchors for bounded semantic overlays. No layout work.
+    pub(crate) fn visible_block_origins(&self) -> Vec<(u32, [f32; 2])> {
+        self.reader.as_ref().map_or_else(Vec::new, |reader| {
+            reader
+                .visible_block_origins()
+                .into_iter()
+                .map(|(block, y)| (block, [self.origin[0], self.origin[1] + y as f32]))
+                .collect()
+        })
+    }
+    pub(crate) fn clip(&self) -> [f32; 4] {
+        self.clip
+    }
     pub fn frame(&mut self) -> Option<Frame> {
         let mut frame = self.reader.as_mut()?.frame();
         if self.reader_epoch != frame.epoch {

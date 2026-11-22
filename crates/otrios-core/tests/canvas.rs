@@ -1636,6 +1636,7 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
         members: vec![],
         messages: vec![chat::InitialMessage {
             message: chat::Message {
+                event: None,
                 assets: vec![],
                 sequence: 1,
                 at: 1_000_000,
@@ -1656,6 +1657,7 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
     for sequence in 2..=64 {
         full.messages.push(chat::InitialMessage {
             message: chat::Message {
+                event: None,
                 assets: vec![],
                 sequence,
                 at: 1_000_000 + sequence * 1000,
@@ -4429,13 +4431,13 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     client
         .receive_chat(
             &chat::encode_event(&Event::Effect {
-                participant: "1".repeat(32),
-                kind: "steam".into(),
-                target: None,
+                sequence: 1,
+                event: chat::MessageEvent::Steam { seed: 1 },
             })
             .unwrap(),
         )
         .unwrap();
+    client.tick(1700, 1_700_000_000).unwrap();
     let start = composer.compose(&mut client, &font).unwrap().clone();
     assert_eq!(start.revisions.content, idle.revisions.content);
     assert_eq!(start.revisions.semantics, idle.revisions.semantics);
@@ -4444,7 +4446,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     let first = client.effect_vertices().unwrap();
     assert!(!first.is_empty());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
-    client.tick(1100, 1_700_000_000).unwrap();
+    client.tick(1800, 1_700_000_000).unwrap();
     let moving = composer.compose(&mut client, &font).unwrap().clone();
     assert_ne!(moving.revisions.effects, start.revisions.effects);
     assert_eq!(moving.revisions.content, start.revisions.content);
@@ -4458,7 +4460,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     );
     assert_ne!(first, client.effect_vertices().unwrap());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
-    client.tick(2100, 1_700_000_000).unwrap();
+    client.tick(3500, 1_700_000_000).unwrap();
     let ended = composer.compose(&mut client, &font).unwrap().clone();
     assert!(!ended.order.contains(&Layer::Effects));
     assert_ne!(ended.revisions.effects, moving.revisions.effects);
@@ -4601,6 +4603,7 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
     };
     let messages = (1..=40)
         .map(|i| Message {
+            event: None,
             assets: vec![],
             sequence: i,
             at: 1_700_000_000_000,
@@ -5422,6 +5425,7 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
         members: vec![],
         messages: vec![chat::InitialMessage {
             message: chat::Message {
+                event: Some(chat::MessageEvent::Steam { seed: 42 }),
                 assets: vec![],
                 sequence: 1,
                 at: 1_000_000,
@@ -5430,7 +5434,7 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
                     name: "Author".into(),
                     avatar: 1,
                 },
-                kind: chat::Kind::Message,
+                kind: chat::Kind::Notice,
                 text: "Readable without presence".into(),
                 nonce: "b".repeat(32),
             },
@@ -5476,6 +5480,43 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
     client
         .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
         .unwrap();
+    for turn in 1..=16 {
+        client.tick(2000 + turn * 8, 1_000_000).unwrap();
+    }
+    assert_eq!(
+        client.chat_info().unwrap().event_animations,
+        0,
+        "admitted history is quiet"
+    );
+    let replay = client
+        .control_ids()
+        .unwrap()
+        .into_iter()
+        .find(|id| {
+            client
+                .control_label(*id)
+                .unwrap()
+                .starts_with("Replay steam")
+        })
+        .expect("visible replay control");
+    let bounds = client.control_bounds(replay).unwrap().unwrap();
+    assert!(
+        bounds[2] > 44. && bounds[3] > 0.,
+        "the event text and icon are both hittable"
+    );
+    let retained = client.scene().unwrap();
+    assert!(client.activate(client.epoch(), replay).unwrap());
+    assert_eq!(client.focus_state().unwrap().id, Some(replay));
+    assert_eq!(client.chat_info().unwrap().event_animations, 1);
+    client.tick(2600, 1_000_000).unwrap();
+    assert!(
+        std::sync::Arc::ptr_eq(&retained, &client.scene().unwrap()),
+        "replay does not rebuild transcript chrome"
+    );
+    assert!(
+        client.chat_outgoing().unwrap().is_none(),
+        "read-only replay stays local"
+    );
     assert_eq!(client.chat_messages().len(), 1);
     assert!(client.chat_info().unwrap().online);
     assert!(

@@ -54,6 +54,7 @@ impl Client {
         self.members.clear();
         self.drafts.clear();
         self.particles.clear();
+        self.replay = Default::default();
         self.authors_revision = self.authors_revision.saturating_add(1);
     }
     pub fn receive_collection(&mut self, bytes: &[u8], follow: bool) -> Result<bool> {

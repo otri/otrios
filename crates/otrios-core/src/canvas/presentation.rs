@@ -79,6 +79,7 @@ pub struct Composer {
     frame: Option<Frame>,
     revisions: Revisions,
     presentation_epoch: u64,
+    semantic_overlay_revision: u64,
 }
 fn advance(revision: &mut u32) {
     *revision = revision.wrapping_add(1).max(1);
@@ -156,6 +157,11 @@ impl Composer {
             let old = self.frame.as_ref().ok_or("Missing retained frame")?;
             (old.base.clone(), old.overlay.clone())
         };
+        let semantic_overlay_revision = client.semantic_overlay_revision();
+        if self.semantic_overlay_revision != semantic_overlay_revision {
+            advance(&mut self.revisions.semantics);
+            self.semantic_overlay_revision = semantic_overlay_revision;
+        }
         let effects = client.effect_vertices()?;
         client.feedback_prepared();
         let effects = if let Some(old) = &self.frame

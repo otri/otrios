@@ -43,7 +43,7 @@ impl Client {
     pub(super) fn focus_targets(&self) -> Result<Vec<Target>> {
         let scene = self.scene()?;
         let (_, _, container) = self.focus_context(&scene);
-        Ok(scene
+        let mut targets = scene
             .controls()
             .into_iter()
             .filter(|owner| {
@@ -74,7 +74,17 @@ impl Client {
                     responder: owner.node.responder?,
                 })
             })
-            .collect())
+            .collect::<Vec<_>>();
+        if self.focus_context(&scene).1.is_empty()
+            && let Some(chat) = self.active.as_ref().and_then(|m| m.chat.as_ref())
+        {
+            targets.extend(chat.replay_controls().iter().map(|c| Target {
+                id: c.id,
+                label: c.label.clone(),
+                responder: TouchResponder::Activate(Action::KeyboardKey(u16::MAX)),
+            }));
+        }
+        Ok(targets)
     }
     pub(super) fn focus_allows_activation(&self, id: u32) -> Result<bool> {
         let scene = self.scene()?;
@@ -213,8 +223,7 @@ impl Client {
         let Some(id) = state.id else {
             return Ok(());
         };
-        let scene = self.scene()?;
-        let Some(owner) = scene.controls().into_iter().find(|n| n.node.id == id) else {
+        let Some(bounds) = self.control_bounds(id)? else {
             return Ok(());
         };
         let color = self
@@ -225,10 +234,10 @@ impl Client {
             .palette()
             .focus
             .map(|c| f32::from(c) / 255.);
-        let x = owner.origin[0] + 2.;
-        let y = owner.origin[1] + 2.;
-        let w = (owner.node.frame.width * owner.scale - 4.).max(0.);
-        let h = (owner.node.frame.height * owner.scale - 4.).max(0.);
+        let x = bounds[0] + 2.;
+        let y = bounds[1] + 2.;
+        let w = (bounds[2] - 4.).max(0.);
+        let h = (bounds[3] - 4.).max(0.);
         if w < 4. || h < 4. {
             return Ok(());
         }

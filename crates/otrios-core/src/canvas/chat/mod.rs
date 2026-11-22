@@ -7,10 +7,12 @@ mod authority;
 pub use authority::{Publication, publish};
 mod client;
 mod collections;
+mod effects;
 mod history;
 pub mod icons;
 mod journal;
 mod portable;
+mod replay;
 pub use portable::{PinnedHistory, QualifiedHistory};
 mod text;
 mod view;
@@ -89,3 +91,6 @@ pub fn validate_message_assets(assets: &[Asset]) -> Result<()> {
 pub fn valid_request_nonce(value: &str) -> bool {
     valid_hex(value, 16)
 }
+
+#[cfg(test)]
+mod identity_tests;

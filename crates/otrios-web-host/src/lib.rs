@@ -730,41 +730,16 @@ impl CanvasApp {
         self.inner.accessibility_text()
     }
     pub fn controls(&self) -> Result<Vec<u32>, String> {
-        Ok(self
-            .inner
-            .scene()?
-            .controls()
-            .iter()
-            .map(|c| c.node.id)
-            .collect())
+        self.inner.control_ids()
     }
     pub fn label(&self, id: u32) -> Result<String, String> {
-        Ok(self
-            .inner
-            .scene()?
-            .controls()
-            .iter()
-            .find(|c| c.node.id == id)
-            .and_then(|c| c.node.semantics.as_ref())
-            .map(|s| s.label.clone())
-            .unwrap_or_default())
+        self.inner.control_label(id)
     }
     pub fn bounds(&self, id: u32) -> Result<Vec<f32>, String> {
         Ok(self
             .inner
-            .scene()?
-            .controls()
-            .iter()
-            .find(|c| c.node.id == id)
-            .map(|c| {
-                vec![
-                    c.origin[0],
-                    c.origin[1],
-                    c.node.frame.width * c.scale,
-                    c.node.frame.height * c.scale,
-                ]
-            })
-            .unwrap_or_default())
+            .control_bounds(id)?
+            .map_or_else(Vec::new, |b| b.to_vec()))
     }
     pub fn activate(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
         self.inner.activate(epoch, id)

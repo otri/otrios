@@ -50,13 +50,31 @@ emit sparks.
 | `/help`, `/who`, `/avatar` | Open the handbook, members or your calling card |
 | `/nick Name` | Change your name |
 | `/me action` | Send an action |
-| `/roll 2d6` | Roll up to ten dice with 2–100 sides |
+| `/roll 2d6`, `/dice 1d20` | Recorded dice results; procedural 3D d6/d20 throws |
 | `/shrug` | Send a shrug |
-| `/salute Full Name` | Salute a member |
+| `/salute Full Name` | Tip a brass hat to a member |
+| `/boop Full Name` | A springy brass greeting and copper rings |
 | `/steam` | Vent a little steam |
 | `/topic text` | Administrator room announcement |
 | `/kick Full Name` | Select a member and confirm removal |
 | `//text` | Send a literal leading slash |
+
+Special events carry a typed description in the durable message: Steam, Boop,
+Salute or Dice. The authority records random seeds, target snapshots and dice
+outcomes before broadcasting a live playback. Retries return the existing
+receipt without another effect. History admission never autoplays. Tap/click the
+event text or its play mark to replay locally; keyboard and assistive activation
+use the same shared responder focus. Replays create no message or room command.
+
+Procedural shaded d6 cubes and d20 meshes tumble with seeded bounce/spin, then
+settle onto the recorded face. Other admitted side counts retain their exact
+results in numbered result blocks. Steam drifts upward; Boop and Salute use the
+target's visible avatar position when available, otherwise the event message.
+Animations are clipped to the transcript and run in the shared effects layer,
+without rebuilding retained text/chrome. One throw and at most two other effects
+can coexist, with a bounded geometry budget. Off/reduced-motion suppress playback;
+Quiet reduces movement and particles. Dice outcomes are never rolled again by a
+replay.
 
 Signing in to Monitoring grants administrator rights to that authenticated
 browser connection. Native members can explicitly enter Monitoring credentials
@@ -65,9 +83,16 @@ Select a member, choose Kick and confirm: all their room tabs leave, their draft
 clear, and a persisted 60-second cooldown applies. This is a guest-session kick,
 not a durable ban against someone discarding their guest identity.
 
-Browsers retain identity through a Secure, HttpOnly, SameSite=Strict guest cookie;
-localStorage holds only the public profile. A browser that cannot retain the
-cookie can join temporarily, marked in its calling card. Native stores a separate
+Managed rooms retain an anonymous browser profile through a separate Secure,
+HttpOnly, SameSite=Strict browser cookie, renewed for 400 days. The cookie is a
+chat identity bearer and grants no Space access. On first sign-in, a verified
+browser profile can be adopted into the account; an existing account profile
+always wins and restores on other browsers. Logout does not turn the anonymous
+bearer into an account credential. Offline legacy guests that never had a
+managed resume bearer no longer reserve aliases against bound identities;
+immutable transcript authors remain unchanged. The legacy unscoped room keeps
+its guest cookie. localStorage contains only public profile information.
+Native stores a separate
 mode-0600 `guest.identity` outside digest-named executable caches. The frame
 supervisor supplies `/var/lib/otrios-dashboard/guest.identity`; other native hosts
 can use `--chat-identity` or `OTRIOS_CHAT_IDENTITY`. Guest resume secrets never
@@ -76,7 +101,7 @@ grant administrator privileges or enter presentation snapshots.
 The covered authority lives in `otrios-core::canvas::chat`; the dashboard host
 only adapts cookies, authentication, bounded queues and the shared WebSocket.
 Room commands, receipts and ephemeral events use channel 3; coherent message
-windows use the reusable collection channel 4 under state protocol v8.
+windows use the reusable collection channel 4 under state protocol v41.
 Release discovery keeps its stable
 v1 opening envelope. A failed chat journal closes the room while release/control
 and other apps remain available. Slow room queues explicitly resynchronize.
@@ -98,8 +123,9 @@ have lengths and SHA-256 checksums; writes sync before receipt publication. A
 retry with the same nonce returns its original receipt; conflicting text is
 rejected. An incomplete final record is truncated on recovery; complete corrupt
 records fail closed. Atomic compaction bounds the journal at 64 MiB. Retained
-history is capped at 50,000 messages and 32 MiB; inactive identities expire after
-30 days, with a 4,096-identity ceiling. Message, draft, command and connection
+history is capped at 50,000 messages and 32 MiB. Legacy unbound guests expire
+after 30 inactive days; browser-bound profiles after 400 days. Account-bound
+profiles remain stable, with a 4,096-identity ceiling. Message, draft, command and connection
 limits are enforced by the authority rather than trusted to the UI.
 Leaving the room removes online membership while retaining the profile. The
 private guest record's `last_seen_unix_ms` is authority-clock Unix milliseconds;

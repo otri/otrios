@@ -123,6 +123,7 @@ pub fn publish(
         .map(|asset| source_assets.copy_to(destination_assets, asset))
         .collect::<Result<Vec<_>>>()?;
     let message = Message {
+        event: selected.event,
         sequence: destination
             .sequence
             .checked_add(1)
