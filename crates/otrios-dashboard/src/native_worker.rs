@@ -1059,7 +1059,8 @@ pub(super) fn state_worker(
         }
         dirty |= client.set_private_access(o.private_access && online);
         last_online = online;
-        let confirmed = o.url.is_none() || (online && client.confirmed());
+        let confirmed =
+            o.url.is_none() || ((online || client.owns_monitoring_view()) && client.confirmed());
         if !client.ui_ref().is_empty() && stress_epoch != Some(client.epoch()) {
             if o.load > 0 {
                 dirty |= client.set_stress(o.load)?;

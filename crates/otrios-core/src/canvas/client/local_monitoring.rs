@@ -14,6 +14,13 @@ pub struct Usage {
     pub local: bool,
 }
 impl Client {
+    /// This view is confirmed against the durable local producer, independently
+    /// of the remote authority connection. Ordinary remote leases stay online-only.
+    pub fn owns_monitoring_view(&self) -> bool {
+        self.local
+            && self.owned_monitoring.is_some()
+            && matches!(self.presentation(), Some(Presentation::Monitoring { .. }))
+    }
     /// Only the configured native owner calls this. UI still binds to the signed
     /// installed catalog; a remote viewing grant never calls this entry point.
     pub fn own_monitoring(&mut self, ui: &[u8], bytes: &[u8]) -> Result<bool> {
@@ -205,12 +212,14 @@ mod tests {
         client.own_monitoring(&ui, &first.bytes().unwrap()).unwrap();
         client.open("app:monitoring/ui", "app:monitoring/state");
         assert!(client.poll_owned_monitoring().unwrap());
+        assert!(client.owns_monitoring_view());
         assert!(client.confirmed());
         assert_eq!(
             client.resource_usage().monitoring.unwrap().root,
             hex(&first.root())
         );
         client.reset_connection();
+        assert!(client.owns_monitoring_view());
         assert!(client.confirmed());
         assert_eq!(client.ui_ref(), "app:monitoring/ui");
         d.window.generated += 1;

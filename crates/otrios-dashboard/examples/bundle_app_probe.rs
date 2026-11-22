@@ -54,6 +54,7 @@ fn main() -> Result<()> {
     }
     let start = Instant::now();
     let mut before = None;
+    let mut monitoring_before = None;
     loop {
         client.tick(start.elapsed().as_millis() as u64, 0)?;
         while let Some(bytes) = client.spaces_outgoing()? {
@@ -91,14 +92,36 @@ fn main() -> Result<()> {
             opened = true;
         }
         if args[3] == "deny" && client.auth_required() {
-            if !client.ui_ref().is_empty() {
-                return Err("Private UI leaked before admission".into());
+            // A managed denial may show the public Spaces launcher. Only the
+            // requested private app/data would constitute an admission leak.
+            if client.ui_ref() == entry.app.ui_ref || client.resource_usage().monitoring.is_some() {
+                return Err("Private UI/data leaked before admission".into());
             }
             println!("DENIED app={} payloads=false", entry.app.id);
             break;
         }
         if args[3] != "deny" && client.ui_ref() == entry.app.ui_ref && client.confirmed() {
-            if args[3] == "controls" {
+            if args[3] == "monitoring-update" {
+                let usage = client
+                    .resource_usage()
+                    .monitoring
+                    .ok_or("Missing Monitoring app data")?;
+                if let Some((revision, root)) = &monitoring_before {
+                    if usage.revision > *revision {
+                        if usage.root == *root {
+                            return Err("Monitoring revision did not change its root".into());
+                        }
+                        println!(
+                            "{}",
+                            serde_json::json!({"passed":true,"monitoring_update_received":true,"before_revision":revision,"monitoring":usage})
+                        );
+                        break;
+                    }
+                } else {
+                    eprintln!("MONITORING_SUBSCRIBED revision={}", usage.revision);
+                    monitoring_before = Some((usage.revision, usage.root));
+                }
+            } else if args[3] == "controls" {
                 let scene = client.scene()?;
                 let controls:Vec<_>=scene.controls().into_iter().map(|control|serde_json::json!({
                     "label":control.node.semantics.as_ref().map(|value|value.label.as_str()).unwrap_or(""),
@@ -111,7 +134,9 @@ fn main() -> Result<()> {
                 );
                 break;
             }
-            if args[3] == "increase" && before.is_none() {
+            if args[3] == "monitoring-update" {
+                // Keep the admitted read lease open for the next publication.
+            } else if args[3] == "increase" && before.is_none() {
                 before = Some(client.value(1)?);
                 let scene = client.scene()?;
                 let node = scene
