@@ -137,6 +137,22 @@ impl Client {
     }
     /// Local wheel input never changes the map mount or authoritative metadata.
     pub fn scroll_map(&mut self, epoch: u32, delta: f32) -> Result<bool> {
+        if epoch == self.epoch()
+            && let Some(mount) = &mut self.active
+            && mount
+                .breadcrumbs
+                .as_ref()
+                .is_none_or(|trail| !trail.account_open)
+            && let Some(changed) = mount
+                .chat
+                .as_mut()
+                .and_then(|chat| chat.scroll_dialog(delta))
+        {
+            if changed {
+                mount.invalidate();
+            }
+            return Ok(changed);
+        }
         if (!self.host_active
             && self
                 .active

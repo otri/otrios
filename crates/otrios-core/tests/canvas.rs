@@ -4047,9 +4047,9 @@ fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both
             )
             .unwrap();
         for label in [
-            "Members",
+            "Participants",
             "Close dialog",
-            "Edit profile",
+            "Chat identity",
             "Next avatars",
             "Next avatars",
             "Next avatars",
@@ -4078,6 +4078,204 @@ fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both
                 );
             }
         }
+    }
+}
+
+#[test]
+fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handbook() {
+    use otrios_interfaces::{
+        chat::{Event, Member, Profile},
+        scene::{PointerEvent, PointerPhase, Primitive, TouchResponder},
+    };
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    for viewport in [[320., 568.], [390., 720.], [430., 932.], [720., 390.]] {
+        let mut c = Client::default();
+        activate(&mut c, brass_relay::ui(&[]), "brass-phone-dialog", vec![]);
+        c.set_viewport(viewport).unwrap();
+        c.set_font(font.clone());
+        c.receive_chat(
+            &chat::encode_event(&Event::Welcome {
+                you: Member {
+                    profile: Profile {
+                        id: "1".repeat(32),
+                        name: "Pilot Piston".into(),
+                        avatar: 0,
+                    },
+                    generation: 1,
+                    admin: false,
+                },
+                temporary: true,
+                credential: None,
+                epoch: 1,
+                members: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let control = |c: &Client, label: &str| {
+            let scene = c.scene().unwrap();
+            let n = scene
+                .controls()
+                .into_iter()
+                .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == label))
+                .unwrap();
+            (n.origin, n.node.frame)
+        };
+        edit(&mut c, "Chat identity", 0, 0);
+        let scene = c.scene().unwrap();
+        let dim = scene
+            .root()
+            .children
+            .iter()
+            .position(|n| n.responder == Some(TouchResponder::Consume))
+            .unwrap();
+        let panel = scene.root().children[dim + 1].frame;
+        for label in [
+            "Close dialog",
+            "Edit room name",
+            "Cancel profile",
+            "Save profile",
+        ] {
+            let (at, rect) = control(&c, label);
+            assert!(
+                at[0] >= panel.x && at[1] >= panel.y,
+                "{label} inside {viewport:?}"
+            );
+            assert!(
+                at[0] + rect.width <= panel.x + panel.width + 0.01
+                    && at[1] + rect.height <= panel.y + panel.height + 0.01,
+                "{label} inside {viewport:?}"
+            );
+        }
+        let (cancel, cancel_frame) = control(&c, "Cancel profile");
+        let (save, _) = control(&c, "Save profile");
+        assert!(cancel[0] + cancel_frame.width + 11.9 <= save[0]);
+        assert!(!format!("{scene:?}").contains("Your room name"));
+        let (close, _) = control(&c, "Close dialog");
+        for n in scene.root().children.iter().skip(dim + 3) {
+            if let Primitive::Text { value, scale, .. } = &n.primitive
+                && n.frame.y >= panel.y + 15.
+                && n.frame.y < panel.y + 80.
+            {
+                assert!(
+                    font.text_width(value, *scale as f32) <= n.frame.width + 0.1,
+                    "title fits: {value}"
+                );
+                assert!(
+                    n.frame.x + n.frame.width <= close[0] - 15.9,
+                    "title clears Close"
+                );
+            }
+        }
+        assert!(
+            matches!(
+                scene.hit_path([2., 2.]).last().unwrap().node.responder,
+                Some(TouchResponder::Consume)
+            ),
+            "modal blocks background input"
+        );
+        edit(&mut c, "Edit room name", 0, 0);
+        c.hardware_edit(&otrios_interfaces::keyboard::Edit::SelectAll)
+            .unwrap();
+        c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
+            "Pilot ".repeat(12),
+        ))
+        .unwrap();
+        let focused = c.scene().unwrap();
+        let field = focused
+            .controls()
+            .into_iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Edit room name")
+            })
+            .unwrap();
+        assert!(
+            matches!(field.node.primitive, Primitive::Canvas { clip: true }),
+            "name paint stays inside the field"
+        );
+        assert_eq!(
+            c.text_inputs().unwrap().len(),
+            1,
+            "background composer is not an input behind the dialog"
+        );
+        edit(&mut c, "Cancel profile", 0, 0);
+        while c.chat_outgoing().unwrap().is_some() {}
+        edit(&mut c, "Commands", 0, 0);
+        let epoch = c.epoch();
+        let scene = c.scene().unwrap();
+        let body = scene.path(60001).unwrap();
+        let body = body.last().unwrap();
+        let origin = body.origin;
+        let bounds = body.node.frame;
+        assert!(c.resource_usage().panel_scroll.as_ref().unwrap().limit[1] > 0.);
+        for n in &body.node.children {
+            if let Primitive::Text { value, scale, .. } = &n.primitive {
+                assert!(
+                    font.text_width(value, *scale as f32) <= bounds.width + 0.1,
+                    "wrapped {value}"
+                );
+            }
+        }
+        let close = control(&c, "Close dialog");
+        let actions = control(&c, "Browse dispatches");
+        assert!(c.scroll_map(epoch, 10000.).unwrap());
+        assert_eq!(control(&c, "Close dialog"), close);
+        assert_eq!(control(&c, "Browse dispatches"), actions);
+        let scene = c.scene().unwrap();
+        let last = scene
+            .path(60001)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .children
+            .last()
+            .unwrap()
+            .frame;
+        assert!(
+            last.y + last.height <= bounds.height + 1.,
+            "last command reachable"
+        );
+        c.scroll_map(epoch, -10000.).unwrap();
+        let start = [origin[0] + 10., origin[1] + bounds.height - 4.];
+        for (phase, y, time) in [
+            (PointerPhase::Down, start[1], 100),
+            (PointerPhase::Move, origin[1] + 4., 150),
+            (PointerPhase::Up, origin[1] + 4., 200),
+        ] {
+            c.pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 72,
+                    phase,
+                    position: [start[0], y],
+                },
+                time,
+            )
+            .unwrap();
+        }
+        assert!(
+            c.resource_usage().panel_scroll.unwrap().offset[1] > 0.,
+            "touch pans the body"
+        );
+        assert!(!c.input_busy());
+        c.cancel().unwrap();
+        assert!(
+            c.chat_outgoing().unwrap().is_none(),
+            "dialog panning never sends chat edits"
+        );
+        assert_eq!(c.epoch(), epoch);
+        edit(&mut c, "Close dialog", 0, 0);
+        assert!(c.resource_usage().panel_scroll.is_none());
     }
 }
 

@@ -106,6 +106,7 @@ pub struct Client {
     pub(super) wall: u64,
     pub(super) particles: Vec<Particle>,
     pub(super) input_view: super::super::text_viewport::TextViewport,
+    pub(super) help_view: super::super::text_viewport::TextViewport,
     pub(super) new_messages: usize,
     pub(super) older: bool,
     pub(super) history_wait: bool,
@@ -189,6 +190,7 @@ impl Default for Client {
             wall: 0,
             particles: vec![],
             input_view: Default::default(),
+            help_view: Default::default(),
             new_messages: 0,
             older: false,
             history_wait: false,
@@ -329,6 +331,13 @@ impl Client {
         self.viewport = [size[0], super::view::room_height(size, keyboard)];
         self.font = font;
         self.refresh_text_layouts();
+        if self.panel == Panel::Help {
+            let help = self.handbook_layout();
+            self.help_view
+                .bounds(help.content_height, help.frame.height);
+        } else {
+            self.help_view = Default::default();
+        }
     }
     pub(crate) fn native(&mut self, native: bool) {
         self.native = native;
@@ -909,7 +918,7 @@ impl Client {
             self.notice.clear();
         }
         self.refresh_text_layouts();
-        let moving = self.input_view.tick(now);
+        let moving = self.input_view.tick(now) | self.help_view.tick(now);
         let mut emitted = false;
         if let Some(anchor) = self.pending_spark.take() {
             if let Some(position) = self.spark_origin(&anchor) {
@@ -978,6 +987,31 @@ impl Client {
     }
     pub(crate) fn blur_input(&mut self) {
         self.focus = None;
+    }
+    pub(crate) fn dialog_scroll_info(&self) -> Option<super::super::text_scroll::Info> {
+        (self.panel == Panel::Help).then(|| super::super::text_scroll::Info {
+            offset: [0., self.help_view.offset],
+            limit: [0., self.help_view.limit()],
+            active: self.help_view.animating(),
+            velocity: [0., self.help_view.velocity()],
+        })
+    }
+    pub(crate) fn dialog_touching(&self) -> bool {
+        self.help_view.active()
+    }
+    pub(crate) fn cancel_dialog_scroll(&mut self) {
+        self.help_view.cancel();
+    }
+    pub(crate) fn scroll_dialog(&mut self, delta: f32) -> Option<bool> {
+        if self.panel != Panel::Help {
+            return None;
+        }
+        let before = self.help_view.offset;
+        self.help_view.cancel();
+        if delta.is_finite() {
+            self.help_view.offset = (before + delta).clamp(0., self.help_view.limit());
+        }
+        Some(before != self.help_view.offset)
     }
     pub(crate) fn host_scroll(&mut self, offset: f32) -> bool {
         if self.focus != Some(Focus::Compose) || !offset.is_finite() {
@@ -1243,6 +1277,32 @@ impl Client {
         Ok(())
     }
     pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
+        if self.panel == Panel::Help {
+            let frame = self.handbook_layout().frame;
+            let [x, y] = event.position;
+            if event.phase == PointerPhase::Down {
+                if x < frame.x
+                    || x >= frame.x + frame.width
+                    || y < frame.y
+                    || y >= frame.y + frame.height
+                {
+                    return None;
+                }
+                self.help_view.down(event.id, y, now);
+            } else if self.help_view.owns(event.id) {
+                match event.phase {
+                    PointerPhase::Move => self.help_view.motion(y, now),
+                    PointerPhase::Up => {
+                        self.help_view.up(y, now);
+                    }
+                    PointerPhase::Cancel => self.help_view.cancel(),
+                    _ => {}
+                }
+            } else {
+                return None;
+            }
+            return Some(true);
+        }
         if self.read_only {
             return None;
         }
@@ -1408,7 +1468,7 @@ impl Client {
             let width = if self.focus == Some(Focus::Compose) {
                 self.input_width()
             } else {
-                500.
+                (720_f32.min(self.viewport[0] - 48.) - 72.).max(1.)
             };
             let offset = if self.focus == Some(Focus::Compose) {
                 self.input_view.offset

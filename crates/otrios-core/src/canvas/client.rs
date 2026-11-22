@@ -2068,6 +2068,9 @@ impl Client {
                     || m.preview_scroll.as_ref().is_some_and(|s| s.touching())
                     || m.text_scroll.as_ref().is_some_and(|s| s.touching())
                     || m.text_document.as_ref().is_some_and(|s| s.touching())
+                    || m.chat
+                        .as_ref()
+                        .is_some_and(super::chat::Client::dialog_touching)
             })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
@@ -2279,6 +2282,11 @@ impl Client {
                     .as_ref()
                     .and_then(oib_designer::Designer::inspector_scroll_info)
                     .or_else(|| m.panel_scroll.as_ref().map(|s| s.info()))
+                    .or_else(|| {
+                        m.chat
+                            .as_ref()
+                            .and_then(super::chat::Client::dialog_scroll_info)
+                    })
             }),
             text_document: self
                 .active
@@ -4263,6 +4271,9 @@ impl Client {
             }
             for view in m.text_views.values_mut() {
                 view.cancel();
+            }
+            if let Some(chat) = &mut m.chat {
+                chat.cancel_dialog_scroll();
             }
             m.order_drag = None;
             m.doc.flush_pending();

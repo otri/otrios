@@ -116,6 +116,9 @@ impl Paint {
             ));
         }
         let mut button = canvas(id, Rect::new(r[0], r[1], r[2], r[3]), children);
+        if matches!(command, 8 | 15 | 16) {
+            button.primitive = Primitive::Canvas { clip: true };
+        }
         button.responder = if self.read_only && !super::client::read_action(command) {
             None
         } else {
@@ -203,6 +206,13 @@ impl Paint {
 pub fn room_height(size: [f32; 2], keyboard: bool) -> f32 {
     size[1] - if keyboard { 320. * size[0] / 1280. } else { 0. }
 }
+pub(super) struct Handbook {
+    pub frame: Rect,
+    pub lines: Vec<(String, f32)>,
+    pub content_height: f32,
+    pub footer: f32,
+    pub stacked: bool,
+}
 impl Client {
     pub(crate) fn effect_vertices(&self) -> Result<Vec<f32>> {
         if self.panel != Panel::None || self.kicked.is_some() || self.particles.is_empty() {
@@ -238,17 +248,117 @@ impl Client {
         let scene = Scene::new(canvas(8_000_000, Rect::new(0., 0., w, h), p.nodes))?;
         Ok(crate::dashboard::render_scene(&scene).vertices)
     }
-    fn sharing_label(&self, value: &str, width: f32) -> String {
+    fn wrapped_label(&self, value: &str, width: f32, scale: u32) -> Vec<String> {
+        let measure = |value: &str| {
+            self.font.as_ref().map_or_else(
+                || value.chars().count() as f32 * 8. * scale as f32,
+                |font| font.text_width(value, scale as f32),
+            )
+        };
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for word in value.split_whitespace() {
+            if !line.is_empty() {
+                if measure(&format!("{line} {word}")) <= width {
+                    line.push(' ');
+                } else {
+                    lines.push(std::mem::take(&mut line));
+                }
+            }
+            for g in word.graphemes(true) {
+                if !line.is_empty() && measure(&format!("{line}{g}")) > width {
+                    lines.push(std::mem::take(&mut line));
+                }
+                line.push_str(g);
+            }
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+        lines
+    }
+    fn dialog_title(&self, title: &str, width: f32) -> (Vec<String>, u32, f32) {
+        let scale = if width < 500. { 2 } else { 3 };
+        let height = self.font.as_ref().map_or(14. * scale as f32, |f| {
+            f.metrics().line_height(scale as f32)
+        });
+        let mut lines = self.wrapped_label(title, width - 112., scale);
+        if lines.len() > 2 {
+            let rest = lines[1..].join(" ");
+            lines.truncate(1);
+            lines.push(self.fitted_label(&rest, width - 112., scale));
+        }
+        (lines, scale, height)
+    }
+    pub(super) fn handbook_layout(&self) -> Handbook {
+        let [w, h] = self.viewport;
+        let pw = 720_f32.min(w - 48.);
+        let x = (w - pw) / 2.;
+        let y = if h < 720. {
+            20.
+        } else {
+            100_f32.min((h - 200.).max(20.))
+        };
+        let ph = 520_f32.min((h - y - 24.).max(200.));
+        let (title, _, title_height) = self.dialog_title("The operator's handbook", pw);
+        let top = y + (32. + title.len() as f32 * title_height).max(84.) + 12.;
+        let stacked = self.managed && !self.native && !self.read_only && pw < 400. && ph >= 420.;
+        let footer = y + ph - if stacked { 140. } else { 76. };
+        let frame = Rect::new(x + 24., top, pw - 48., (footer - 16. - top).max(1.));
+        let mut lines = Vec::new();
+        let mut at = 0.;
+        let line_height = self
+            .font
+            .as_ref()
+            .map_or(28., |font| font.metrics().line_height(2.));
+        for entry in [
+            "/me action - send a stage direction",
+            "/roll 2d6 - consult the probability engine",
+            "/salute name - tip your hat",
+            "/steam - a small puff from the boiler",
+            "/nick name - change your calling card",
+            "/avatar - choose your emblem",
+            "/who - see who is on the wire",
+            if self.managed {
+                "/kick name - moderator: review a removal"
+            } else {
+                "/kick name - admin: review a removal"
+            },
+            "//text - send a literal slash",
+        ] {
+            for line in self.wrapped_label(entry, frame.width, 2) {
+                lines.push((line, at));
+                at += line_height;
+            }
+            at += 12.;
+        }
+        Handbook {
+            frame,
+            lines,
+            content_height: at,
+            footer,
+            stacked,
+        }
+    }
+    fn fitted_label(&self, value: &str, width: f32, scale: u32) -> String {
         let mut label: String = value.chars().take(256).collect();
-        if let Some(font) = &self.font
-            && font.text_width(&label, 2.) > width
-        {
-            while !label.is_empty() && font.text_width(&format!("{label}…"), 2.) > width {
-                label.pop();
+        let measure = |label: &str| {
+            self.font.as_ref().map_or_else(
+                || label.chars().count() as f32 * 8. * scale as f32,
+                |font| font.text_width(label, scale as f32),
+            )
+        };
+        if measure(&label) > width {
+            while !label.is_empty() && measure(&format!("{label}…")) > width {
+                let last = label.graphemes(true).next_back().unwrap().len();
+                label.truncate(label.len() - last);
             }
             label.push('…');
         }
         label
+    }
+    fn sharing_label(&self, value: &str, width: f32) -> String {
+        self.fitted_label(value, width, 2)
     }
     fn sharing_preview(&self, p: &mut Paint, x: f32, y: f32, width: f32, height: f32) {
         let Some(selected) = &self.sharing.selected else {
@@ -1032,7 +1142,17 @@ impl Client {
                 Panel::Auth => "Monitoring sign-in",
                 Panel::None => "",
             };
-            p.text(x + 24., y + 28., pw - 120., title, 3, TEXT);
+            let (title_lines, title_scale, title_height) = self.dialog_title(title, pw);
+            for (line, title) in title_lines.iter().enumerate() {
+                p.text(
+                    x + 24.,
+                    y + 16. + line as f32 * title_height,
+                    pw - 112.,
+                    title,
+                    title_scale,
+                    TEXT,
+                );
+            }
             match self.panel {
                 Panel::Dispatches
                 | Panel::Dispatch
@@ -1041,20 +1161,19 @@ impl Client {
                 | Panel::Redact
                 | Panel::Assets => self.sharing_panel(&mut p, x, y, pw, ph),
                 Panel::Profile => {
-                    p.text(x + 24., y + 70., pw - 48., "Your room name", 2, MUTED);
                     if self.temporary {
                         p.text(
                             x + 24.,
-                            y + ph - 174.,
+                            y + 156.,
                             pw - 48.,
-                            "Temporary guest - identity changes on reload",
+                            "Guest identity resets on reload",
                             1,
                             BRASS,
                         );
                     }
                     p.button(
                         8,
-                        [x + 24., y + 104., pw - 48., 60.],
+                        [x + 24., y + 84., pw - 48., 60.],
                         "Edit room name",
                         "",
                         false,
@@ -1139,18 +1258,25 @@ impl Client {
                             false,
                         );
                     }
+                    let (cancel_width, save_width) = if pw < 400. {
+                        let width = (pw - 60.) / 2.;
+                        (width, width)
+                    } else {
+                        (128., 200.)
+                    };
+                    let save_x = x + pw - 24. - save_width;
                     p.button(
                         6,
-                        [x + pw - 364., y + ph - 70., 128., 52.],
+                        [save_x - 12. - cancel_width, y + ph - 70., cancel_width, 52.],
                         "Cancel profile",
                         "Cancel",
                         false,
                     );
                     p.button(
                         7,
-                        [x + pw - 224., y + ph - 70., 200., 52.],
+                        [save_x, y + ph - 70., save_width, 52.],
                         "Save profile",
-                        "That's me",
+                        if pw < 320. { "Save" } else { "That's me" },
                         true,
                     );
                 }
@@ -1266,51 +1392,54 @@ impl Client {
                     }
                 }
                 Panel::Help => {
-                    for (i, line) in [
-                        "/me action - send a stage direction",
-                        "/roll 2d6 - consult the probability engine",
-                        "/salute name - tip your hat",
-                        "/steam - a small puff from the boiler",
-                        "/nick name - change your calling card",
-                        "/avatar - choose your emblem",
-                        "/who - see who is on the wire",
-                        if self.managed {
-                            "/kick name - moderator: review a removal"
-                        } else {
-                            "/kick name - admin: review a removal"
-                        },
-                        "//text - send a literal slash",
-                    ]
-                    .iter()
-                    .enumerate()
-                    {
+                    let layout = self.handbook_layout();
+                    let start = p.nodes.len();
+                    for (line, at) in &layout.lines {
                         p.text(
-                            x + 24.,
-                            y + 86. + i as f32 * if ph < 500. { 24. } else { 34. },
-                            pw - 48.,
+                            0.,
+                            *at - self.help_view.offset,
+                            layout.frame.width,
                             line,
-                            if ph < 500. { 1 } else { 2 },
+                            2,
                             MUTED,
                         );
                     }
+                    let content = p.nodes.drain(start..).collect();
+                    let mut body = canvas(60001, layout.frame, content);
+                    body.primitive = Primitive::Canvas { clip: true };
+                    p.nodes.push(body);
+                    let files = self.managed && !self.native && !self.read_only;
+                    let width = if files && !layout.stacked {
+                        (pw - 60.) / 2.
+                    } else {
+                        pw - 48.
+                    };
                     p.button(
                         208,
-                        [x + 24., y + ph - 78., (pw - 60.) * 0.6, 54.],
+                        [x + 24., layout.footer, width, 52.],
                         "Browse dispatches",
-                        "Dispatches",
+                        if width < 160. {
+                            "History"
+                        } else {
+                            "Dispatches"
+                        },
                         false,
                     );
-                    if self.managed && !self.native && !self.read_only {
+                    if files {
                         p.button(
                             214,
                             [
-                                x + 36. + (pw - 60.) * 0.6,
-                                y + ph - 78.,
-                                (pw - 60.) * 0.4,
-                                54.,
+                                if layout.stacked {
+                                    x + 24.
+                                } else {
+                                    x + 36. + width
+                                },
+                                layout.footer + if layout.stacked { 64. } else { 0. },
+                                width,
+                                52.,
                             ],
                             "Send file",
-                            "Send file",
+                            if width < 128. { "Files" } else { "Send file" },
                             false,
                         );
                     }
