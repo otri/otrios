@@ -631,6 +631,7 @@ struct Body {
     rotation: Q,
     floor: f32,
     scale: f32,
+    camera_distance: f32,
     alpha: f32,
 }
 #[derive(Clone)]
@@ -692,6 +693,9 @@ fn bodies(
     let columns = count.min(5);
     let rows = count.div_ceil(columns);
     let scale = (viewport[0] / (columns as f32 + 1.) * 0.5).clamp(18., 46.);
+    // A longer lens keeps cubes natural near the edges. Increase distance on
+    // very wide/tall viewports too; matched focal length preserves centre size.
+    let camera_distance = 48_f32.max(viewport[0].max(viewport[1]) / (scale * 0.6));
     let radius = mesh
         .iter()
         .flat_map(|f| &f.points)
@@ -856,6 +860,7 @@ fn bodies(
                     .blend(rotations[i], settle),
                 floor,
                 scale,
+                camera_distance,
                 alpha: (1. - (t - 3.55).max(0.) / 0.75).clamp(0., 1.),
             }
         })
@@ -878,7 +883,7 @@ fn body(
 
 fn project(body: &Body, p: V3, width: f32) -> [f32; 2] {
     let p = add(body.rotation.rotate(p), body.center);
-    let depth = 12. / (12. - p[2]).max(4.);
+    let depth = body.camera_distance / (body.camera_distance - p[2]).max(body.camera_distance / 3.);
     [
         width * 0.5 + p[0] * body.scale * depth,
         body.floor - p[1] * body.scale * depth,
@@ -984,7 +989,7 @@ fn facing_camera(body: &Body, face: &Face) -> bool {
     let center = add(body.rotation.rotate(face.center), body.center);
     dot(
         body.rotation.rotate(face.normal),
-        sub([0., 0., 12.], center),
+        sub([0., 0., body.camera_distance], center),
     ) > 0.
 }
 fn dice(
@@ -1012,7 +1017,8 @@ fn dice(
         .collect();
     let bodies = bodies(seed, &values, mesh, t, canvas.viewport, origin, quiet);
     for body in &bodies {
-        let depth = 12. / (12. - body.center[2]).max(4.);
+        let depth = body.camera_distance
+            / (body.camera_distance - body.center[2]).max(body.camera_distance / 3.);
         let at = [
             canvas.viewport[0] * 0.5 + body.center[0] * body.scale * depth,
             body.floor + 2.,
@@ -1043,7 +1049,7 @@ fn dice(
     // close pass even when the solids never intersect.
     faces.sort_by(|a, b| {
         let distance = |i: usize| {
-            let d = sub([0., 0., 12.], bodies[i].center);
+            let d = sub([0., 0., bodies[i].camera_distance], bodies[i].center);
             dot(d, d)
         };
         distance(b.1)
