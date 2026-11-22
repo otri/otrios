@@ -319,6 +319,13 @@ set `builder_container` to a dedicated Docker builder name; omission retains
 `otrios-dashboard-live-builder`. Keep the existing publisher identity and strict
 Frame SSH pin. Do not share a writable source tree, Cargo target, Docker `/src`,
 or activation pointer with another in-flight build.
+For a state-protocol cutover, check the app-import guard while the running
+authority still matches the active signed manifest. Promote the verified pointer
+and switch to the matching new authority together. Starting a new codec against
+the old manifest intentionally leaves state recovery unavailable; do not bypass
+the import guard to work around that ordering. Once new durable record variants
+have been written, a code rollback must include a decoder that reads them.
+
 For storage or protocol cutovers, retain the matching compatible server and agents;
 a browser may need a launcher-root visit after an incompatible rollback.
 
