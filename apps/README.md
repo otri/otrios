@@ -18,7 +18,7 @@ apps/
   input-lab/                    # Shared text registers; local editing/keyboard
   animation-lab/                 # Shared intent, local animation clock
   three-d-lab/                   # Shared intent, local tetrahedron presentation
-  monitoring/                   # Protected UI and replaceable read-only chart view
+  monitoring/                   # Protected UI, typed Merkle data and local chart projection
   catalog.flex                  # Generated public catalog, ignored
 ```
 
@@ -46,7 +46,7 @@ capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
 Text panning uses UI v3, the document reader uses v4, and Brass Relay uses v5.
 Motion demos use UI v6, which binds their presentation to an authored stage node.
-Other shipped screens remain v2. The current state protocol is v8; the opening
+Other shipped screens remain v2. The current state protocol is v42; the opening
 release-control envelope remains v1. The UI format version is independent of
 the state wire protocol.
 Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to inspect the
@@ -62,14 +62,15 @@ catalog may name Monitoring without exposing its private package.
 Browser and native use one negotiated `/session` transport, with browser
 permissions derived from the existing session and trusted native access derived
 from its private listener. Public devices and the frame share the same intended
-public roots. Clients keep app documents in RAM; only the authority persists them.
+public roots. Ordinary viewers keep app documents in RAM. Monitoring has an
+explicit local owner on Frame; see [its data path](../docs/MONITORING.md).
 Code/blob caches retain their bounded budgets; touch trails remain ephemeral.
 
 Input Lab stores text in shared atomic typed registers, not a per-character text
 CRDT. Carets, selections, focus, repeat and keyboard presentation stay local.
 Animation/3D keep phase and rendering local while syncing intent. Their stress
-control is an isolated RAM CRDT workload. Monitoring replaces a protected binary
-Layout aggregate without adding telemetry history to app documents.
+control is an isolated RAM CRDT workload. Monitoring owns bounded typed Merkle
+app data; native and Web hosts derive chart geometry from its current snapshot.
 
 ## Build and validation
 
@@ -83,7 +84,8 @@ and target compilation caches stay outside the bundle.
 
 Signed bundle-aware releases store packages under `authority/bundles/`. The
 installer composes their catalog and Home entries without rebuilding browser or
-native executables. [Bundle Counter](bundle-counter/README.md) is intentionally
+native executables. `canvas-bundle refresh` updates catalog bindings while preserving
+authored Home UI; `compose` explicitly regenerates Home entries. [Bundle Counter](bundle-counter/README.md) is intentionally
 absent from the built-in source registry and demonstrates independent building,
 signing and installation. Navigation dependencies are checked; arbitrary host
 effects/modules are not resolved or granted. See [RFC 0026](../docs/rfcs/0026-target-wasm-compilation.md)

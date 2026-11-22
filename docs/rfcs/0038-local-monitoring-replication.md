@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0038: Locally owned Monitoring data and authorized replication
 
-Status: implemented; live cutover acceptance pending. This is a bounded Monitoring milestone,
+Status: implemented and live-qualified on Frame and the OrbStack authority.
+See the [acceptance record](../experiments/monitoring-local-replication-2026-11-22.md).
+This is a bounded Monitoring milestone,
 not general multi-authority writes or a new OS object store.
 
 Monitoring owns typed current values, hourly samples (including gaps), UTC

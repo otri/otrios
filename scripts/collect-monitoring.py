@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Read an allowlisted Prometheus HTTPS window; publish one immutable FlexBuffers view.
-Credentials stay in a private service file; browser and display clients receive only the view.
+"""Read an allowlisted Prometheus HTTPS window and commit local Monitoring app data.
+Credentials stay private. The legacy layout publication mode remains for rollback.
 """
 import argparse
 import base64

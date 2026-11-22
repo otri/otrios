@@ -109,8 +109,9 @@ Generated Cargo/build outputs live under ignored `target/`; they are not app sou
 
 The **OrbStack Linux machine `otrios` on SPD Studio 1** now owns the authority,
 durable app state and public HTTPS tunnel for `https://otrios.otri.ca`. The Mac
-builds and signs releases. The Frame is offline; its installed paths below remain
-recovery references. Its old tunnel credential was superseded during cutover.
+builds and signs releases. Frame is online as a native subscriber and explicitly
+owns the local Monitoring collector, durable Merkle app data and outbound publisher.
+It runs no authority or tunnel.
 The browser loads the shared Wasm runtime and keeps unconfirmed edits in RAM.
 See [authority hosting](docs/FRAME_HOSTING.md) for current operation and the Frame layout.
 
@@ -118,18 +119,13 @@ See [authority hosting](docs/FRAME_HOSTING.md) for current operation and the Fra
 | --- | --- |
 | OrbStack `otrios`: `/home/otri/otrios/releases/` | Complete verified signed release and active pointer |
 | OrbStack `otrios`: `/home/otri/otrios/state.signed.apps/` and `spaces.flex` | Current durable collections and Space registry |
-| OrbStack `otrios`: `/home/otri/otrios/private/` | Private auth, collector configuration, current binding, feed and tunnel credentials |
+| OrbStack `otrios`: `/home/otri/otrios/private/` | Private auth, collector service binding and tunnel credentials |
 | Mac: `~/Library/Application Support/OTriOSDashboard-SPDStudio1/` | Restored private build/signing workspace; no automatic watcher |
 | Mac: `~/Projects/otrios-spd-studio-1/` | Restored source checkout for future staged builds |
-| Frame: `/opt/otrios-authority/` | Authority and Monitoring binaries, bundle checker and management helpers |
-| Frame: `/opt/otrios-dashboard/` | Native supervisor and session bootstrap helper |
-| Frame: `/etc/otrios-authority/` | Private service/auth/tunnel configuration and publisher public key |
+| Frame: `/opt/otrios-dashboard/` | Native supervisor, publisher public key and session bootstrap helper |
+| Frame: `/opt/otrios-monitoring/` and `/etc/otrios-monitoring/` | Signed-tool launcher, HTTPS collector and private service configuration |
+| Frame: `/var/lib/otrios-monitoring/` | Durable Monitoring app snapshot, verified UI and publication ACK |
 | Frame: `/etc/otrios-dashboard.conf` | Native host endpoints; touch calibration remains in `/etc/udev/rules.d/99-spd-touch.rules` |
-| Frame: `/var/lib/otrios-authority/releases/current.json` | Pointer to the complete active signed release |
-| Frame: `/var/lib/otrios-authority/releases/<release-id>/authority/bundles/` | Installed `.otapp` trees, including private apps; the release also carries the catalog and host assets |
-| Frame: `/var/lib/otrios-authority/state.apps/` | Durable app checkpoints and journals, separate from bundles |
-| Frame: `/var/lib/otrios-authority/spaces.flex` and its `.latest` / `.owner.lock` sidecars | Space membership, audiences, collection identities and durable safety decisions |
-| Frame: `/var/lib/otrios-authority/state.presentation.flex` | Latest complete Monitoring presentation |
 | Frame: `/var/lib/otrios-dashboard/` | Disposable native release cache and `last-good.json` |
 | Frame: `/run/otrios-direct-console/otrios/` | Ephemeral native readiness reports, update sockets and first-frame capture |
 | Frame: `/root/.bashrc` and `/root/.inputrc` | Interactive SSH prompt, aliases and completion preferences |
@@ -141,25 +137,26 @@ See [authority hosting](docs/FRAME_HOSTING.md) for current operation and the Fra
 `/Applications` is **not a live Linux directory yet**; use the release-store path
 above to find installed bundles today. [Spaces](docs/SPACES.md) govern the active
 OrbStack host: Public retains the demo apps and their existing state; closed
-Operations contains Monitoring for the restored authorized account. The collector
+Operations contains Monitoring for the restored authorized account and Frame's
+existing Member identity. The collector
 has a separate service grant and is not an Operations viewer.
 
 Inspect the active host from the Mac with:
 
 ```sh
 orb -m otrios
-systemctl status otrios-local otrios-tunnel otrios-monitoring.timer
-journalctl -u otrios-local -u otrios-monitoring --since today
+systemctl status otrios-local otrios-tunnel
+journalctl -u otrios-local --since today
 cat /home/otri/otrios/releases/current.json
 ```
 
-For Frame recovery, once it is reachable and a local `frame` SSH alias is configured:
+On Frame, using its existing pinned SSH connection (or a configured `frame` alias):
 
 ```sh
 ssh frame
-systemctl status otrios-authority otrios-dashboard-direct otrios-tunnel
-journalctl -u otrios-authority -u otrios-dashboard-direct --since today
-cat /var/lib/otrios-authority/releases/current.json
+systemctl status otrios-dashboard-direct otrios-monitoring-local.timer otrios-monitoring-publish
+journalctl -u otrios-dashboard-direct -u otrios-monitoring-publish --since today
+cat /var/lib/otrios-dashboard/last-good.json
 ```
 
 Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), and [development instructions](AGENTS.md). Follow the [contribution instructions](CONTRIBUTING.md) for scoped changes and review.

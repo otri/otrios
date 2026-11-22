@@ -85,3 +85,5 @@ working tree does not remove Git history or shrink an existing clone's history.
 
 The [maintenance guide](../MAINTENANCE.md) describes routine cache cleanup and
 the evidence to retain during future documentation consolidation.
+
+- [Frame-owned Monitoring replication — 2026-11-22](monitoring-local-replication-2026-11-22.md): local typed app data, authorized peer roots, real server outage and offline native restart.

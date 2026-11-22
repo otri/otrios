@@ -1,11 +1,11 @@
-# Prometheus monitoring view
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Monitoring app data and local collection
 
-Select **Operations**, then **Monitoring**, from the [Spaces launcher](SPACES.md).
-Operations membership is required. The unattended Frame has no Operations
-membership; a signed-in authorized browser can view the presentation. Back/Home
-navigate locally while the collector continues refreshing.
-
-This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. Native GLES2 and browser WebGL support the same complete FlexBuffers presentation for authorized viewers. The live Frame's unattended identity and public visitors receive none of the Operations view. The frame does not run Grafana or a browser.
+Open **Monitoring** in the Operations Space. Operations membership is required
+for remote viewers. Frame's existing `frame-household` identity is a Member,
+without administration privileges. Frame also explicitly owns a local Monitoring
+installation, so its display can start and refresh while OrbStack is unavailable.
+It uses native GLES2; browsers use the same Rust chart projection through WebGL.
 
 ## Panels and query semantics
 
@@ -21,88 +21,88 @@ Absent/nonfinite samples remain missing. Paths split at gaps while retaining the
 
 This is deliberately a subset: no Grafana embedding, dashboard editor, arbitrary PromQL, time-range picker, hover inspection, alert management or interactive chart controls.
 
-## Data path and bounded replacement
+## Ownership and replication
 
-`scripts/collect-monitoring.py` currently runs on the OrbStack Linux authority
-host and queries the existing Prometheus HTTPS API through the Mac's networking.
-The Frame deployment remains a recovery reference in [hosting](FRAME_HOSTING.md).
-The collector uses fixed, read-only queries and a
-private Basic-auth credential; neither browsers nor the native display receive
-that credential. It does not require SSH or the Mac. JSON is confined to this
-external adapter boundary and an optional private evidence cache.
+Monitoring owns typed app data: eleven metrics, current readings, 169 hourly
+samples per metric (including gaps), UTC window metadata and collection time.
+Frame's collector queries Prometheus directly, then atomically commits a canonical
+Merkle snapshot to `/var/lib/otrios-monitoring/data.merkle`. The root binds the
+collection/feed ID, producer and monotonic revision. Invalid responses or clock
+regressions leave the previous complete snapshot intact. Rendered charts are
+derived locally; chart geometry is not replicated app state.
 
-`dashboard-monitoring` consumes the window on stdin and authors typed component/instance data directly into FlexBuffers. It reuses Screen, Text and Panel templates and adds Path/Circle templates for plots. It formats units, normalizes plotted values against labelled axes and resolves data into a complete presentation; raw metric values are not a general client-queryable telemetry schema in this PoC. The same existing primitive interpreter expands and validates the result on both hosts. There is no JSON scene representation or JavaScript chart renderer.
+A separate publisher on Frame initiates the outbound
+`wss://otrios.otri.ca/session` connection. It offers the newest root using channel
+6 after the stable v1 hello. OrbStack checks the existing collector service grant
+and current app/collection attachment on every request, requests a Merkle delta
+or full snapshot, validates and durably commits it before acknowledging. Reconnect
+publishes the newest revision; intermediate refreshes need not be queued.
+No inbound Frame listener or OrbStack-to-Frame connection is needed.
 
-The collector posts the complete binary view to trusted `/presentation` with its
-separate service token. The authority's `--collector-binding` restricts that
-producer to the current Operations Monitoring collection; human Admins cannot
-upload a view. The
-server persists only the latest complete aggregate, validates it before replacing
-the current view and sends it as a replaceable Canvas `View` on an authorized
-Monitoring lease. It uses channel 1 of the same negotiated `/session` connection;
-there is no OTML1 side stream or global editable layout register.
+OrbStack stores the same root in the Monitoring collection's `.data/` directory.
+Authorized peers receive typed snapshots on their existing channel-1 Monitoring
+lease and derive their own charts. Viewer membership and the producer grant are
+separate; the Frame viewing token cannot publish, and human Admin status does not
+grant collector publication. The old layout-upload contract is rejected for the
+new typed Monitoring presentation. See [RFC 0038](rfcs/0038-local-monitoring-replication.md).
 
-Clients retain the private aggregate only in RAM for that activation. Refreshes
-do not append metrics or binary layouts to durable Merkle documents. Revocation
-drops the private activation/view. Clearing the aggregate reveals the Monitoring
-app's empty-feed presentation, rather than an old global dashboard. A disconnected
-view's AS OF label is unchanged and must not be treated as fresh data.
+Remote viewers retain private snapshots in RAM under their revocable lease.
+The explicitly configured local owner keeps its own durable data and signed UI;
+server membership revocation cannot recall those locally owned bytes. This is
+not general offline authorization or a durable browser cache.
 
-Each presentation remains limited to 128 KiB, 128 instances and 512 expanded nodes. Literal series allow at most 256 points. Extremely fragmented history that exceeds the scene limits is rejected and leaves the previous view intact. A general content-addressed raw telemetry store, independent data-binding schema and per-chart delta protocol are future work.
+## Failure behavior
 
-## Build and collect
+- OrbStack down: Frame continues collecting from Prometheus and displaying local
+  committed data, including after a display restart. Other peers need a reachable
+  authorized server for fresh data. The publisher reconnects and catches up.
+- Prometheus or Frame networking down: the previous snapshot and **AS OF** time
+  remain; failure does not create a fresh health reading.
+- Frame down: OrbStack and viewers retain the last published snapshot and its
+  collection time. There is no second active collector or automatic failover.
+
+This is a bounded single-producer data path, not a multi-authority merge engine.
+Snapshots are limited to 128 KiB; the fixed metric schema and existing scene
+limits apply. History is a replaceable seven-day window, not an unbounded archive.
+There is no automatic stale alarm yet.
+
+## Active Frame services
+
+| Unit | Role |
+| --- | --- |
+| `otrios-monitoring-local.timer` | Runs the collector every five minutes |
+| `otrios-monitoring-local.service` | HTTPS queries and atomic local Merkle commit |
+| `otrios-monitoring-publish.service` | Outbound publication/reconnection, independent of collection |
+| `otrios-dashboard-direct.service` | Reads the local snapshot and renders the signed Monitoring UI |
+
+Private configuration is in `/etc/otrios-monitoring/`. `config.json` contains
+`prometheus_url`, `prometheus_credentials`, `renderer`, `local_data`, `feed` and
+`producer`. The renderer is `/opt/otrios-monitoring/monitoring-tool.py`, which
+verifies the existing publisher signature and collector artifact hash before
+executing the current signed ARM binary. `collector.identity` reuses the existing
+producer credential; `publish.conf` sets `MONITORING_SESSION` to the WSS URL.
+Prometheus credentials and tokens remain private mode-600 service files, outside
+app snapshots and releases. The display process does not query Prometheus.
+
+The native service drop-in sets
+`OTRIOS_MONITORING_DIR=/var/lib/otrios-monitoring`. That directory contains
+`data.merkle`, its writer lock, verified `ui.flex`, and technical publication ACK
+metadata in `data.published.json`. Signed UI admission still checks the installed
+catalog; device-local uninstall remains respected.
 
 ```sh
-cargo build --release --locked -p otrios-dashboard --features server \
-  --bin dashboard-server --bin dashboard-monitoring
-python3 scripts/collect-monitoring.py --config /etc/otrios-authority/monitoring-config.json
+systemctl start otrios-monitoring-local.service
+/opt/otrios-monitoring/monitoring-tool.py --inspect /var/lib/otrios-monitoring/data.merkle
+journalctl -u otrios-monitoring-publish.service --no-pager -n 20
 ```
 
-Private config example (`/etc/otrios-authority/monitoring-config.json`):
+HTTPS is mandatory for Prometheus, redirects are rejected, responses and the
+external JSON window are bounded at 2 MiB, and collection has a 180-second request
+budget. JSON exists only at the external query adapter boundary; canonical app
+data uses the existing FlexBuffers/Merkle representation.
 
-```json
-{
-  "prometheus_url": "https://monitoring.steampunk.digital/prometheus",
-  "prometheus_credentials": "/etc/otrios-authority/prometheus-credentials.json",
-  "renderer": "/opt/otrios-authority/dashboard-monitoring",
-  "output": "/var/lib/otrios-authority/monitoring.flex",
-  "authority_identity": "/etc/otrios-authority/collector.identity"
-}
-```
-
-The credential file contains `username` and `password`, is owned by the service
-user and has mode 0600. HTTPS is mandatory; redirects are rejected so credentials
-cannot be forwarded to another destination. Each response and the full window
-are bounded at 2 MiB, and collection has a 180-second request budget.
-The optional `evidence` path retains the private query window. Publication defaults
-to the trusted local `http://127.0.0.1:8876/presentation` endpoint. An authority on
-another local port can set `authority_url` to its HTTP origin, such as
-`http://127.0.0.1:8894`. Only `127.0.0.1` and `[::1]` HTTP origins are accepted;
-credentials, remote hosts, paths, queries and fragments are rejected. The
-collector always publishes to `/presentation` and refuses redirects.
-
-`otrios-monitoring.timer` runs the one-shot service five minutes apart, starting
-30 seconds after boot. A failed collection leaves the prior complete view and
-its AS OF timestamp unchanged; the failed unit remains visible to systemd.
-`--watch` also supports a foreground loop. The frame needs Tailscale and network
-access to refresh; a disconnected view must not be read as a fresh health check.
-The former Mac collector LaunchAgent is retired.
-
-## Inspect and restore
-
-Trusted `GET /presentation` returns the current binary aggregate. Trusted
-`POST /presentation` with `application/octet-stream` replaces it atomically; an
-empty body clears it. Public clients receive it only after Monitoring admission,
-through the Canvas lease on `/session`; authenticated HTTP inspection is also
-available at `/monitoring/presentation`. There is no separate Monitoring socket.
-`/layout` and the old global dashboard editor are retired. `/health` reports app
-roots, release and presentation availability, without returning metric values.
-
-The collector owns its view templates locally in `apps/monitoring/`; it no longer
-borrows the global dashboard seed. New aggregates use layout v2. Existing static
-v1 views remain readable within the bounded layout contract.
-
-Stop the OTriOS collector before clearing its presentation, otherwise the next
-scheduled collection restores the view. This affects only OTriOS; Grafana and
-Prometheus keep running. Confirmed Canvas app state is independent of the
-replaceable Monitoring aggregate. See [live operations](FRAME_HOSTING.md).
+OrbStack's former `otrios-monitoring.timer` is disabled. The collector and
+publisher are on Frame; OrbStack retains the authority, access control and tunnel.
+Do not reactivate the retired Frame authority or its old collector units.
+See [hosting](FRAME_HOSTING.md) and the
+[live acceptance record](experiments/monitoring-local-replication-2026-11-22.md).

@@ -4,10 +4,10 @@
 ## Active OrbStack host
 
 Since 2026-11-22, OrbStack's Ubuntu ARM64 machine `otrios` on SPD Studio 1 serves
-`https://otrios.otri.ca`. It runs the Linux authority and Monitoring renderer;
+`https://otrios.otri.ca`. It runs the Linux authority and authorized Monitoring replica;
 the restored Mac toolchain builds and signs releases. Prometheus and Grafana
-remain on Linode. Frame is online as a native display subscriber; it no longer
-hosts an authority, tunnel or Monitoring collector.
+remain on Linode. Frame runs the native display, local Monitoring collector and outbound publisher.
+It hosts no authority or tunnel.
 
 `otrios-local.service` uses trusted loopback port 8894 and public loopback port
 8877. `otrios-tunnel.service` exposes only the public listener through the existing
@@ -16,24 +16,27 @@ the obsolete tunnel files supplied as handoff recovery references.
 
 The host root is `/home/otri/otrios`: `releases/` contains verified immutable code,
 `state.signed.apps/` contains current app data, `spaces.flex` is the current
-registry, and `private/` holds auth, sessions, collector configuration/binding and
-the latest Monitoring feed. Public preserves the previously served demos and
-confirmed roots; Operations remains closed to the restored human Admin. The
+registry, and `private/` holds auth, sessions and the collector service binding.
+The typed Monitoring replica belongs to its collection under `state.signed.apps/`. Public preserves the previously served demos and
+confirmed roots; Operations remains closed to nonmembers, with the restored human
+Admin and the existing Frame Member admitted. The
 preserved collector identity has a new authority-specific service binding, not
-viewing membership. `otrios-monitoring.timer` refreshes every five minutes.
+viewing membership. OrbStack's former `otrios-monitoring.timer` is disabled.
 
-Enter with `orb -m otrios`; inspect `otrios-local`, `otrios-tunnel` and
-`otrios-monitoring.timer` using systemctl. Mac build/signing configuration is in
+Enter with `orb -m otrios`; inspect `otrios-local` and `otrios-tunnel` using
+systemctl. Inspect the separate Monitoring units on Frame over its pinned SSH
+connection. Mac build/signing configuration is in
 `~/Library/Application Support/OTriOSDashboard-SPDStudio1/config.json`, with source
 at `~/Projects/otrios-spd-studio-1`. Use `--once --stage-only` for future builds
 until their Linux deployment is explicitly configured; no automatic watcher was
-started. Mac executables must not replace the Linux authority/renderer. Preserve
+started. Mac executables must not replace the Linux authority or ARM Frame tools. Preserve
 the current publisher identity.
 
 ## Active Frame subscriber
 
-Frame (`SPD-DASH-0001`, Tailscale `100.73.221.26`) runs only the existing direct
-KMS/GLES2 display and touch client. `/etc/otrios-dashboard.conf` sets both
+Frame (`SPD-DASH-0001`, Tailscale `100.73.221.26`) runs the existing direct
+KMS/GLES2 display and touch client plus the separate local Monitoring collector
+and outbound publisher. `/etc/otrios-dashboard.conf` sets both
 `DASHBOARD_URL` and `DASHBOARD_CODE_URL` to `https://otrios.otri.ca`. Its native
 service waits for network/Tailscale and does not pull in a local authority.
 Remote sessions use HTTPS/WSS with an explicit matching Origin; the existing
@@ -56,17 +59,23 @@ The retired `/opt/otrios-authority`, `/etc/otrios-authority` and
 on 2026-11-22. Deploy future signed code to the OrbStack authority; Frame follows
 its release events and verifies native bytes using its existing publisher key.
 The 128 MiB native cache remains disposable. Network loss leaves cached code
-available; live synchronization and fresh remote data require connectivity.
+available. Monitoring's explicitly configured owner also keeps its signed UI and
+durable app snapshot in `/var/lib/otrios-monitoring`; it can start and refresh
+locally without OrbStack while Prometheus remains reachable. See [Monitoring](MONITORING.md)
+for `otrios-monitoring-local.timer`, `otrios-monitoring-publish.service`, private
+configuration and outage behavior. Other apps still use remote synchronization.
 
 For focused hardware acceptance, use `scripts/check-frame-release.py` with the
 existing pinned SSH config, the published `--pointer`, an `--output` path, and
 `--subscriber-origin https://otrios.otri.ca`. Do not pass `--resume-monitoring`:
-that collector now belongs on OrbStack. The check verifies the signed cache,
-running executable, confirmed state, remote health and absence of old hosting
-roles. Physical gestures require separate hands-on acceptance.
+that is the retired authority collector, not the new local-owner timer. The check verifies the signed cache,
+running executable, confirmed state, remote health and absence of old authority/tunnel
+roles. The older general subscriber checker does not qualify the local Monitoring
+owner; use the dedicated outage evidence below for that behavior. Physical gestures require separate hands-on acceptance.
 
 See [the cutover record](experiments/frame-subscriber-2026-11-22.md) for release
-and validation evidence.
+and validation evidence. The subsequent [local Monitoring acceptance](experiments/monitoring-local-replication-2026-11-22.md)
+records the collector cutover and server-outage behavior.
 
 ## Historical Frame authority deployment reference
 

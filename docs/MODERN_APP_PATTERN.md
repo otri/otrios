@@ -43,7 +43,7 @@ flowchart LR
   Responders --> Commands[Declared operation or bounded Wasm reducer]
   Commands --> Replica
   Clock[Local presentation clock and GPU resources] --> GPU
-  Private[Authorized read-only Monitoring aggregate] --> Scene
+  Private[Authorized typed Monitoring snapshot] --> Scene
 ```
 
 The authority admits UI/State pairs from a catalog, validates operations against
@@ -107,11 +107,13 @@ The stress control runs a real isolated CRDT workload in RAM; it is not a stream
 of synthetic writes into durable app state. It can stall the state worker while
 the presentation clock continues independently.
 
-Monitoring uses a private, read-only, replaceable FlexBuffers Layout aggregate.
-Its app owns navigation/header composition; the authority supplies the current
-weekly chart projection with gaps preserved. Feed replacement does not append
-metric samples or binary layouts to durable CRDT history. This is the current
-aggregate-view contract, not a general query or analytics engine.
+Monitoring owns typed Merkle app data: current values, a bounded seven-day hourly
+window with gaps, collection time and monotonic producer revision. Frame commits
+locally and publishes outbound; the authority enforces its producer service grant
+and viewer membership. Native and Web clients derive chart geometry from the same
+data. Ordinary viewers retain revocable RAM replicas; the explicitly configured
+Frame owner keeps its own durable snapshot and signed UI for offline operation.
+See [RFC 0038](rfcs/0038-local-monitoring-replication.md).
 
 A Canvas retains an immutable resolved scene until selected presentation inputs
 change. Unselected state changes and acknowledgements do not rebuild it. Sync
@@ -198,7 +200,7 @@ uses the corresponding equation. This is not one global Lamé oval or a claim of
 exact equivalence to Apple's continuous corners. Radius is bounded by half the
 shorter side; zero produces a rectangle.
 
-The remaining layout v1 reader handles bounded static Monitoring aggregates, not
+The remaining layout v1 reader handles legacy bounded static aggregates, not
 a global-room runtime. Stable control v1 and its metadata-only alias, explicit
 retired-route tombstones, dated benchmark references and unrelated OS snapshot
 scaffolds are intentional retained boundaries. Deleting these would weaken

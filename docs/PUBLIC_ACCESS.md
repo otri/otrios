@@ -31,9 +31,10 @@ For the current release, read `/release` or the opening `/session` hello;
 the qualification hash above is historical.
 
 One Rust service on the OrbStack Linux host serves code and state. Cloudflare
-Tunnel reaches its public loopback listener on 8877; the local collector uses
-trusted 8894. Frame subscribes through the public HTTPS/WSS origin using its
-existing device credential.
+Tunnel reaches its public loopback listener on 8877; trusted administration uses
+8894. Frame views through the public HTTPS/WSS origin using its existing device
+credential. Its separate Monitoring producer connects outbound on the same public
+`/session` endpoint with the existing collector service credential.
 Remote administration uses pinned SSH over Tailscale. Public
 requests never forward to the trusted listener. State recovery failure leaves
 signed code and release negotiation available. A whole-process crash affects both.
@@ -110,8 +111,13 @@ acquire the new cookie. The native Frame uses its private token file over HTTPS/
 authority. Its existing `frame-household` identity has Member access to the
 closed Operations Space, allowing Monitoring without interactive sign-in.
 Native authentication does not imply Space membership or administration.
-Only immutable public artifacts enter disposable caches; documents and private
-Monitoring views remain in RAM. See [client storage](CLIENT_STORAGE.md).
+Ordinary viewers keep private Monitoring data in RAM. Frame's explicitly configured
+Monitoring owner is a separate durable installation: its local collector commits
+app-owned Merkle data and its display can use those bytes offline. Membership
+revocation cannot recall locally owned data. Channel-6 publication rechecks the
+producer service grant and collection attachment before accepting a revision;
+viewing membership alone never grants publication. See [Monitoring](MONITORING.md)
+and [client storage](CLIENT_STORAGE.md).
 
 ## Publication and verification
 
@@ -123,7 +129,7 @@ events over the existing session; reconnect hello recovers missed events. Releas
 metadata is independent of state decoding. See [live deployment](FRAME_HOSTING.md)
 and [RFC 0009](rfcs/0009-unified-server-session.md).
 
-Build/sign on the Mac and publish to the frame as described in [frame hosting](FRAME_HOSTING.md).
+Build/sign on the Mac and publish to the OrbStack authority as described in [frame hosting](FRAME_HOSTING.md).
 Run the required Rust/Python/Node checks, then:
 
 ```sh

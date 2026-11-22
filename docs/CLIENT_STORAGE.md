@@ -42,3 +42,14 @@ See [resource ownership and limits](ARCHITECTURE-RESOURCES.md),
 [packed transport](rfcs/0011-packed-canvas-transport.md), and
 [session/upgrade ownership](FRAME_HOSTING.md). The earlier Automerge checkpoint,
 IndexedDB document cache and migration fallback are removed from the app runtime.
+
+## Explicit Monitoring owner
+
+Frame's configured Monitoring owner is an exception to ordinary viewer RAM
+replicas. The collector commits typed app snapshots under
+`/var/lib/otrios-monitoring`; the native owner checks its locally retained UI
+against the signed installed catalog. It renders saved data and local refreshes
+without an authority connection. A separate producer reconnects outbound to
+publish the latest root under the server's existing grant. This does not make
+browser views durable or grant them offline private access. Server revocation
+cannot recall the owner's existing local bytes. See [Monitoring](MONITORING.md).
