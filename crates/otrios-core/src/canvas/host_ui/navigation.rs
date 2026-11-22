@@ -4,6 +4,10 @@ use super::*;
 use otrios_interfaces::spaces::SpaceSummary;
 
 impl Model {
+    pub fn editing(&self, space: &str) -> bool {
+        self.editing.as_deref() == Some(space)
+    }
+
     pub fn parent<'a>(&'a self, space: &'a SpaceSummary, app: &str) -> Option<&'a str> {
         let path = self.routes.get(app)?;
         space

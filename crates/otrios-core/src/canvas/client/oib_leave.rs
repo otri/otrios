@@ -13,7 +13,7 @@ pub(super) enum Target {
     Back,
     Navigate(String),
     Spaces,
-    Profile,
+    HostPane(super::super::host_ui::Pane),
     SignOut,
     Open { ui_ref: String, state_ref: String },
 }
@@ -207,8 +207,8 @@ impl Client {
             Target::Spaces => {
                 self.show_spaces()?;
             }
-            Target::Profile => {
-                self.open_profile()?;
+            Target::HostPane(pane) => {
+                self.open_host_pane(pane)?;
             }
             Target::SignOut => {
                 self.sign_out_requested = true;

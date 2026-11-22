@@ -231,7 +231,15 @@ fn shell_appearance_and_account_preserve_invalid_draft_and_preview_mode() {
             .error
             .is_some()
     );
-    client.shell_command(breadcrumbs::Command::Account).unwrap();
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .breadcrumbs
+        .as_mut()
+        .unwrap()
+        .admin = true;
+    client.shell_command(breadcrumbs::Command::Menu).unwrap();
     assert!(client.text_inputs().unwrap().is_empty());
     assert!(
         !client
@@ -296,7 +304,6 @@ fn shell_appearance_and_account_preserve_invalid_draft_and_preview_mode() {
         Some("alice")
     );
     assert_eq!(client.typed_value(1).ok(), value);
-    client.shell_command(breadcrumbs::Command::Account).unwrap();
     client.shell_command(breadcrumbs::Command::Profile).unwrap();
     assert!(client.active.as_ref().unwrap().leave.is_some());
 }

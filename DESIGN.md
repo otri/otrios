@@ -145,10 +145,16 @@ and leave header navigation independent of dashboard scaling.
 
 The shell shares location/account geometry, paired semantic colors, button
 geometry, app icons and separate app toolbars across the current routes. Home and
-Playground use “Arrange apps” rather than a generic Edit action. Designer has its
-own document/component scope, save status and editing commands below the global
-header. The account menu contains System/Light/Dark, account settings and sign-out
-when signed in. Web remembers only the local appearance preference; System follows
+Playground show plain Space titles and an Edit pencil on each Space the signed-in
+user administers. The clearly labelled Space editing panel includes Arrange apps;
+arrangement affects that Space, and its check icon finishes editing. There is no
+extra Spaces heading or global Arrange toolbar. Designer has its own document/
+component scope, save status and editing commands below the global header.
+
+Sign in opens the login panel directly. The Profile avatar opens account settings
+and sign-out directly. Admins also get a hamburger beside Profile with Add Space,
+Review Deleted and Appearance (System/Light/Dark). Visitors and members do not see
+admin controls. Web remembers only the local appearance preference; System follows
 the browser/OS. Native hosts without an appearance signal default to Dark.
 
 Focused scene/protocol checks cover every current route in both modes, matching

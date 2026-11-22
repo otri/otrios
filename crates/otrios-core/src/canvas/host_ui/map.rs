@@ -14,7 +14,7 @@ const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
 const WHITE: [u8; 4] = [255, 254, 250, 255];
-pub(super) const TOP: f32 = 176.;
+pub(super) const TOP: f32 = 112.;
 pub(super) fn top(width: f32) -> f32 {
     TOP + crate::canvas::client::breadcrumbs::compact_extra(width)
 }
@@ -462,13 +462,19 @@ pub(super) fn render(
     font: Option<&crate::dashboard::font::Font>,
 ) -> Result<Rendered> {
     let [w, h] = viewport;
-    let any_admin = snapshot.spaces.iter().any(|s| s.role == Some(Role::Admin));
-    if !any_admin {
-        model.editing = false;
+    if snapshot.identity.is_none()
+        || model.editing.as_ref().is_some_and(|id| {
+            !snapshot
+                .spaces
+                .iter()
+                .any(|s| s.id == *id && s.role == Some(Role::Admin) && !s.archived)
+        })
+    {
+        model.editing = None;
     }
     let selected = snapshot.selected.as_ref();
     let summary = selected.and_then(|d| snapshot.spaces.iter().find(|s| s.id == d.space));
-    let admin = summary.is_some_and(|s| s.role == Some(Role::Admin));
+    let admin = snapshot.identity.is_some() && summary.is_some_and(|s| s.role == Some(Role::Admin));
     if !admin
         && matches!(
             model.pane,
@@ -502,7 +508,7 @@ pub(super) fn render(
     let mut background_model = Model {
         routes: model.routes.clone(),
         collection: model.collection.clone(),
-        editing: model.editing,
+        editing: model.editing.clone(),
         scroll: model.scroll,
         page: model.map_page,
         ..Model::default()
@@ -746,12 +752,6 @@ pub(super) fn render(
                     [left, top + 104., width, 56.],
                     HostAction::Pane(Pane::ProfileEdit),
                 );
-                b.flat(
-                    "Deleted Spaces",
-                    "Deleted Spaces",
-                    [left, top + 168., width, 56.],
-                    HostAction::Pane(Pane::DeletedSpaces),
-                );
             }
             if sign_out && snapshot.identity.is_some() {
                 b.flat(
@@ -792,6 +792,7 @@ pub(super) fn render(
             }
         }
         Pane::SpaceSettings => {
+            let top = top + 48.;
             if let Some(space) = summary {
                 form = true;
                 if model.field_owner.as_deref() != Some(&space.id) {
@@ -801,6 +802,11 @@ pub(super) fn render(
                     model.form_generation = snapshot.generation;
                     model.form_blocked = false;
                 }
+                b.nodes.push(text(
+                    &format!("Edit {}", space.name),
+                    [left, top - 48., width, 40.],
+                    2.,
+                ));
                 b.name([left, top, width, 64.]);
                 let palette = [
                     Background::None,
@@ -922,6 +928,12 @@ pub(super) fn render(
                         [left, top + palette_shift + 356., width, 32.],
                     );
                 }
+                b.flat(
+                    "Arrange apps",
+                    "Arrange apps",
+                    [left, top + palette_shift + 556., width, 50.],
+                    HostAction::Edit(space.id.clone()),
+                );
                 b.divider([left, top + palette_shift + 412., width, 1.]);
                 b.flat(
                     "People & access",
@@ -1124,8 +1136,6 @@ fn map_body<'a>(
     let snapshot = &launcher;
     let [w, h] = viewport;
     let top = self::top(w);
-    let toolbar_y = top - 64.;
-    let any_admin = snapshot.spaces.iter().any(|s| s.role == Some(Role::Admin));
     let mut b = Builder {
         font,
         nodes: vec![],
@@ -1140,7 +1150,9 @@ fn map_body<'a>(
         .spaces
         .iter()
         .filter(|s| {
-            !s.archived && (s.attached_count > 0 || model.editing && s.role == Some(Role::Admin))
+            !s.archived
+                && (s.attached_count > 0
+                    || s.role == Some(Role::Admin) && snapshot.identity.is_some())
         })
         .collect::<Vec<_>>();
     let margin = if w < 500. { 16. } else { 28. };
@@ -1155,7 +1167,7 @@ fn map_body<'a>(
     let mut tiles = 0;
     for space in &shown {
         let count = (space.apps.len()
-            + if model.editing {
+            + if model.editing(&space.id) {
                 space.retained.len()
             } else {
                 0
@@ -1179,20 +1191,26 @@ fn map_body<'a>(
     for space in &pages[model.page] {
         let width = usize::from(space.layout.width).min(cols);
         let count = (space.apps.len()
-            + if model.editing {
+            + if model.editing(&space.id) {
                 space.retained.len()
             } else {
                 0
             })
         .min(otrios_interfaces::spaces::MAX_INSTALLED_APPS);
-        let rows = count.max(1).div_ceil(width).max(if model.editing {
-            usize::from(space.layout.height)
-        } else {
-            1
-        });
+        let rows = count
+            .max(1)
+            .div_ceil(width)
+            .max(if model.editing(&space.id) {
+                usize::from(space.layout.height)
+            } else {
+                1
+            });
         let height = 68.
             + rows as f32 * 152.
-            + if model.editing && space.role == Some(Role::Admin) {
+            + if model.editing(&space.id)
+                && space.role == Some(Role::Admin)
+                && snapshot.identity.is_some()
+            {
                 60.
             } else {
                 16.
@@ -1222,7 +1240,9 @@ fn map_body<'a>(
     model.scroll = model.scroll.clamp(0., model.scroll_limit);
     for (space, frame, columns) in positions {
         let [x, y, width, height] = frame;
-        let editable = model.editing && space.role == Some(Role::Admin);
+        let editable = model.editing(&space.id)
+            && space.role == Some(Role::Admin)
+            && snapshot.identity.is_some();
         let mut card = Builder {
             font,
             nodes: vec![],
@@ -1233,7 +1253,8 @@ fn map_body<'a>(
                 .frame([0., 0., width, height])
                 .corner_radius(24.0.into()),
         );
-        let title_width = width - if editable { 64. } else { 16. };
+        let admin = snapshot.identity.is_some() && space.role == Some(Role::Admin);
+        let title_width = width - if admin { 64. } else { 16. };
         let displayed_name = if space.archived {
             format!("{} (deleted)", space.name)
         } else {
@@ -1260,20 +1281,38 @@ fn map_body<'a>(
                 )
             })
             .collect();
-        card.nodes.push(
-            a::canvas(title_nodes)
-                .frame([8., 4., title_width, 56.])
-                .semantic_label(&short(&format!("Space: {}", space.name), 94))
-                .on_press(a::Event::back()),
-        );
-        card.actions.push(HostAction::MapSpace(space.id.clone()));
+        let mut title = a::canvas(title_nodes).frame([8., 4., title_width, 56.]);
         if editable {
-            card.flat(
-                &format!("Space settings: {}", space.name),
-                "•••",
-                [width - 56., 4., 48., 48.],
-                HostAction::Settings(space.id.clone(), Pane::SpaceSettings),
+            title = title
+                .semantic_label(&short(&format!("Space: {}", space.name), 94))
+                .on_press(a::Event::back());
+            card.actions.push(HostAction::MapSpace(space.id.clone()));
+        }
+        card.nodes.push(title);
+        if admin {
+            let icon = vec![];
+            card.nodes.push(
+                a::canvas(icon)
+                    .frame([width - 56., 4., 48., 48.])
+                    .semantic_label(&short(
+                        &format!(
+                            "{}: {}",
+                            if editable {
+                                "Done editing Space"
+                            } else {
+                                "Edit Space"
+                            },
+                            space.name
+                        ),
+                        94,
+                    ))
+                    .on_press(a::Event::back()),
             );
+            card.actions.push(if editable {
+                HostAction::Edit(space.id.clone())
+            } else {
+                HostAction::Settings(space.id.clone(), Pane::SpaceSettings)
+            });
         }
         let tile = (width - 24.) / columns as f32;
         for (index, app) in space.apps.iter().enumerate() {
@@ -1378,15 +1417,9 @@ fn map_body<'a>(
                 .push(a::rectangle(SOFT).frame([width - 30., height - 18., 14., 2.]));
         }
         // A clipped map viewport keeps scrolled tiles clear of the header/footer.
-        content.nodes.push(
-            a::canvas(card.nodes)
-                .frame([x, y, width, height])
-                .semantic_label("Space body")
-                .on_press(a::Event::back()),
-        );
         content
-            .actions
-            .push(HostAction::SpaceBody(space.id.clone()));
+            .nodes
+            .push(a::canvas(card.nodes).frame([x, y, width, height]));
         content.actions.extend(card.actions);
     }
     b.nodes.push(
@@ -1441,37 +1474,6 @@ fn map_body<'a>(
             ">",
             [margin + 56., h - 124., 48., 48.],
             HostAction::Page(1),
-        );
-    }
-    if !model.editing {
-        b.nodes.push(text(
-            if model.collection.is_some() {
-                "Apps"
-            } else {
-                "Spaces"
-            },
-            [margin, toolbar_y + 4., 160., 36.],
-            2.,
-        ));
-    }
-    if model.editing && model.collection.is_none() {
-        b.flat(
-            "Add Space",
-            "+ Space",
-            [margin, toolbar_y, 140., 48.],
-            HostAction::Pane(Pane::Create),
-        );
-    }
-    if any_admin {
-        b.flat(
-            if model.editing {
-                "Done"
-            } else {
-                "Arrange apps"
-            },
-            if model.editing { "Done" } else { "Arrange" },
-            [w - 180., toolbar_y, 152., 48.],
-            HostAction::Edit,
         );
     }
     if !model.message.is_empty() {

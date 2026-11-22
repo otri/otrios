@@ -531,7 +531,7 @@ impl Client {
                 &mount.ui,
                 false,
             )?;
-            next.account_open = previous.account_open;
+            next.account_open = previous.account_open && next.admin;
             next.preference = self.shell_preference;
             next.sign_in = !self.chat_native;
             if next != *previous {
@@ -701,9 +701,8 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
-        if self.host.requested_profile {
-            self.host.requested_profile = false;
-            self.host.pane = super::host_ui::Pane::Profile;
+        if let Some(pane) = self.host.requested_pane.take() {
+            self.host.pane = pane;
         }
         self.host.routes = self
             .catalog
@@ -872,7 +871,7 @@ impl Client {
             self.host.field_owner = None;
             self.host.background = None;
             let app = app.or_else(|| {
-                if self.host.pane == super::host_ui::Pane::Apps && !self.host.editing {
+                if self.host.pane == super::host_ui::Pane::Apps && self.host.editing.is_none() {
                     let apps = snapshot
                         .selected
                         .as_ref()?
@@ -1001,7 +1000,7 @@ impl Client {
                     .as_ref()
                     .and_then(|(_, app)| self.host.routes.get(app))
                     .and_then(|path| path.rsplit_once('/').map(|(parent, _)| parent.to_string()));
-                self.host.editing = false;
+                self.host.editing = None;
                 if let Some(parent) = parent {
                     self.navigate(&parent)?;
                 } else {
@@ -1042,36 +1041,25 @@ impl Client {
                 self.host.background = None;
                 self.build_host(false)?;
             }
-            HostAction::Edit => {
-                self.host.editing = !self.host.editing;
+            HostAction::Edit(space) => {
+                if !self.map_admin(&space) {
+                    return Ok(false);
+                }
+                self.commit_host_label()?;
+                self.host.editing = if self.host.editing(&space) {
+                    None
+                } else {
+                    Some(space)
+                };
+                self.host.pane = Pane::Home;
+                self.host.panel_scroll = 0.;
                 self.host.drag = None;
                 self.build_host(false)?;
             }
-            HostAction::MapSpace(space) => {
-                if self.host.collection.is_some() && !self.host.editing {
-                    return Ok(false);
-                }
-                let app = self
-                    .spaces
-                    .snapshot()
-                    .and_then(|s| s.spaces.iter().find(|s| s.id == space))
-                    .filter(|s| s.attached_count == 1)
-                    .and_then(|s| s.apps.first())
-                    .map(|a| a.app.clone());
-                let pane = if self.host.editing {
-                    Pane::SpaceSettings
-                } else {
-                    Pane::Apps
-                };
-                self.host_destination(space, pane, if self.host.editing { None } else { app })?;
-            }
-            HostAction::SpaceBody(space) => {
-                if !self.host.editing {
-                    return self.host_action(HostAction::MapSpace(space));
-                }
-            }
+            // The title is a drag handle only during explicit arrangement.
+            HostAction::MapSpace(_) => return Ok(false),
             HostAction::MapApp(space, app) => {
-                if self.host.editing {
+                if self.host.editing(&space) {
                     self.host_destination(space, Pane::AppSettings(app), None)?;
                 } else if self.host.is_collection(&app) {
                     self.host.collection = Some((space, app));
@@ -2440,7 +2428,7 @@ impl Client {
         {
             self.host.collection = Some((space, entry.id));
             self.host.pane = super::host_ui::Pane::Home;
-            self.host.editing = false;
+            self.host.editing = None;
             self.host.page = 0;
             self.host.scroll = 0.;
             self.show_launcher()?;

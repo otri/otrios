@@ -110,13 +110,17 @@ snapshot; it never automatically replays Create or a destructive action. Every
 management path uses the same generation/role checks.
 
 The shared native/browser entrance is the [RFC 0028](rfcs/0028-spaces-map-sharing-and-portable-data.md)
-Spaces map. It has no Spaces heading or role subtitles. Sign-in/profile stays at
-upper-right; an Admin's Edit/Done action stays at lower-right. Empty Spaces are
-hidden outside Edit. Selecting a single-app Space directly opens that app;
-multiple-app Spaces offer their app list, and map app tiles launch directly.
-Unavailable local code keeps its entry and explains the problem on selection.
+Spaces map. It has no redundant Spaces heading or role subtitles. Sign in opens
+login directly; the signed-in Profile avatar opens account settings directly.
+Admins have a hamburger beside Profile with Add Space, Review Deleted and local
+Appearance (System/Light/Dark). Space titles and card backgrounds are inert outside
+arrangement; app tiles launch directly. Empty administered Spaces remain visible
+so their management is reachable. Other empty Spaces stay hidden. Unavailable
+local code keeps its entry and explains the problem on selection.
 
-Edit exposes Add Space, each Space's Add App, title dragging and corner resizing.
+Each administered Space has an Edit pencil opening its labelled editing panel.
+Arrange apps in that panel enables that Space's Add App, title dragging and corner
+resizing; its check icon finishes arrangement.
 Arrow keys on a title, app tile or resize corner perform equivalent ordering/size
 changes. App minus controls are separate from the tile's drag target. App reordering is
 within a Space; a cross-Space drop opens the move review. Space on an app or ghost
@@ -131,12 +135,12 @@ Edit previews also retain the mount so native touch capture survives every
 frame. While dragging a title or app, hold near the map's upper or lower edge
 to scroll toward an offscreen destination; move into the middle to stop.
 Cancel and drops back onto the same item leave metadata unchanged.
-Managed apps return through `< OTriOS • App name`; the breadcrumb uses the host's
-reserved return action and includes the top-left padding in its touch target.
+Managed apps use the shared `OTriOS > App name` breadcrumb, including collection
+ancestors where applicable. Space names do not appear in the breadcrumb.
 
 The Space settings panel combines name and background (including None), then usage
-and its compact access/app/dataset information rows. People & access and Delete Space
-are its primary actions. No width/height fields or separate
+and its compact access/app/dataset information rows. People & access, Delete Space
+and Arrange apps are available below these rows. No width/height fields or separate
 appearance panel is added. In Edit, an app opens a name field over its immutable
 bundle ID. Enter, blur or closing commits a changed label; there is no Rename,
 Move or Delete App button in that panel. Share App, Export Data and Replace Data
@@ -239,7 +243,7 @@ Palette selections commit the currently edited name and chosen background as
 one generation-checked ConfigureSpace. Swatches wrap to retain touch target size
 on narrow screens. Dataset headings edit exact preferred/sealed dataset labels
 through LabelDataset; labels never change bundle/collection identity. Archived
-Spaces are recovered through Profile → Deleted Spaces, with current Admin checks.
+Spaces are recovered through the admin hamburger → Review Deleted, with current Admin checks.
 
 People & access holds an unsent local draft of audience and membership changes.
 Save sends one single-Space Access command with the desired audience and at most

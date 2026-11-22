@@ -33,7 +33,7 @@ fn transfer_fixture() -> Client {
 #[test]
 fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session_commit() {
     let mut client = transfer_fixture();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Counter");
     let right = |client: &Client, label: &str| {
         let scene = client.scene().unwrap();
@@ -137,7 +137,7 @@ fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session
 fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_replacement() {
     for close_early in [false, true] {
         let mut client = transfer_fixture();
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         click(&mut client, "Counter");
         click(&mut client, "Replace Data");
         click(&mut client, "Choose File");
@@ -166,7 +166,7 @@ fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_repla
 fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
     for revoke in [false, true] {
         let mut client = transfer_fixture();
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         click(&mut client, "Counter");
         click(&mut client, "Replace Data");
         click(&mut client, "Choose File");
@@ -197,7 +197,7 @@ fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
 #[test]
 fn app_upload_tile_and_explicit_host_wide_review_precede_import_commit() {
     let mut client = transfer_fixture();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Add app: Household");
     assert!(labels(&client).contains(&"Upload".into()));
     click(&mut client, "Upload");
@@ -259,7 +259,7 @@ fn share_link_is_immutable_and_appears_only_after_confirmed_publication() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Counter");
     click(&mut client, "Share App");
     assert!(!labels(&client).contains(&"Copy link".into()));
@@ -410,19 +410,34 @@ fn fixture(role: Role) -> (Client, Ui) {
         .admit_catalog(
             &encode_catalog(&Catalog {
                 format: "otrios-app-catalog-v1".into(),
-                apps: vec![CatalogEntry {
-                    app: App {
-                        id: "counter".into(),
-                        title: "Counter".into(),
-                        ui_ref: ui.ui_ref.clone(),
-                        state_ref: "app:counter/state".into(),
-                        status: "canvas-app".into(),
-                        dependencies: vec![],
+                apps: vec![
+                    CatalogEntry {
+                        app: App {
+                            id: "home".into(),
+                            title: "Home".into(),
+                            ui_ref: "app:home/ui".into(),
+                            state_ref: "app:home/state".into(),
+                            status: "canvas-app".into(),
+                            dependencies: vec![],
+                        },
+                        path: "".into(),
+                        ui_hash: vec![0; 32],
+                        private: false,
                     },
-                    path: "".into(),
-                    ui_hash: hash(&bytes),
-                    private: false,
-                }],
+                    CatalogEntry {
+                        app: App {
+                            id: "counter".into(),
+                            title: "Counter".into(),
+                            ui_ref: ui.ui_ref.clone(),
+                            state_ref: "app:counter/state".into(),
+                            status: "canvas-app".into(),
+                            dependencies: vec![],
+                        },
+                        path: "counter".into(),
+                        ui_hash: hash(&bytes),
+                        private: false,
+                    },
+                ],
             })
             .unwrap(),
         )
@@ -579,7 +594,7 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
     client.tick(1, 0).unwrap();
     assert!(client.appearance_is_dark());
     assert!(labels(&client).contains(&"Test Playground".into()));
-    click(&mut client, "Profile");
+    click(&mut client, "Spaces menu");
     assert!(!labels(&client).contains(&"Test Playground".into()));
     assert!(!client.activate(epoch, stale).unwrap());
     assert!(client.text_inputs().unwrap().is_empty());
@@ -596,7 +611,7 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
     assert_eq!(client.screen(), "test-playground");
     assert!(labels(&client).contains(&"Counter".into()));
     assert!(!labels(&client).contains(&"OIB Designer".into()));
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     assert!(
         labels(&client)
             .iter()
@@ -624,7 +639,7 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
         client.set_viewport([width, 844.]).unwrap();
         let scene = client.scene().unwrap();
         assert_eq!(scene.root().frame.width, width);
-        for label in ["Back to OTriOS", "Profile", "Done"] {
+        for label in ["Back to OTriOS", "Profile", "Done editing Space: Household"] {
             let control = scene
                 .controls()
                 .into_iter()
@@ -690,6 +705,48 @@ fn click(client: &mut Client, label: &str) {
     assert!(client.activate(client.epoch(), id).unwrap());
 }
 
+fn edit_space(client: &mut Client, name: &str) {
+    let done = format!("Done editing Space: {name}");
+    if labels(client).contains(&done) {
+        click(client, &done);
+    }
+    click(client, &format!("Edit Space: {name}"));
+    if let Some(space) = client.take_space_switch() {
+        let mut state = client.spaces_snapshot().unwrap().clone();
+        client.select_space(&space).unwrap();
+        let Command::Watch { observation, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("watch edited Space")
+        };
+        state.selected.as_mut().unwrap().space = space;
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation,
+                    snapshot: Box::new(state),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+    }
+}
+fn arrange_space(client: &mut Client, name: &str) {
+    edit_space(client, name);
+    if !labels(client).contains(&"Arrange apps".into()) {
+        client.scroll_map(client.epoch(), 1e6).unwrap();
+    }
+    click(client, "Arrange apps");
+}
+fn arrange(client: &mut Client) {
+    let label = labels(client)
+        .into_iter()
+        .find(|l| l.starts_with("Edit Space: "))
+        .expect("an administered Space has an Edit icon");
+    arrange_space(client, label.strip_prefix("Edit Space: ").unwrap());
+}
+
 fn home(client: &mut Client) {
     let current = labels(client);
     if current.contains(&"Home".into()) {
@@ -697,14 +754,13 @@ fn home(client: &mut Client) {
     } else if current.contains(&"Close".into()) {
         click(client, "Close");
     }
-    if labels(client).contains(&"Done".into()) {
-        click(client, "Done");
+    if labels(client).contains(&"Done editing Space: Household".into()) {
+        click(client, "Done editing Space: Household");
     }
 }
 fn open_access(client: &mut Client) {
     home(client);
-    click(client, "Arrange apps");
-    click(client, "Space settings: Household");
+    edit_space(client, "Household");
     click(client, "People & access");
 }
 
@@ -714,7 +770,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
         let (mut client, _) = fixture(role);
         assert!(client.spaces_ui());
         assert_eq!(
-            labels(&client).iter().any(|l| l == "Arrange apps"),
+            labels(&client).iter().any(|l| l == "Edit Space: Household"),
             role == Role::Admin
         );
         for viewport in [[1280., 800.], [800., 1280.], [780., 844.]] {
@@ -743,11 +799,11 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
     client.set_viewport([390., 440.]).unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Counter");
     assert!(client.resource_usage().map_scroll.is_none());
     assert!(client.resource_usage().panel_scroll.as_ref().unwrap().limit[1] > 0.);
-    for hidden in ["Profile", "Done", "Space: Household"] {
+    for hidden in ["Done editing Space: Household", "Space: Household"] {
         assert!(!labels(&client).contains(&hidden.into()));
     }
     let epoch = client.epoch();
@@ -814,12 +870,11 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
     let scene = client.scene().unwrap();
     let settings = scene
         .controls()
         .into_iter()
-        .find(|c| c.node.semantics.as_ref().unwrap().label == "Space settings: Household")
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Edit Space: Household")
         .unwrap();
     let position = [settings.origin[0] + 20., settings.origin[1] + 20.];
     let epoch = client.epoch();
@@ -837,7 +892,10 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
             .unwrap();
     }
     assert!(labels(&client).contains(&"People & access".into()));
-    assert!(!labels(&client).contains(&"Profile".into()));
+    assert!(
+        labels(&client).contains(&"Profile".into()),
+        "shared Profile access remains available above the panel"
+    );
     assert!(!client.accessibility_text().unwrap().contains("Sample"));
     click(&mut client, "Name");
     assert!(client.keyboard_visible());
@@ -877,7 +935,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
 fn local_forms_use_the_shared_keyboard_without_synchronizing_drafts_as_app_data() {
     let (mut client, _) = fixture(Role::Admin);
     home(&mut client);
-    click(&mut client, "Arrange apps");
+    click(&mut client, "Spaces menu");
     click(&mut client, "Add Space");
     click(&mut client, "Space name");
     assert!(client.keyboard_visible());
@@ -1848,6 +1906,154 @@ fn read_only_document_controls_do_not_queue_writes_or_fail_the_view() {
 }
 
 #[test]
+fn home_admin_menu_and_space_editing_follow_current_identity_and_roles() {
+    {
+        let (mut client, _) = fixture(Role::Admin);
+        let mut long = snapshot(Role::Admin, 2);
+        long.spaces[0].name = "A".repeat(128);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(long),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            client.scene().is_ok(),
+            "long Space names keep valid control labels"
+        );
+        assert!(
+            labels(&client)
+                .iter()
+                .any(|l| l.starts_with("Edit Space: ") && l.len() <= 96)
+        );
+    }
+    let (mut client, _) = fixture(Role::Admin);
+    let mut state = snapshot(Role::Admin, 2);
+    let mut second = state.spaces[0].clone();
+    second.id = "f".repeat(32);
+    second.name = "Workshop".into();
+    state.spaces.push(second);
+    let receive = |client: &mut Client, state: Discovery| {
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(state),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+    };
+    receive(&mut client, state.clone());
+    // Ordinary title taps must not bubble into an unexplained Space modal.
+    let scene = client.scene().unwrap();
+    let edit = scene
+        .controls()
+        .into_iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Edit Space: Household")
+        })
+        .unwrap();
+    let title_at = [edit.origin[0] - 80., edit.origin[1] + 20.];
+    for phase in [
+        otrios_interfaces::scene::PointerPhase::Down,
+        otrios_interfaces::scene::PointerPhase::Up,
+    ] {
+        client
+            .pointer_at(
+                client.epoch(),
+                otrios_interfaces::scene::PointerEvent {
+                    id: 99,
+                    phase,
+                    position: title_at,
+                },
+                100,
+            )
+            .unwrap();
+    }
+    assert!(!labels(&client).contains(&"Name".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    for label in [
+        "Spaces",
+        "Space: Household",
+        "Space: Workshop",
+        "Arrange apps",
+    ] {
+        assert!(
+            !labels(&client).contains(&label.into()),
+            "unexpected {label}"
+        );
+    }
+    click(&mut client, "Spaces menu");
+    for label in ["Add Space", "Review Deleted", "System", "Light", "Dark"] {
+        assert!(labels(&client).contains(&label.into()), "missing {label}");
+    }
+    assert!(
+        !labels(&client).contains(&"Counter in Household".into()),
+        "menu blocks launcher input"
+    );
+    click(&mut client, "Light");
+    assert_eq!(client.appearance_preference(), "light");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client.back().unwrap();
+    arrange_space(&mut client, "Household");
+    assert!(labels(&client).contains(&"Done editing Space: Household".into()));
+    assert!(labels(&client).contains(&"Edit Space: Workshop".into()));
+    assert!(!labels(&client).contains(&"Resize: Workshop".into()));
+    assert!(!labels(&client).contains(&"Space: Workshop".into()));
+    click(&mut client, "Spaces menu");
+    state.generation += 1;
+    state.cursor.revision += 1;
+    for space in &mut state.spaces {
+        space.role = Some(Role::Member);
+    }
+    state.selected = snapshot(Role::Member, state.generation).selected;
+    receive(&mut client, state.clone());
+    for label in [
+        "Spaces menu",
+        "Add Space",
+        "Review Deleted",
+        "Light",
+        "Done editing Space: Household",
+        "Edit Space: Household",
+    ] {
+        assert!(
+            !labels(&client).contains(&label.into()),
+            "revoked control {label}"
+        );
+    }
+    assert!(labels(&client).contains(&"Counter in Household".into()));
+    click(&mut client, "Profile");
+    assert!(labels(&client).contains(&"Edit profile".into()));
+    assert!(labels(&client).contains(&"Sign out".into()));
+    assert!(!labels(&client).contains(&"Appearance".into()));
+    click(&mut client, "Close");
+    state.identity = None;
+    state.generation += 1;
+    state.cursor.revision += 1;
+    state.spaces[0].role = Some(Role::Member);
+    receive(&mut client, state);
+    assert!(!labels(&client).contains(&"Spaces menu".into()));
+    assert!(!labels(&client).contains(&"Edit Space: Household".into()));
+    assert!(!labels(&client).contains(&"Space: Household".into()));
+    click(&mut client, "Sign in");
+    assert!(
+        client.auth_required(),
+        "Sign in opens authentication directly"
+    );
+    assert!(!labels(&client).contains(&"Light".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+
+#[test]
 fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
     for role in [Role::Member, Role::Admin] {
         let (mut client, _) = fixture(role);
@@ -1856,7 +2062,7 @@ fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
         assert!(controls.contains(&"Counter".into()));
         assert!(!controls.contains(&"Spaces".into()));
         assert_eq!(
-            controls.contains(&"Arrange apps".into()),
+            controls.contains(&"Edit Space: Household".into()),
             role == Role::Admin
         );
         let view = format!("{:?}", client.scene().unwrap());
@@ -1900,7 +2106,7 @@ fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
 #[test]
 fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Counter");
     let panel = labels(&client);
     for unwanted in ["Rename", "Move...", "Delete App"] {
@@ -1955,7 +2161,7 @@ fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
 #[test]
 fn title_and_corner_keyboard_actions_are_shared_generation_checked_metadata() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     let scene = client.scene().unwrap();
     let resize = scene
         .controls()
@@ -1985,8 +2191,8 @@ fn title_and_corner_keyboard_actions_are_shared_generation_checked_metadata() {
         }
     );
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Arrange apps");
-    click(&mut client, "Space settings: Household");
+    arrange(&mut client);
+    edit_space(&mut client, "Household");
     click(&mut client, "Custom background color");
     assert!(!labels(&client).contains(&"Close".into()));
     click(&mut client, "Hex color");
@@ -2037,7 +2243,7 @@ fn empty_spaces_are_edit_only_and_cancelled_drags_cannot_write() {
         )
         .unwrap();
     assert!(!labels(&client).contains(&"Space: Household".into()));
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     assert!(labels(&client).contains(&"Space: Household".into()));
     let scene = client.scene().unwrap();
     let title = scene
@@ -2088,7 +2294,7 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     let point = |label: &str| {
         let scene = client.scene().unwrap();
         let nodes = scene.controls();
@@ -2242,7 +2448,7 @@ fn add_app_scrolls_the_complete_installed_list_and_targets_the_last_item() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Add app: Household");
     for unwanted in ["Previous", "Next"] {
         assert!(!labels(&client).contains(&unwanted.into()));
@@ -2322,7 +2528,7 @@ fn oversized_management_lists_use_scrollable_bounded_batches_without_losing_targ
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "All retained data");
     assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
     client.scroll_map(client.epoch(), 1e6).unwrap();
@@ -2411,11 +2617,11 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     assert!(!labels(&client).contains(&"Next".into()));
-    assert!(client.resource_usage().map_scroll.unwrap().limit[1] > 4000.);
+    assert!(client.resource_usage().map_scroll.unwrap().limit[1] > 1000.);
     client.scroll_map(client.epoch(), 1e6).unwrap();
-    assert!(labels(&client).contains(&"Resize: Space 5".into()));
+    assert!(labels(&client).contains(&"Edit Space: Space 5".into()));
 
     for deleted in [false, true] {
         let (mut client, _) = fixture(Role::Admin);
@@ -2447,10 +2653,10 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
             )
             .unwrap();
         if deleted {
-            click(&mut client, "Profile");
-            click(&mut client, "Deleted Spaces");
+            click(&mut client, "Spaces menu");
+            click(&mut client, "Review Deleted");
         } else {
-            click(&mut client, "Arrange apps");
+            arrange(&mut client);
             let scene = client.scene().unwrap();
             let id = scene
                 .controls()
@@ -2475,7 +2681,7 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
 #[test]
 fn transfer_file_picker_scrolls_all_sixty_four_files_without_paging() {
     let mut client = transfer_fixture();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Add app: Household");
     click(&mut client, "Upload");
     click(&mut client, "Choose File");
@@ -2515,6 +2721,12 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
     client.set_viewport([390., 440.]).unwrap();
     let mut next = snapshot(Role::Admin, 2);
     next.spaces[0].layout.height = 6;
+    for i in 1..8 {
+        let mut space = next.spaces[0].clone();
+        space.id = format!("{i:032x}");
+        space.name = format!("Space {i}");
+        next.spaces.push(space);
+    }
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
@@ -2528,7 +2740,7 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
     let epoch = client.epoch();
     let limit = client.resource_usage().map_scroll.unwrap().limit[1];
     assert!(limit > 500.);
-    assert!(labels(&client).contains(&"Counter".into()));
+    assert!(labels(&client).contains(&"Counter in Household".into()));
     for unwanted in ["Scroll up", "Scroll down"] {
         assert!(!labels(&client).contains(&unwanted.into()));
     }
@@ -2574,7 +2786,7 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
         }
         assert!(!client.input_busy());
         assert!(
-            labels(&client).contains(&"Counter".into()),
+            labels(&client).contains(&"Counter in Household".into()),
             "reverse restores controls"
         );
     }
@@ -2584,9 +2796,9 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
         !format!("{:?}", client.scene().unwrap()).contains("4200000000"),
         "fade disappears at the bottom"
     );
-    assert!(!labels(&client).contains(&"Counter".into()));
+    assert!(!labels(&client).contains(&"Counter in Household".into()));
     assert!(client.scroll_map(epoch, -100000.).unwrap());
-    assert!(labels(&client).contains(&"Counter".into()));
+    assert!(labels(&client).contains(&"Counter in Household".into()));
     assert!(!client.scroll_map(epoch - 1, 100.).unwrap());
     assert!(!client.scroll_map(epoch, f32::NAN).unwrap());
     assert!(client.spaces_outgoing().unwrap().is_none());
@@ -2600,6 +2812,12 @@ fn map_momentum_and_cancel_use_sample_time_and_release_capture() {
     client.set_viewport([390., 440.]).unwrap();
     let mut next = snapshot(Role::Admin, 2);
     next.spaces[0].layout.height = 6;
+    for i in 1..8 {
+        let mut space = next.spaces[0].clone();
+        space.id = format!("{i:032x}");
+        space.name = format!("Space {i}");
+        next.spaces.push(space);
+    }
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
@@ -2662,6 +2880,18 @@ fn managed_app_breadcrumb_returns_home_from_corner_padding() {
     launch(&mut client, &ui, &mut authority);
     let epoch = client.epoch();
     assert!(!format!("{:?}", client.scene().unwrap()).contains("Quit"));
+    let scene = client.scene().unwrap();
+    let home = scene
+        .controls()
+        .into_iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Back to OTriOS")
+        })
+        .unwrap();
+    let corner = [home.origin[0] + 1., home.origin[1] + 1.];
     for phase in [Down, Up] {
         client
             .pointer_at(
@@ -2669,7 +2899,7 @@ fn managed_app_breadcrumb_returns_home_from_corner_padding() {
                 PointerEvent {
                     id: 1,
                     phase,
-                    position: [5., 5.],
+                    position: corner,
                 },
                 100,
             )
@@ -2729,7 +2959,7 @@ fn populated_map_keeps_header_footer_and_viewport_fixed_during_scroll() {
         .unwrap();
     let fixed = |client: &Client| {
         let scene = client.scene().unwrap();
-        ["Profile", "Arrange apps"].map(|label| {
+        ["Profile", "Spaces menu"].map(|label| {
             let controls = scene.controls();
             let c = controls
                 .iter()
@@ -2810,7 +3040,8 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
                 .unwrap(),
             )
             .unwrap();
-        click(&mut client, "Arrange apps");
+        client.scroll_map(client.epoch(), 100000.).unwrap();
+        arrange_space(&mut client, "Brass Relay");
         let epoch = client.epoch();
         assert!(client.scroll_map(epoch, 100000.).unwrap());
         assert!(!labels(&client).contains(&"Space: Household".into()));
@@ -2869,15 +3100,26 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
             }
         }
         assert_eq!(client.resource_usage().map_scroll.unwrap().offset[1], 0.);
-        assert!(labels(&client).contains(&"Space: Household".into()));
-        // The title is stationary at the edge throughout autoscroll.
+        assert!(labels(&client).contains(&"Edit Space: Household".into()));
+        let scene = client.scene().unwrap();
+        let destination = scene
+            .controls()
+            .into_iter()
+            .find(|c| {
+                c.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Counter in Household")
+            })
+            .unwrap();
+        let drop_at = [destination.origin[0] + 24., destination.origin[1] + 24.];
         client
             .pointer_at(
                 epoch,
                 PointerEvent {
                     id: 7,
                     phase: Up,
-                    position: [start[0], 108.],
+                    position: drop_at,
                 },
                 10000,
             )
@@ -2918,7 +3160,7 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     let epoch = client.epoch();
     let scene = client.scene().unwrap();
     let title = scene
@@ -2989,9 +3231,9 @@ fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a
     };
     for delete_space in [false, true] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         if delete_space {
-            click(&mut client, "Space settings: Household");
+            edit_space(&mut client, "Household");
             click(&mut client, "Delete Space");
         } else {
             click(&mut client, "Delete App: Counter in Household");
@@ -3048,7 +3290,7 @@ fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a
 fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_collection() {
     for remove_data in [false, true] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         click(&mut client, "Delete App: Counter in Household");
         assert!(client.spaces_outgoing().unwrap().is_none());
         assert!(labels(&client).contains(&"Remove Data".into()));
@@ -3093,7 +3335,7 @@ fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_coll
         assert!(!format!("{:?}", client.scene().unwrap()).contains("Saved."));
     }
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Arrange apps");
+    arrange(&mut client);
     click(&mut client, "Delete App: Counter in Household");
     click(&mut client, "Remove Data");
     click(&mut client, "Cancel");
@@ -3111,7 +3353,7 @@ fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_coll
 fn map_delete_review_cannot_follow_generation_changes_or_lost_admin_access() {
     for role in [Role::Admin, Role::Member] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         click(&mut client, "Delete App: Counter in Household");
         let mut changed = snapshot(role, 2);
         changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
@@ -3175,7 +3417,7 @@ fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() 
             let title = if backup { "Earlier Counter" } else { "Counter" };
             let label = format!("{title} (data) in Household");
             assert!(!labels(&client).contains(&label));
-            click(&mut client, "Arrange apps");
+            arrange(&mut client);
             assert!(labels(&client).contains(&label));
             if delete {
                 click(&mut client, &format!("Delete data: {title} in Household"));
@@ -3216,10 +3458,10 @@ fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() 
     }
 }
 #[test]
-fn deleted_space_recovers_from_profile_with_current_admin_access() {
+fn deleted_space_recovers_from_admin_menu_with_current_admin_access() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Arrange apps");
-    click(&mut client, "Space settings: Household");
+    arrange(&mut client);
+    edit_space(&mut client, "Household");
     click(&mut client, "Delete Space");
     assert!(client.spaces_outgoing().unwrap().is_none());
     click(&mut client, "Delete");
@@ -3249,10 +3491,9 @@ fn deleted_space_recovers_from_profile_with_current_admin_access() {
         )
         .unwrap();
     assert!(!labels(&client).contains(&"Space: Household".into()));
-    click(&mut client, "Arrange apps");
-    assert!(!labels(&client).contains(&"Space: Household".into()));
-    click(&mut client, "Profile");
-    click(&mut client, "Deleted Spaces");
+    assert!(!labels(&client).contains(&"Edit Space: Household".into()));
+    click(&mut client, "Spaces menu");
+    click(&mut client, "Review Deleted");
     click(&mut client, "Restore Space: Household");
     let Command::Manage { request, .. } =
         spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
@@ -3296,7 +3537,7 @@ fn cross_space_pickup_reviews_modes_publication_and_exact_current_bindings() {
                 .unwrap(),
             )
             .unwrap();
-        click(&mut client, "Arrange apps");
+        arrange(&mut client);
         let id = client
             .scene()
             .unwrap()
@@ -3320,14 +3561,14 @@ fn cross_space_pickup_reviews_modes_publication_and_exact_current_bindings() {
             let target = scene
                 .controls()
                 .into_iter()
-                .find(|n| n.node.semantics.as_ref().unwrap().label == "Space: The Brass Relay")
+                .find(|n| n.node.semantics.as_ref().unwrap().label == "Edit Space: The Brass Relay")
                 .unwrap()
                 .origin;
             let epoch = client.epoch();
             for (phase, position, at) in [
                 (Down, [from[0] + 30., from[1] + 40.], 100),
-                (Move, [target[0] + 100., target[1] + 20.], 200),
-                (Up, [target[0] + 100., target[1] + 20.], 300),
+                (Move, [target[0] + 24., target[1] + 24.], 200),
+                (Up, [target[0] + 24., target[1] + 24.], 300),
             ] {
                 client
                     .pointer_at(

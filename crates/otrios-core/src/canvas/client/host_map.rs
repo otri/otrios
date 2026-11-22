@@ -206,22 +206,23 @@ impl Client {
             _ => None,
         }
     }
-    fn map_admin(&self, id: &str) -> bool {
+    pub(super) fn map_admin(&self, id: &str) -> bool {
         self.spaces.snapshot().is_some_and(|s| {
-            s.spaces
-                .iter()
-                .any(|s| s.id == id && s.role == Some(Role::Admin))
+            s.identity.is_some()
+                && s.spaces
+                    .iter()
+                    .any(|s| s.id == id && s.role == Some(Role::Admin))
         })
     }
     pub(super) fn host_map_draggable(&self, id: u32) -> bool {
-        self.host.editing
+        self.host.editing.is_some()
             && match self.map_action_for(id) {
                 Some(
                     HostAction::MapSpace(s)
                     | HostAction::MapApp(s, _)
                     | HostAction::MapDataset(s, _, _)
                     | HostAction::Resize(s),
-                ) => self.map_admin(s),
+                ) => self.host.editing(s) && self.map_admin(s),
                 _ => false,
             }
     }
@@ -357,7 +358,7 @@ impl Client {
                 action,
                 Some(
                     HostAction::Settings(..)
-                        | HostAction::Edit
+                        | HostAction::Edit(_)
                         | HostAction::Page(_)
                         | HostAction::Pane(Pane::Create)
                 )
@@ -365,18 +366,18 @@ impl Client {
                 return Ok(None);
             }
             let kind = match &action {
-                Some(HostAction::MapSpace(s)) if self.host.editing && self.map_admin(s) => {
+                Some(HostAction::MapSpace(s)) if self.host.editing(s) && self.map_admin(s) => {
                     DragKind::Space(s.clone())
                 }
-                Some(HostAction::MapApp(s, a)) if self.host.editing && self.map_admin(s) => {
+                Some(HostAction::MapApp(s, a)) if self.host.editing(s) && self.map_admin(s) => {
                     DragKind::App(s.clone(), a.clone())
                 }
                 Some(HostAction::MapDataset(s, a, cid))
-                    if self.host.editing && self.map_admin(s) =>
+                    if self.host.editing(s) && self.map_admin(s) =>
                 {
                     DragKind::Dataset(s.clone(), a.clone(), cid.clone())
                 }
-                Some(HostAction::Resize(s)) if self.host.editing && self.map_admin(s) => {
+                Some(HostAction::Resize(s)) if self.host.editing(s) && self.map_admin(s) => {
                     DragKind::Resize(s.clone())
                 }
                 _ => DragKind::Pan,
@@ -472,7 +473,6 @@ impl Client {
                 let before = match target {
                     Some(
                         HostAction::MapSpace(s)
-                        | HostAction::SpaceBody(s)
                         | HostAction::MapApp(s, _)
                         | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
@@ -546,7 +546,6 @@ impl Client {
                     }
                     Some(
                         HostAction::MapSpace(s)
-                        | HostAction::SpaceBody(s)
                         | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
                     ) if s == space => None,
@@ -594,7 +593,6 @@ impl Client {
 fn target_space(action: &HostAction) -> Option<&str> {
     match action {
         HostAction::MapSpace(s)
-        | HostAction::SpaceBody(s)
         | HostAction::MapApp(s, _)
         | HostAction::MapDataset(s, _, _)
         | HostAction::Settings(s, _) => Some(s),

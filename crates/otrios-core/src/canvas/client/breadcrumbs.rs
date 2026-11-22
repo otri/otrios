@@ -10,7 +10,9 @@ pub(super) const BASE: u32 = 4_100_100_000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Command {
     Navigate(String),
-    Account,
+    Menu,
+    AddSpace,
+    ReviewDeleted,
     Close,
     Preference(shell_style::Preference),
     Profile,
@@ -27,6 +29,7 @@ pub(super) struct Item {
 pub(super) struct Trail {
     pub items: Vec<Item>,
     pub host: bool,
+    pub admin: bool,
     pub preference: shell_style::Preference,
     pub account_open: bool,
     pub name: String,
@@ -95,7 +98,9 @@ impl Trail {
             })
             .collect::<BTreeMap<_, _>>();
         for command in [
-            Command::Account,
+            Command::Menu,
+            Command::AddSpace,
+            Command::ReviewDeleted,
             Command::Close,
             Command::Profile,
             Command::SignIn,
@@ -117,6 +122,12 @@ impl Trail {
         Ok(Self {
             items,
             host,
+            admin: snapshot.is_some_and(|s| {
+                s.identity.is_some()
+                    && s.spaces
+                        .iter()
+                        .any(|space| space.role == Some(otrios_interfaces::spaces::Role::Admin))
+            }),
             preference: shell_style::Preference::System,
             account_open: false,
             name,
@@ -169,6 +180,46 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         }
     }
     remove_account_actions(root, &mount.ui);
+    if trail.host {
+        fn edit_icons(node: &mut SceneNode, color: [u8; 4]) {
+            let label = node
+                .semantics
+                .as_ref()
+                .map(|s| s.label.as_str())
+                .unwrap_or("");
+            let done = label.starts_with("Done editing Space:");
+            if done || label.starts_with("Edit Space:") {
+                let base = BASE + 1000 + node.id * 3;
+                let points = if done {
+                    vec![[13., 24.], [21., 32.], [35., 16.]]
+                } else {
+                    vec![
+                        [13., 35.],
+                        [15., 28.],
+                        [30., 13.],
+                        [35., 18.],
+                        [20., 33.],
+                        [13., 35.],
+                    ]
+                };
+                node.children = vec![crate::dashboard::components::node(
+                    base,
+                    Rect::new(0., 0., 48., 48.),
+                    Primitive::Path {
+                        points,
+                        width: 2.5,
+                        color,
+                    },
+                )];
+                return;
+            }
+            for child in &mut node.children {
+                edit_icons(child, color);
+            }
+        }
+        edit_icons(root, mount.shell_appearance.palette().text);
+    }
+
     let designer = mount.designer.as_ref().filter(|d| d.focus_layout());
     let palette = mount.shell_appearance.palette();
     let (foreground, divider) = (palette.text, palette.divider);
@@ -309,12 +360,21 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     ));
     let mut account = canvas(
         BASE + 200,
-        Rect::new(width - account_width, -2., account_width, 60.),
+        Rect::new(
+            width - account_width - if trail.admin { 72. } else { 0. },
+            -2.,
+            account_width,
+            60.,
+        ),
         account_children,
     );
-    account.responder = Some(TouchResponder::Activate(Action::AppNavigate(
-        trail.action(&Command::Account),
-    )));
+    account.responder = Some(TouchResponder::Activate(Action::AppNavigate(trail.action(
+        if trail.identity.is_some() {
+            &Command::Profile
+        } else {
+            &Command::SignIn
+        },
+    ))));
     account.semantics = Some(SwitchSemantics {
         label: if trail.identity.is_some() {
             "Profile"
@@ -322,9 +382,34 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
             "Sign in"
         }
         .into(),
-        checked: trail.account_open,
+        checked: false,
     });
     children.push(account);
+    if trail.admin {
+        let mut lines = vec![];
+        for (i, y) in [18., 28., 38.].into_iter().enumerate() {
+            let mut line = crate::dashboard::components::background(
+                BASE + 211 + i as u32,
+                28.,
+                3.,
+                foreground,
+                1.5,
+            );
+            line.frame.x = 16.;
+            line.frame.y = y;
+            line.responder = Some(TouchResponder::PassThrough);
+            lines.push(line);
+        }
+        let mut menu = canvas(BASE + 210, Rect::new(width - 60., -2., 60., 60.), lines);
+        menu.responder = Some(TouchResponder::Activate(Action::AppNavigate(
+            trail.action(&Command::Menu),
+        )));
+        menu.semantics = Some(SwitchSemantics {
+            label: "Spaces menu".into(),
+            checked: trail.account_open,
+        });
+        children.push(menu);
+    }
     let header = canvas(
         BASE + 101,
         Rect::new(24., 24., width.max(1.), header_height),
@@ -419,10 +504,14 @@ fn menu_button(
     node
 }
 pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
-    let Some(trail) = mount.breadcrumbs.as_ref().filter(|t| t.account_open) else {
+    let Some(trail) = mount
+        .breadcrumbs
+        .as_ref()
+        .filter(|t| t.account_open && t.admin)
+    else {
         return;
     };
-    // Paint the current view as an inert backdrop while the account menu owns input.
+    // Paint the current view as an inert backdrop while the Spaces menu owns input.
     for child in &mut root.children {
         child.responder = Some(TouchResponder::PassThrough);
         child.semantics = None;
@@ -430,7 +519,7 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
     let p = mount.shell_appearance.palette();
     let width = 360_f32.min(root.frame.width - 32.).max(240.);
     let x = (root.frame.width - width - 24.).max(8.);
-    let top = (root.frame.height - 300.).clamp(8., 100.);
+    let top = (root.frame.height - 348.).clamp(8., 100.);
     let mut dismiss = canvas(
         BASE + 300,
         Rect::new(0., 0., root.frame.width, root.frame.height),
@@ -440,7 +529,7 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
         trail.action(&Command::Close),
     )));
     dismiss.semantics = Some(SwitchSemantics {
-        label: "Close account menu".into(),
+        label: "Close spaces menu".into(),
         checked: false,
     });
     let mut background =
@@ -451,13 +540,31 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
         text(
             BASE + 302,
             Rect::new(16., 16., width - 32., 32.),
-            &trail.name,
+            "Spaces",
             2,
             p.text,
         ),
+        menu_button(
+            trail,
+            BASE + 330,
+            Rect::new(16., 60., width - 32., 52.),
+            "Add Space",
+            Command::AddSpace,
+            false,
+            p,
+        ),
+        menu_button(
+            trail,
+            BASE + 334,
+            Rect::new(16., 120., width - 32., 52.),
+            "Review Deleted",
+            Command::ReviewDeleted,
+            false,
+            p,
+        ),
         text(
             BASE + 303,
-            Rect::new(16., 62., width - 32., 28.),
+            Rect::new(16., 188., width - 32., 28.),
             "Appearance",
             2,
             p.muted,
@@ -475,42 +582,10 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
         children.push(menu_button(
             trail,
             BASE + 310 + index as u32 * 4,
-            Rect::new(16. + index as f32 * segment, 100., segment - 4., 52.),
+            Rect::new(16. + index as f32 * segment, 228., segment - 4., 52.),
             label,
             Command::Preference(preference),
             trail.preference == preference,
-            p,
-        ));
-    }
-    if trail.identity.is_some() {
-        children.push(menu_button(
-            trail,
-            BASE + 330,
-            Rect::new(16., 176., width - 32., 52.),
-            "Account settings",
-            Command::Profile,
-            false,
-            p,
-        ));
-    }
-    if mount.session_controls && trail.identity.is_some() {
-        children.push(menu_button(
-            trail,
-            BASE + 334,
-            Rect::new(16., 240., width - 32., 52.),
-            "Sign out",
-            Command::SignOut,
-            false,
-            p,
-        ));
-    } else if trail.identity.is_none() && trail.sign_in {
-        children.push(menu_button(
-            trail,
-            BASE + 338,
-            Rect::new(16., 176., width - 32., 52.),
-            "Sign in",
-            Command::SignIn,
-            false,
             p,
         ));
     }
@@ -529,7 +604,7 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
         1 + node.children.iter().map(count).sum::<usize>()
     }
     if count(root) + count(&dismiss) > crate::dashboard::scene::MAX_NODES {
-        // A full admitted app can spend its entire scene budget. Keep account
+        // A full admitted app can spend its entire scene budget. Keep Spaces
         // controls available without retaining a second interactive execution.
         root.children.clear();
         root.children.push(crate::dashboard::components::background(
@@ -548,7 +623,16 @@ impl Client {
             Command::Navigate(path) => {
                 self.navigate(&path)?;
             }
-            Command::Account | Command::Close => {
+            Command::Menu | Command::Close => {
+                if matches!(command, Command::Menu)
+                    && !self
+                        .active
+                        .as_ref()
+                        .and_then(|m| m.breadcrumbs.as_ref())
+                        .is_some_and(|t| t.admin)
+                {
+                    return Ok(false);
+                }
                 if self.active.as_ref().is_some_and(|m| {
                     m.local_modal_open() && !m.breadcrumbs.as_ref().is_some_and(|t| t.account_open)
                 }) {
@@ -556,15 +640,45 @@ impl Client {
                 }
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 if let Some(trail) = &mut m.breadcrumbs {
-                    trail.account_open = matches!(command, Command::Account) && !trail.account_open;
+                    trail.account_open = matches!(command, Command::Menu) && !trail.account_open;
                 }
                 m.invalidate();
             }
             Command::Preference(preference) => {
+                if !self
+                    .active
+                    .as_ref()
+                    .and_then(|m| m.breadcrumbs.as_ref())
+                    .is_some_and(|t| t.admin && t.account_open)
+                {
+                    return Ok(false);
+                }
                 self.set_appearance(
                     preference.name(),
                     self.system_appearance == oib_workspace::Appearance::Dark,
                 )?;
+            }
+            Command::AddSpace | Command::ReviewDeleted => {
+                if !self
+                    .active
+                    .as_ref()
+                    .and_then(|m| m.breadcrumbs.as_ref())
+                    .is_some_and(|t| t.admin)
+                {
+                    return Ok(false);
+                }
+                let pane = if matches!(command, Command::AddSpace) {
+                    super::super::host_ui::Pane::Create
+                } else {
+                    super::super::host_ui::Pane::DeletedSpaces
+                };
+                if let Some(m) = &mut self.active {
+                    if let Some(trail) = &mut m.breadcrumbs {
+                        trail.account_open = false;
+                    }
+                    m.invalidate();
+                }
+                self.open_host_pane(pane)?;
             }
             Command::Profile => {
                 if let Some(m) = &mut self.active {
@@ -600,10 +714,13 @@ impl Client {
         Ok(true)
     }
     pub(super) fn open_profile(&mut self) -> Result<bool> {
-        if self.request_leave(oib_leave::Target::Profile)? {
+        self.open_host_pane(super::super::host_ui::Pane::Profile)
+    }
+    pub(super) fn open_host_pane(&mut self, pane: super::super::host_ui::Pane) -> Result<bool> {
+        if self.request_leave(oib_leave::Target::HostPane(pane.clone()))? {
             return Ok(true);
         }
-        self.host.requested_profile = true;
+        self.host.requested_pane = Some(pane);
         self.show_spaces()
     }
 }
