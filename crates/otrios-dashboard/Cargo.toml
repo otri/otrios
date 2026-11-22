@@ -50,7 +50,7 @@ workspace = true
 [[bin]]
 name = "dashboard-monitoring"
 path = "src/monitoring.rs"
-required-features = ["server"]
+required-features = ["server", "host-sync"]
 
 [[bin]]
 name = "dashboard-direct"

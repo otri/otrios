@@ -26,6 +26,7 @@ pub(super) mod bench_telemetry;
 #[cfg(unix)]
 #[path = "native_worker/local_apps.rs"]
 mod local_apps;
+mod monitoring;
 #[path = "session_client.rs"]
 mod session_client;
 #[cfg(unix)]
@@ -310,52 +311,7 @@ fn authenticated_request(
     url: &str,
     identity: Option<&std::path::Path>,
 ) -> Result<tungstenite::http::Request<()>, String> {
-    let mut request = session_client::request(url)?;
-    if let Some(path) = identity {
-        use std::io::Read;
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-        }
-        let file = options
-            .open(path)
-            .map_err(|_| "Cannot open Frame identity")?;
-        let metadata = file
-            .metadata()
-            .map_err(|_| "Cannot inspect Frame identity")?;
-        if !metadata.is_file() || !(64..=65).contains(&metadata.len()) {
-            return Err("Invalid Frame identity file".into());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            if metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
-                return Err("Frame identity must be private and unlinked".into());
-            }
-        }
-        let mut token = String::new();
-        file.take(66)
-            .read_to_string(&mut token)
-            .map_err(|_| "Cannot read Frame identity")?;
-        let token = token.trim();
-        if token.len() != 64
-            || !token
-                .bytes()
-                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-        {
-            return Err("Invalid Frame identity".into());
-        }
-        request.headers_mut().insert(
-            tungstenite::http::header::AUTHORIZATION,
-            format!("Bearer {token}")
-                .parse()
-                .map_err(|_| "Invalid Frame identity")?,
-        );
-    }
-    Ok(request)
+    session_client::authenticated_request(url, identity)
 }
 fn save_identity(path: &std::path::Path, token: &str) -> Result<(), String> {
     use std::io::Write;
@@ -530,6 +486,25 @@ pub(super) fn state_worker(
     } else {
         mount_local(&mut client, &resources, &entry.app.id, &entry.app.state_ref)?;
     }
+    let mut monitoring_owner = monitoring::Owner::configured();
+    if let Some(owner) = &mut monitoring_owner {
+        match owner.poll(&mut client) {
+            Ok(_) => {
+                client.open(
+                    "app:monitoring/ui",
+                    &admitted
+                        .apps
+                        .iter()
+                        .find(|e| e.app.id == "monitoring")
+                        .ok_or("Monitoring not installed")?
+                        .app
+                        .state_ref,
+                );
+                client.poll_owned_monitoring()?;
+            }
+            Err(error) => eprintln!("Local Monitoring startup: {error}"),
+        }
+    }
     let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
     let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(8);
     let stream_ready = Arc::new(AtomicBool::new(false));
@@ -597,6 +572,7 @@ pub(super) fn state_worker(
     let mut local_update = false;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
+    let mut monitoring_error: Option<String> = None;
     let mut last_online = false;
     let mut composer = Composer::default();
     let mut display_access = Arc::new(AtomicBool::new(true));
@@ -607,6 +583,18 @@ pub(super) fn state_worker(
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
     loop {
+        if let Some(owner) = &mut monitoring_owner {
+            match owner.poll(&mut client) {
+                Ok(changed) => dirty |= changed,
+                Err(error) => {
+                    if monitoring_error.as_deref() != Some(error.as_str()) {
+                        eprintln!("Local Monitoring retained: {error}");
+                        monitoring_error = Some(error);
+                    }
+                }
+            }
+        }
+        dirty |= client.poll_owned_monitoring()?;
         client.set_local_apps_online(
             epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id),
         );

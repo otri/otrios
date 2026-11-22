@@ -185,6 +185,10 @@ pub enum Presentation {
     View {
         frame: [f32; 4],
     },
+    /// App-owned typed Merkle data, projected locally on every host.
+    Monitoring {
+        frame: [f32; 4],
+    },
     Motion {
         /// UI v6: authored stage; older descriptions keep the legacy extent.
         #[serde(default)]

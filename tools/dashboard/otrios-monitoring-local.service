@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Collect Frame-owned Monitoring app data directly from Prometheus
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kiosk
+Group=kiosk
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/otrios-monitoring/collect-monitoring.py --config /etc/otrios-monitoring/config.json
+StateDirectory=otrios-monitoring
+StateDirectoryMode=0700
+TimeoutStartSec=240
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

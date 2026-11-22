@@ -7,12 +7,12 @@ publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_na
 app_imports=SourceFileLoader('otrios_app_imports',str(pathlib.Path(__file__).with_name('process-app-imports.py'))).load_module()
 
 def inputs(repo):
-    exact=['apps/launcher-routes.json','Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt','assets/fonts/noto-emoji/NotoEmoji.ttf','assets/fonts/noto-emoji/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols2-Regular.ttf','assets/fonts/noto-symbols/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols.ttf','assets/fonts/noto-symbols/Symbols-OFL.txt','assets/fonts/openmoji/black-72x72.zip','assets/fonts/openmoji/LICENSE.txt','assets/fonts/openmoji/NOTICE.txt','assets/fonts/openmoji/upstream.json','assets/fonts/openmoji/resource.json','assets/fonts/unicode-emoji/emoji-test-17.0.txt','assets/fonts/unicode-emoji/LICENSE.txt','tools/fonts/generate_emoji.py','tools/fonts/generate_roboto.py','tools/fonts/requirements.txt','tools/fonts/FALLBACKS.md','tools/fonts/emoji-requirements.txt','tools/fonts/EMOJI.md','web/shared/fonts/Emoji.otemo','web/shared/fonts/Emoji.index','web/shared/emoji-reference.mjs']
+    exact=['assets/models/relay-hat.glb','assets/models/relay-hat.glb.json','assets/models/README.md','apps/launcher-routes.json','Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt','assets/fonts/noto-emoji/NotoEmoji.ttf','assets/fonts/noto-emoji/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols2-Regular.ttf','assets/fonts/noto-symbols/OFL.txt','assets/fonts/noto-symbols/NotoSansSymbols.ttf','assets/fonts/noto-symbols/Symbols-OFL.txt','assets/fonts/openmoji/black-72x72.zip','assets/fonts/openmoji/LICENSE.txt','assets/fonts/openmoji/NOTICE.txt','assets/fonts/openmoji/upstream.json','assets/fonts/openmoji/resource.json','assets/fonts/unicode-emoji/emoji-test-17.0.txt','assets/fonts/unicode-emoji/LICENSE.txt','tools/fonts/generate_emoji.py','tools/fonts/generate_roboto.py','tools/fonts/requirements.txt','tools/fonts/FALLBACKS.md','tools/fonts/emoji-requirements.txt','tools/fonts/EMOJI.md','web/shared/fonts/Emoji.otemo','web/shared/fonts/Emoji.index','web/shared/emoji-reference.mjs']
     files=[repo/x for x in exact]
     files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.lz4','.vert','.frag','.txt','.service','.timer','.svg','.ico'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.lz4','.vert','.frag','.txt','.service','.timer','.conf','.svg','.ico'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -53,7 +53,7 @@ def rebuild(config,wanted,activate=True,checks=False):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES','crates','apps','tools','web/shared/fonts']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES','crates','apps','assets','tools','web/shared/fonts','web/shared/model-shaders.mjs']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
@@ -92,7 +92,7 @@ def rebuild(config,wanted,activate=True,checks=False):
             if not (signed/old.name).exists():shutil.copytree(old,signed/old.name)
     installed=source/'installed-bundles'
     run([checker,'compose',source/'apps/catalog.flex',signed,installed,'--key',runtime/'publisher/public.pem','--sign-key',runtime/'publisher/private.pem','--openssl',config['openssl'],'--routes',source/'apps/launcher-routes.json'])
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=installed/'catalog.flex',bundles=installed,bundle_checker=checker)
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=installed/'catalog.flex',bundles=installed,bundle_checker=checker,monitoring=build/'frame-dashboard-monitoring')
     if activate:
         pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
         if config.get('frame'):

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Refresh Frame-owned Monitoring every five minutes
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=5min
+Unit=otrios-monitoring-local.service
+[Install]
+WantedBy=timers.target

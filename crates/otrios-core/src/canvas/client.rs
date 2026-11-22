@@ -9,6 +9,7 @@ mod host_map;
 mod host_moves;
 mod host_panel;
 mod host_transfers;
+mod local_monitoring;
 mod oib_applied_history;
 mod oib_delete;
 mod oib_designer;
@@ -148,6 +149,7 @@ struct Mount {
     stress_workload: Option<StressWorkload>,
     keyboard_pointer: Option<u32>,
     view: Option<Layout>,
+    monitoring: Option<super::monitoring::Snapshot>,
     pad_preview: BTreeMap<u16, Value>,
     order_editing: bool,
     order_drag: Option<OrderDrag>,
@@ -241,6 +243,7 @@ pub struct DesignerUsage {
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
+    pub monitoring: Option<local_monitoring::Usage>,
     pub designer: Option<DesignerUsage>,
     pub oib: Option<super::oib::Info>,
     pub chat: Option<super::chat::Info>,
@@ -302,6 +305,7 @@ pub struct Client {
     ui_cache: VecDeque<(Vec<u8>, Vec<u8>)>,
     ui_cache_hits: u64,
     local: bool,
+    owned_monitoring: Option<local_monitoring::Owned>,
     navigation: Option<(String, String)>,
     catalog: Option<Catalog>,
     catalog_hash: Vec<u8>,
@@ -2234,6 +2238,16 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            monitoring: self
+                .active
+                .as_ref()
+                .and_then(|m| m.monitoring.as_ref())
+                .map(|s| local_monitoring::Usage {
+                    root: hex(&s.root()),
+                    revision: s.head().revision,
+                    generated: s.head().window.generated,
+                    local: self.local,
+                }),
             designer: self.active.as_ref().and_then(|m| {
                 m.designer
                     .as_ref()
@@ -2348,7 +2362,9 @@ impl Client {
             self.navigation = None;
             return;
         }
-        if self.host_active {
+        if self.host_active
+            || self.local && self.active.as_ref().is_some_and(|m| m.monitoring.is_some())
+        {
             return;
         }
         if let Some(r) = &mut self.requested {
@@ -2662,12 +2678,7 @@ impl Client {
                 if epoch != m.epoch {
                     return Ok(false);
                 }
-                if !matches!(m.ui.presentation, Some(Presentation::View { .. })) {
-                    return Err("Undeclared aggregate view".into());
-                }
-                let view = Layout::from_bytes(&bytes)?;
-                view.resolve_slots(&BTreeMap::new())?;
-                m.view = Some(view);
+                m.install_view(&bytes)?;
                 m.invalidate();
                 Ok(true)
             }
@@ -2788,10 +2799,8 @@ impl Client {
                     }
                     if let Some(bytes) = initial_view {
                         match candidate.ui.presentation {
-                            Some(Presentation::View { .. }) => {
-                                let view = Layout::from_bytes(&bytes)?;
-                                view.resolve_slots(&BTreeMap::new())?;
-                                candidate.view = Some(view);
+                            Some(Presentation::View { .. } | Presentation::Monitoring { .. }) => {
+                                candidate.install_view(&bytes)?;
                             }
                             Some(Presentation::Chat) if candidate.binding.is_some() => {
                                 candidate
@@ -4801,6 +4810,37 @@ impl Client {
     }
 }
 impl Mount {
+    fn install_view(&mut self, bytes: &[u8]) -> Result<()> {
+        let view = match self.ui.presentation {
+            Some(Presentation::Monitoring { .. }) => {
+                let snapshot = super::monitoring::Snapshot::from_bytes(bytes)?;
+                if self
+                    .binding
+                    .as_ref()
+                    .is_some_and(|b| b.collection != snapshot.head().feed)
+                {
+                    return Err("Monitoring data belongs to another collection".into());
+                }
+                if self.monitoring.as_ref().is_some_and(|old| {
+                    old.head().feed == snapshot.head().feed
+                        && (old.head().revision > snapshot.head().revision
+                            || old.head().revision == snapshot.head().revision
+                                && old.root() != snapshot.root())
+                }) {
+                    return Err("Stale/equivocal Monitoring view".into());
+                }
+                let view = Layout::from_bytes(&super::monitoring::project(snapshot.data())?)?;
+                self.monitoring = Some(snapshot);
+                view
+            }
+            Some(Presentation::View { .. }) => Layout::from_bytes(bytes)?,
+            _ => return Err("Undeclared aggregate view".into()),
+        };
+        view.resolve_slots(&BTreeMap::new())?;
+        self.view = Some(view);
+        Ok(())
+    }
+
     // Fixed Chat presentation actions are host-owned, including when an older
     // compatible app description does not list newer publication controls.
     fn handler(&self, control: u8) -> Option<Handler> {
@@ -4928,7 +4968,12 @@ impl Mount {
         if self.breadcrumbs.is_none() {
             return self.layout.viewport_policy();
         }
-        if self.chat.is_some() || matches!(self.ui.presentation, Some(Presentation::View { .. })) {
+        if self.chat.is_some()
+            || matches!(
+                self.ui.presentation,
+                Some(Presentation::View { .. } | Presentation::Monitoring { .. })
+            )
+        {
             return ViewportPolicy::Responsive {
                 minimum: [320., 300.],
             };
@@ -5617,7 +5662,7 @@ fn qualify(
                     return Err("Reorder mapping requires a matching wrap in both profiles".into());
                 }
             }
-            Presentation::View { frame } => {
+            Presentation::View { frame } | Presentation::Monitoring { frame } => {
                 if !frame.iter().all(|n| n.is_finite()) || frame[2] <= 0. || frame[3] <= 0. {
                     return Err("Invalid aggregate frame".into());
                 }
@@ -5718,6 +5763,12 @@ fn qualify(
     } else {
         None
     };
+    let initial_monitoring_view =
+        if matches!(ui.presentation, Some(Presentation::Monitoring { .. })) {
+            Some(Layout::from_bytes(&super::monitoring::empty_projection()?)?)
+        } else {
+            None
+        };
     let mut m = Mount {
         chat: matches!(ui.presentation, Some(Presentation::Chat))
             .then(super::chat::Client::default),
@@ -5812,7 +5863,8 @@ fn qualify(
         stress_updates: 0,
         stress_workload: None,
         keyboard_pointer: None,
-        view: None,
+        view: initial_monitoring_view,
+        monitoring: None,
         pad_preview: BTreeMap::new(),
         order_editing: false,
         order_drag: None,
@@ -6109,7 +6161,8 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         }
         append(&mut root, control, &m.ink);
     }
-    if let Some(Presentation::View { mut frame }) = m.ui.presentation
+    if let Some(Presentation::View { mut frame } | Presentation::Monitoring { mut frame }) =
+        m.ui.presentation
         && let Some(view) = &m.view
     {
         if m.breadcrumbs.is_some() {

@@ -80,6 +80,11 @@ def presentation_url(config):
     return urllib.parse.urlunsplit((parsed.scheme,parsed.netloc,'/presentation','',''))
 
 def refresh(config):
+    if config.get('local_data'):
+        raw=collect(config)
+        subprocess.run([config['renderer'],'--collect',config['local_data'],config['feed'],config['producer']],input=raw,check=True,timeout=30)
+        print('COMMITTED local Monitoring / collected '+json.loads(raw)['collected_label'],flush=True)
+        return
     destination=presentation_url(config)
     raw=collect(config)
     output=pathlib.Path(config['output'])

@@ -618,7 +618,9 @@ fn asset_type(path: &str) -> Option<&'static str> {
         }
         "apps/catalog.flex" => Some("application/octet-stream"),
         "manifest.json" => Some("application/json"),
-        "manifest.sig" | "native/armv7/dashboard-native" => Some("application/octet-stream"),
+        "manifest.sig" | "native/armv7/dashboard-native" | "native/armv7/dashboard-monitoring" => {
+            Some("application/octet-stream")
+        }
         _ => None,
     }
 }

@@ -4,7 +4,7 @@ use otrios_interfaces::canvas::{Presentation, Ui};
 pub fn description() -> Ui {
     AppUi::new("monitoring", "Monitoring", super::state::schema())
         .with_breadcrumbs(&[("OTriOS", "home")])
-        .with_presentation(Presentation::View {
+        .with_presentation(Presentation::Monitoring {
             frame: [24., 112., 1232., 680.],
         })
         .build(

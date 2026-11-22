@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Publish Frame Monitoring revisions to the authorized remote server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+User=kiosk
+Group=kiosk
+UMask=0077
+EnvironmentFile=/etc/otrios-monitoring/publish.conf
+ExecStart=/opt/otrios-monitoring/monitoring-tool.py --publish /var/lib/otrios-monitoring/data.merkle ${MONITORING_SESSION} /etc/otrios-monitoring/collector.identity
+StateDirectory=otrios-monitoring
+StateDirectoryMode=0700
+Restart=always
+RestartSec=3
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+[Install]
+WantedBy=multi-user.target

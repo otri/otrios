@@ -107,7 +107,7 @@ fn main() -> Result<()> {
                 })).collect();
                 println!(
                     "{}",
-                    serde_json::json!({"app":entry.app.id,"ui_sha256":canvas::hex(&entry.ui_hash),"controls":controls})
+                    serde_json::json!({"app":entry.app.id,"ui_sha256":canvas::hex(&entry.ui_hash),"controls":controls,"monitoring":client.resource_usage().monitoring})
                 );
                 break;
             }

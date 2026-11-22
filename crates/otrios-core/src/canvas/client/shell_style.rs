@@ -155,7 +155,10 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         preview,
         trail.host,
         false,
-        matches!(mount.ui.presentation, Some(Presentation::View { .. })),
+        matches!(
+            mount.ui.presentation,
+            Some(Presentation::View { .. } | Presentation::Monitoring { .. })
+        ),
         mount.shell_appearance,
         &role,
     );

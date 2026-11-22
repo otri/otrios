@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! One authority, independently persisted app roots and private admission before payloads.
 use super::*;
+#[path = "server_monitoring.rs"]
+mod monitoring_data;
 use otrios_core::canvas::{self, Behavior, Document, Session};
 use otrios_interfaces::canvas::{App as AppContract, ClientMessage, ServerMessage};
 use otrios_interfaces::session::STATE_PROTOCOL;
@@ -26,6 +28,7 @@ struct Package {
     policy: otrios_interfaces::spaces::AppPolicy,
     chat: bool,
     aggregate_view: bool,
+    monitoring: bool,
     ink: bool,
     primary_ref: String,
     code_bytes: Option<u64>,
@@ -54,6 +57,7 @@ pub(super) struct Hub {
     spaces: Option<otrios_core::spaces::Store>,
     collector: Option<otrios_interfaces::spaces::ServiceBinding>,
     collection_views: BTreeMap<String, (Vec<u8>, Vec<u8>)>,
+    monitoring_failed: bool,
     provisioning: bool,
     discovery: otrios_interfaces::spaces::DiscoveryCursor,
     discovery_catalog: Vec<u8>,
@@ -257,6 +261,7 @@ impl Hub {
             spaces: None,
             collector: None,
             collection_views: BTreeMap::new(),
+            monitoring_failed: false,
             provisioning: false,
             discovery: otrios_core::spaces::discovery_cursor().map_err(|e| e.to_string())?,
             discovery_catalog: vec![],
@@ -455,6 +460,13 @@ impl Hub {
         Ok(())
     }
     pub(super) fn set_collector_view(&mut self, identity: &str, bytes: Vec<u8>) -> Result<()> {
+        if self
+            .bundles
+            .get(&self.active)
+            .is_some_and(|b| b.packages.values().any(|p| p.monitoring))
+        {
+            return Err("Monitoring now requires typed app data".into());
+        }
         if bytes.len() > canvas::MAX_BYTES {
             return Err("Collection presentation exceeds transport budget".into());
         }
@@ -485,7 +497,10 @@ impl Hub {
             .insert(collection, (canvas::hash(&bytes), bytes));
         Ok(())
     }
-    fn load_collection_view(&mut self, collection: &str) -> Result<()> {
+    fn load_collection_view(&mut self, collection: &str, monitoring: bool) -> Result<()> {
+        if monitoring {
+            return self.load_monitoring_data(collection);
+        }
         if self.collection_views.contains_key(collection) {
             return Ok(());
         }
@@ -1018,7 +1033,9 @@ impl Hub {
                     let checkpoint = root.join(format!("collection-{}.merkle", collection));
                     let presentation =
                         root.join(format!("collection-{}.presentation.flex", collection));
-                    if package.is_some_and(|p| p.aggregate_view) && !presentation.is_file() {
+                    if package.is_some_and(|p| p.aggregate_view && !p.monitoring)
+                        && !presentation.is_file()
+                    {
                         available = false;
                     }
                     [
@@ -1814,7 +1831,10 @@ impl Hub {
             );
             let aggregate_view = matches!(
                 description.presentation,
-                Some(otrios_interfaces::canvas::Presentation::View { .. })
+                Some(
+                    otrios_interfaces::canvas::Presentation::View { .. }
+                        | otrios_interfaces::canvas::Presentation::Monitoring { .. }
+                )
             );
             if packages
                 .insert(
@@ -1837,6 +1857,10 @@ impl Hub {
                         policy,
                         chat,
                         aggregate_view,
+                        monitoring: matches!(
+                            description.presentation,
+                            Some(otrios_interfaces::canvas::Presentation::Monitoring { .. })
+                        ),
                         ink: matches!(
                             description.presentation,
                             Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
@@ -2057,7 +2081,7 @@ impl Hub {
                 let room_key = if let Some(binding) = &binding {
                     self.scoped_room(binding, &p)?;
                     if p.aggregate_view {
-                        self.load_collection_view(&binding.collection)?;
+                        self.load_collection_view(&binding.collection, p.monitoring)?;
                     }
                     collection_room(binding, &p)
                 } else {
@@ -2099,15 +2123,25 @@ impl Hub {
                     None
                 };
                 let initial_view = if p.aggregate_view {
-                    Some(if let Some(b) = &binding {
-                        self.collection_views
-                            .get(&b.collection)
-                            .ok_or("Missing collection presentation")?
-                            .1
-                            .clone()
+                    if let Some(b) = &binding {
+                        if p.monitoring {
+                            self.collection_views
+                                .get(&b.collection)
+                                .map(|v| v.1.clone())
+                        } else {
+                            Some(
+                                self.collection_views
+                                    .get(&b.collection)
+                                    .ok_or("Missing collection presentation")?
+                                    .1
+                                    .clone(),
+                            )
+                        }
+                    } else if p.monitoring {
+                        None
                     } else {
-                        self.view.clone()
-                    })
+                        Some(self.view.clone())
+                    }
                 } else if let Some(chat) = &prepared_chat {
                     Some(chat.chat.prepare()?)
                 } else {

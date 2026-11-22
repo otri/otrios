@@ -381,6 +381,7 @@ async fn peer(
                             && !matches!(
                                 bytes.first(),
                                 Some(&wire::STATE)
+                                    | Some(&otrios_interfaces::monitoring::CHANNEL)
                                     | Some(&otrios_interfaces::spaces::CHANNEL)
                                     | Some(&wire::INK)
                                     | Some(&otrios_interfaces::chat::CHANNEL)
@@ -456,6 +457,48 @@ async fn peer(
                             continue;
                         }
                         match bytes.split_first() {
+                            Some((&otrios_interfaces::monitoring::CHANNEL, payload)) => {
+                                use otrios_core::canvas::monitoring;
+                                if collection_rate.0.elapsed() >= Duration::from_secs(1) {
+                                    collection_rate = (Instant::now(), 0);
+                                }
+                                collection_rate.1 += 1;
+                                if collection_rate.1 > 16
+                                    || payload.len() > monitoring::MAX_PACKET_BYTES
+                                {
+                                    break;
+                                }
+                                let identity = spaces::identity(&app, &key).await;
+                                let reply = if let (Some(identity), Ok(command)) =
+                                    (identity, monitoring::decode_command(payload))
+                                {
+                                    let mut guard = app.apps.lock().await;
+                                    guard
+                                        .as_mut()
+                                        .and_then(|hub| {
+                                            hub.monitoring_publication(&identity, command).ok()
+                                        })
+                                        .unwrap_or(monitoring::Event::Rejected)
+                                } else {
+                                    monitoring::Event::Rejected
+                                };
+                                if matches!(reply, monitoring::Event::Ack { .. }) {
+                                    announce(&app).await;
+                                }
+                                let Ok(payload) = monitoring::encode_event(&reply) else {
+                                    break;
+                                };
+                                if !send(
+                                    &mut output,
+                                    Message::Binary(
+                                        wire::frame(monitoring::CHANNEL, payload).into(),
+                                    ),
+                                )
+                                .await
+                                {
+                                    break;
+                                }
+                            }
                             Some((&otrios_interfaces::spaces::CHANNEL, payload))
                                 if !payload.is_empty()
                                     && payload.len()

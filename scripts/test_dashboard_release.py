@@ -224,6 +224,19 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual(exe.stat().st_size,self.native.stat().st_size)
         self.assertTrue((self.cache/self.id/'dashboard-native').exists())
         self.assertLessEqual(agent.cache_size(self.cache),8*1024*1024)
+    def test_monitoring_tool_is_in_signed_native_closure_and_cached_with_executable_mode(self):
+        from unittest.mock import patch
+        pointer=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,catalog=self.root/'apps/catalog.flex',monitoring=self.native)
+        release=pointer['id']
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(pointer).encode()),release)
+        def fetch(base,path,limit):return (self.out/path.removeprefix('/releases/')).read_bytes()
+        with patch.object(agent,'fetch',side_effect=fetch):
+            agent.qualify('https://example.com',self.cache,self.public,OPENSSL,release)
+        tool=self.cache/release/'dashboard-monitoring'
+        self.assertEqual(tool.read_bytes(),self.native.read_bytes())
+        self.assertEqual(tool.stat().st_mode & 0o777,0o700)
+        tool.write_bytes(tool.read_bytes()+b'changed')
+        with self.assertRaises(ValueError):agent.cached(self.cache,release,self.public,OPENSSL)
     def test_modified_native_bytes_are_rejected(self):
         (self.cache/self.id/'dashboard-native').write_bytes(self.native.read_bytes()+b'changed')
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)

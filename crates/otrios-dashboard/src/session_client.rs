@@ -124,3 +124,55 @@ mod tests {
         assert!(super::request("wss://user:password@otrios.otri.ca/session").is_err());
     }
 }
+
+pub fn authenticated_request(
+    url: &str,
+    identity: Option<&std::path::Path>,
+) -> Result<tungstenite::http::Request<()>, String> {
+    let mut request = request(url)?;
+    if let Some(path) = identity {
+        use std::io::Read;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options
+            .open(path)
+            .map_err(|_| "Cannot open Frame identity")?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| "Cannot inspect Frame identity")?;
+        if !metadata.is_file() || !(64..=65).contains(&metadata.len()) {
+            return Err("Invalid Frame identity file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            if metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
+                return Err("Frame identity must be private and unlinked".into());
+            }
+        }
+        let mut token = String::new();
+        file.take(66)
+            .read_to_string(&mut token)
+            .map_err(|_| "Cannot read Frame identity")?;
+        let token = token.trim();
+        if token.len() != 64
+            || !token
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err("Invalid Frame identity".into());
+        }
+        request.headers_mut().insert(
+            tungstenite::http::header::AUTHORIZATION,
+            format!("Bearer {token}")
+                .parse()
+                .map_err(|_| "Invalid Frame identity")?,
+        );
+    }
+    Ok(request)
+}

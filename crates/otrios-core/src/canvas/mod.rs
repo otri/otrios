@@ -8,6 +8,7 @@ mod device_apps;
 pub mod document;
 mod host_ui;
 pub mod model;
+pub mod monitoring;
 pub mod oib;
 pub mod presentation;
 pub mod profiling;
