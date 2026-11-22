@@ -129,3 +129,49 @@ Relay dialog, and announces only dialog text. Closing restores normal navigation
 without an application error. This qualifies the browser DOM/focus behavior;
 physical iPhone Safari pixels were not retested. Authority, tunnel and Monitoring
 timer remain active; the disposable builder is stopped after builds.
+
+## Focus belongs to the shared responder system
+
+Commit `10d8ba7` replaces browser-owned initial focus, DOM traversal and
+label-based opener restoration with shared first-responder state. Shared modal
+scopes cover Relay, Home panels, the Spaces menu and Designer dialogs. Saved
+openers bind node, semantic label and action, and are discarded when removed or
+rebound. App/Space navigation resets the focus domain. Tab/Shift-Tab traverse the
+shared eligible controls; Enter/Space activate through the existing responder
+ancestry. Software keyboard keys retain the text field as first responder.
+
+The shared effects layer paints visible keyboard focus for native and web.
+Browser fields mirror its visible state above their opaque native editor
+surface. A separate effects layer prevents experiment diagnostic HUDs from
+erasing the focus indicator. Browser focus mirroring observes acknowledged input
+revisions and composition, and does not reclaim an external sign-in dialog.
+These are local presentation changes; sync v40 and release-control v1 remain
+unchanged. Native physical keyboard device discovery was not added.
+
+Focused validation passed:
+
+- `cargo test --locked -p otrios-core --features canvas --lib modal_focus_traverses_restores_and_rejects_rebound_openers`: 1 passed, 592 filtered.
+- `cargo test --locked -p otrios-core --features canvas --test canvas brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handbook`: 1 passed, 69 filtered; four phone-size viewports, scoped traversal and opener restoration.
+- `cargo test --locked -p otrios-core --features canvas --test canvas browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits`: 1 passed, 69 filtered; updated its old profile-button name to the existing Chat identity label.
+- `cargo test --locked -p otrios-core --features canvas --test canvas native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene`: 1 passed, 69 filtered; software keys preserve the text first responder and retained scene.
+- `node scripts/test-text-input.mjs`: 19 passed, including composition, stale projections, explicit shared focus, external dialogs and suppressed synthetic focus/blur.
+- JavaScript syntax checks, Mac publisher/tooling, browser Wasm, Linux authority/checker and ARMv7 release host builds passed. No broad preflight suite was run.
+
+Signed release:
+`d9264ac450ef2cb0e2baa318640e8ba4a21768c55edc37c169e94b8340a9bb54`.
+Full Mac/Linux signed closure verification passed; all 85 independent authority
+files, app contracts and catalog bytes are unchanged. Both release pointers
+match. Baseline `0dc8adaf77cea0e08d8d85dbd9b8dff9a56a897b40af83960f89a8deaf440f96`
+and its compatible authority executable remain available for rollback.
+
+The real public browser automatically loaded the release at 390 × 720 CSS
+pixels. Participants opened with Close focused and only modal controls exposed.
+Tab moved to the user row and wrapped to Close; Enter closed and restored
+Participants. Tab to Identity followed by Enter opened its dialog with visible
+keyboard focus. Tab entered the real name input with its shared visible-focus
+flag, Shift-Tab returned to Close, and Escape restored Identity with keyboard
+focus still visible. Sign in opened the native login dialog; the username field
+retained focus across later live frames. No profile change or message was sent,
+and no application/GPU error was reported. This verifies DOM/focus behavior,
+not physical iPhone Safari pixels or native Frame hardware input. Authority and
+tunnel are active, and the disposable builder is stopped.
