@@ -54,6 +54,7 @@ fn compose(
     private: &Path,
     openssl: &str,
     routes: Option<&Path>,
+    preserve_home: bool,
 ) -> Result<()> {
     use otrios_interfaces::{
         bundle::*,
@@ -203,7 +204,11 @@ fn compose(
                 })
                 .collect(),
         );
-    let bytes = canvas::encode_ui(&ui)?;
+    let bytes = if preserve_home {
+        old_home.file(UI_PATH)?.to_vec()
+    } else {
+        canvas::encode_ui(&ui)?
+    };
     let mut entry = home.clone();
     entry.ui_hash = canvas::hash(&bytes);
     let old_digest = old_home.summary().digest.clone();
@@ -459,8 +464,10 @@ fn main() -> Result<()> {
                 else { bundle::with_revision(current, before.revision().checked_add(1).ok_or("App revision overflow")?)? };
             write_tree(Path::new(&args[3]), &current)
         }
+        Some("refresh") if args.len() == 10 && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
+            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], None, true),
         Some("compose") if (args.len() == 10 || args.len() == 12 && args[10] == "--routes") && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
-            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], args.get(11).map(Path::new)),
+            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], args.get(11).map(Path::new), false),
         Some("inspect") if args.len() == 2 => report(&read_tree(Path::new(&args[1]))?),
         Some("verify") if args.len() == 6 && args[2] == "--key" && args[4] == "--openssl" => {
             let key = bundle_files::public_key(Path::new(&args[3]), false, &args[5])?;
