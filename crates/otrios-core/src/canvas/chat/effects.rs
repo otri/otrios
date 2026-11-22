@@ -639,9 +639,10 @@ struct Particle {
     v: V3,
     initial: Q,
     roll: f32,
+    entered: bool,
 }
-fn contacts(particles: &mut [Particle], radius: f32, impulses: bool) {
-    for _ in 0..if impulses { 4 } else { 24 } {
+fn contacts(particles: &mut [Particle], radius: f32, restitution: f32) {
+    for _ in 0..8 {
         for i in 0..particles.len() {
             let (left, right) = particles.split_at_mut(i + 1);
             let a = &mut left[i];
@@ -661,10 +662,10 @@ fn contacts(particles: &mut [Particle], radius: f32, impulses: bool) {
                 a.p = sub(a.p, correction);
                 b.p = add(b.p, correction);
                 let closing = dot(sub(b.v, a.v), normal);
-                if impulses && closing < 0. {
+                if restitution >= 0. && closing < 0. {
                     // Equal masses, bounded restitution and a little tangential
                     // friction. Collision proxies enclose every rotating vertex.
-                    let impulse = mul(normal, -closing * 0.81);
+                    let impulse = mul(normal, -closing * (1. + restitution) * 0.5);
                     a.v = sub(a.v, impulse);
                     b.v = add(b.v, impulse);
                     let tangent = sub(sub(b.v, a.v), mul(normal, dot(sub(b.v, a.v), normal)));
@@ -729,63 +730,134 @@ fn bodies(
                 v,
                 initial,
                 roll: 0.,
+                entered: false,
             }
         })
         .collect();
-    let dt = 1. / 120.;
-    for _ in 0..(t.min(2.8) / dt).floor() as usize {
-        for p in &mut particles {
-            p.v[1] -= if quiet { 15. } else { 11. } * dt;
-            p.p = add(p.p, mul(p.v, dt));
-            p.roll += p.v[0] * dt / 0.72;
-            if p.p[1] < radius {
-                p.p[1] = radius;
-                p.v[1] = p.v[1].abs() * 0.53;
-                p.v[0] *= 0.78;
-                p.v[2] *= 0.78;
+    contacts(&mut particles, radius, 0.62);
+    let rotations: Vec<_> = values.iter().map(|n| resting(mesh, *n)).collect();
+    let heights: Vec<_> = rotations
+        .iter()
+        .map(|q| {
+            mesh.iter()
+                .flat_map(|f| &f.points)
+                .map(|p| -q.rotate(*p)[1])
+                .fold(0_f32, f32::max)
+        })
+        .collect();
+    let mut targets = vec![[0.; 3]; count];
+    let dt = 1_f32 / 120.;
+    let roll_end = 1.85;
+    let roll_steps = (roll_end / dt).round() as usize;
+    let sample = t.min(3.3) / dt;
+    let steps = sample.floor() as usize;
+    let fraction = sample - steps as f32;
+    let mut before = particles.clone();
+    for step in 0..=steps {
+        if step == roll_steps {
+            // Preserve spatial order instead of pulling the front die through
+            // the following one to reach an index-based result slot.
+            let mut order: Vec<_> = (0..count).collect();
+            order.sort_by(|a, b| {
+                particles[*a].p[1]
+                    .total_cmp(&particles[*b].p[1])
+                    .then(a.cmp(b))
+            });
+            for (row, group) in order.chunks_mut(columns).enumerate() {
+                group.sort_by(|a, b| {
+                    particles[*a].p[0]
+                        .total_cmp(&particles[*b].p[0])
+                        .then(a.cmp(b))
+                });
+                let n = group.len();
+                for (col, i) in group.iter().copied().enumerate() {
+                    targets[i] = [
+                        ((col as f32 - (n as f32 - 1.) * 0.5) * 2.35).clamp(-bound, bound),
+                        heights[i] + row as f32 * 2.7,
+                        0.,
+                    ];
+                }
             }
-            if p.p[0] > bound || (p.p[0] < -bound && p.v[0] < 0.) {
+        }
+        if step == steps {
+            before = particles.clone();
+        }
+        let time = (step + 1) as f32 * dt;
+        let settling = smooth((time - roll_end) / 0.90);
+        let drive = smooth((time - roll_end) / 0.22);
+        for (i, p) in particles.iter_mut().enumerate() {
+            p.v[1] -= if quiet { 15. } else { 11. } * dt * (1. - drive);
+            if step >= roll_steps {
+                let omega = 18.;
+                let acceleration = sub(
+                    mul(sub(targets[i], p.p), omega * omega),
+                    mul(p.v, 2. * omega),
+                );
+                p.v = add(p.v, mul(acceleration, drive * dt));
+                let speed = dot(p.v, p.v).sqrt();
+                if speed > 12. {
+                    p.v = mul(p.v, 12. / speed);
+                }
+            }
+            p.p = add(p.p, mul(p.v, dt));
+            // Lock the source orientation once. Blending toward a fixed result
+            // from a still-spinning quaternion can flip its shortest-arc sign.
+            if step < roll_steps {
+                p.roll += p.v[0] * dt / 0.72;
+            }
+            let support = mix(radius, heights[i], settling);
+            if p.p[1] < support {
+                p.p[1] = support;
+                if p.v[1] < 0. {
+                    p.v[1] = -p.v[1] * 0.53 * (1. - settling);
+                }
+                p.v[0] *= mix(0.78, 1., drive);
+                p.v[2] *= mix(0.78, 1., drive);
+            }
+            // A collision may reverse an entering die while it is still off
+            // screen. Do not teleport it to a wall it has not crossed yet.
+            p.entered |= p.p[0] >= -bound;
+            if p.p[0] > bound || (p.entered && p.p[0] < -bound) {
                 p.p[0] = p.p[0].clamp(-bound, bound);
-                p.v[0] *= -0.72;
+                p.v[0] *= -0.72 * (1. - settling);
             }
             if p.p[2].abs() > 2.2 {
                 p.p[2] = p.p[2].clamp(-2.2, 2.2);
                 p.v[2] *= -0.6;
             }
         }
-        contacts(&mut particles, radius, true);
+        // Sleep only after subpixel convergence; this removes residual spring
+        // drift without snapping the visible collision or settling trajectory.
+        if time > 2.8 {
+            for (i, p) in particles.iter_mut().enumerate() {
+                let error = sub(p.p, targets[i]);
+                if dot(error, error) < 0.0005_f32.powi(2) && dot(p.v, p.v) < 0.01_f32.powi(2) {
+                    p.p = targets[i];
+                    p.v = [0.; 3];
+                }
+            }
+        }
+        // Attraction, collision impulses and separation share one fixed-step
+        // state. There is no later position animation overriding the solver.
+        contacts(&mut particles, radius, 0.62 * (1. - settling));
     }
-    let settle = smooth((t - 1.85) / 0.95);
-    let rotations: Vec<_> = values.iter().map(|n| resting(mesh, *n)).collect();
-    for (i, p) in particles.iter_mut().enumerate() {
-        let target_x = (i % columns) as f32 - (columns as f32 - 1.) * 0.5;
-        let rest_height = mesh
-            .iter()
-            .flat_map(|f| &f.points)
-            .map(|p| -rotations[i].rotate(*p)[1])
-            .fold(0_f32, f32::max);
-        p.p[0] = mix(p.p[0], (target_x * 2.35).clamp(-bound, bound), settle);
-        p.p[1] = mix(
-            p.p[1],
-            rest_height + (rows - 1 - i / columns) as f32 * 2.4,
-            settle,
-        );
-        p.p[2] = mix(p.p[2], 0., settle);
-    }
-    // Keep the entire transition into the authoritative result layout clear of
-    // intersections too; independent interpolation would undo the simulation.
-    contacts(&mut particles, radius, false);
-    particles
+    let settle = smooth((t - roll_end) / 0.90);
+    before
         .into_iter()
+        .zip(particles)
         .enumerate()
-        .map(|(i, p)| Body {
-            center: p.p,
-            rotation: Q::axis(norm([0.12, 0.17, -1.]), p.roll)
-                .product(p.initial)
-                .blend(rotations[i], settle),
-            floor,
-            scale,
-            alpha: (1. - (t - 3.55).max(0.) / 0.75).clamp(0., 1.),
+        .map(|(i, (a, b))| {
+            let center = std::array::from_fn(|j| mix(a.p[j], b.p[j], fraction));
+            let roll = mix(a.roll, b.roll, fraction);
+            Body {
+                center,
+                rotation: Q::axis(norm([0.12, 0.17, -1.]), roll)
+                    .product(a.initial)
+                    .blend(rotations[i], settle),
+                floor,
+                scale,
+                alpha: (1. - (t - 3.55).max(0.) / 0.75).clamp(0., 1.),
+            }
         })
         .collect()
 }
@@ -908,6 +980,13 @@ fn face_number(canvas: &mut Canvas, body: &Body, face: &Face, sides: u8, alpha: 
         }
     }
 }
+fn facing_camera(body: &Body, face: &Face) -> bool {
+    let center = add(body.rotation.rotate(face.center), body.center);
+    dot(
+        body.rotation.rotate(face.normal),
+        sub([0., 0., 12.], center),
+    ) > 0.
+}
 fn dice(
     canvas: &mut Canvas,
     seed: u32,
@@ -952,13 +1031,26 @@ fn dice(
     for (index, body) in bodies.iter().enumerate() {
         for face in mesh {
             let normal = body.rotation.rotate(face.normal);
-            if normal[2] > 0.025 {
+            if facing_camera(body, face) {
                 let z = body.rotation.rotate(face.center)[2] + body.center[2];
                 faces.push((z, index, face, normal));
             }
         }
     }
-    faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Equal enclosing collision spheres are disjoint. Their projected overlap
+    // has a consistent near/far order, so paint each convex die as a whole.
+    // Interleaving individual faces by average Z can swap patches during a
+    // close pass even when the solids never intersect.
+    faces.sort_by(|a, b| {
+        let distance = |i: usize| {
+            let d = sub([0., 0., 12.], bodies[i].center);
+            dot(d, d)
+        };
+        distance(b.1)
+            .total_cmp(&distance(a.1))
+            .then(a.1.cmp(&b.1))
+            .then(a.0.total_cmp(&b.0))
+    });
     let light = norm([-0.4, 0.75, 1.]);
     for (_, index, face, normal) in faces {
         let body = &bodies[index];
@@ -1005,6 +1097,128 @@ fn dice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn polygon_area(points: &[[f32; 2]]) -> f32 {
+        points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .take(points.len())
+            .map(|(a, b)| a[0] * b[1] - a[1] * b[0])
+            .sum::<f32>()
+            .abs()
+            * 0.5
+    }
+    fn hull(mut points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+        points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+        points.dedup();
+        let mut result: Vec<[f32; 2]> = vec![];
+        for pass in 0..2 {
+            let start = result.len();
+            for p in if pass == 0 {
+                points.clone()
+            } else {
+                points.iter().rev().copied().collect()
+            } {
+                while result.len() >= start + 2 {
+                    let a = result[result.len() - 2];
+                    let b = result[result.len() - 1];
+                    if (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) > 0. {
+                        break;
+                    }
+                    result.pop();
+                }
+                result.push(p);
+            }
+            result.pop();
+        }
+        result
+    }
+    #[test]
+    fn perspective_dice_faces_cover_their_silhouette() {
+        for mesh in [cube(), d20()] {
+            for seed in [1, 19, 42, 77, 99] {
+                for ms in [100, 600, 1200, 1800, 2300, 2800] {
+                    for body in bodies(
+                        seed,
+                        &[1, 6],
+                        mesh,
+                        ms as f32 / 1000.,
+                        [390., 720.],
+                        [195., 550.],
+                        false,
+                    ) {
+                        let points = mesh
+                            .iter()
+                            .flat_map(|f| f.points.iter().map(|p| project(&body, *p, 390.)))
+                            .collect();
+                        let expected = polygon_area(&hull(points));
+                        let actual = mesh
+                            .iter()
+                            .filter(|f| facing_camera(&body, f))
+                            .map(|f| {
+                                polygon_area(
+                                    &f.points
+                                        .iter()
+                                        .map(|p| project(&body, *p, 390.))
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                            .sum::<f32>();
+                        assert!(
+                            (actual - expected).abs() < expected * 0.0002 + 0.01,
+                            "face gap/overdraw: seed={seed} time={ms} actual={actual} silhouette={expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn dice_contact_and_settling_are_temporally_continuous() {
+        for seed in [1, 19, 42, 77, 99, 123, 291, 4294967295] {
+            for mesh in [cube(), d20()] {
+                for count in [2, 10] {
+                    let values: Vec<_> =
+                        (0..count).map(|i| if i % 2 == 0 { 1 } else { 6 }).collect();
+                    let mut previous =
+                        bodies(seed, &values, mesh, 1.6, [390., 720.], [195., 550.], false);
+                    for step in 193..=384 {
+                        let current = bodies(
+                            seed,
+                            &values,
+                            mesh,
+                            step as f32 / 120.,
+                            [390., 720.],
+                            [195., 550.],
+                            false,
+                        );
+                        for (i, (a, b)) in previous.iter().zip(&current).enumerate() {
+                            let d = sub(a.center, b.center);
+                            let cosine = a
+                                .rotation
+                                .0
+                                .iter()
+                                .zip(b.rotation.0)
+                                .map(|(a, b)| a * b)
+                                .sum::<f32>()
+                                .abs()
+                                .min(1.);
+                            let angle = 2. * cosine.acos();
+                            assert!(
+                                dot(d, d).sqrt() < 0.22,
+                                "position pop: seed={seed} step={step} die={i} displacement={}",
+                                dot(d, d).sqrt()
+                            );
+                            assert!(
+                                angle < 0.35,
+                                "rotation pop: seed={seed} step={step} die={i} radians={angle}"
+                            );
+                        }
+                        previous = current;
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn dice_exchange_impulses_and_remain_separated_through_settling() {
         let particle = |x, velocity| Particle {
@@ -1012,9 +1226,10 @@ mod tests {
             v: [velocity, 0., 0.],
             initial: Q::axis([0., 0., 1.], 0.),
             roll: 0.,
+            entered: true,
         };
         let mut pair = [particle(-0.7, 2.), particle(0.7, -2.)];
-        contacts(&mut pair, 1., true);
+        contacts(&mut pair, 1., 0.62);
         assert!(
             pair[0].v[0] < 0. && pair[1].v[0] > 0.,
             "a head-on collision rebounds"
@@ -1065,7 +1280,10 @@ mod tests {
                     .flat_map(|face| &face.points)
                     .map(|p| q.rotate(*p)[1] + body.center[1])
                     .fold(f32::INFINITY, f32::min);
-                assert!(bottom.abs() < 1e-4, "resting die meets its floor");
+                assert!(
+                    bottom.abs() < 1e-4,
+                    "resting die meets its floor: value={value} bottom={bottom}"
+                );
                 let front = mesh
                     .iter()
                     .max_by(|a, b| q.rotate(a.normal)[2].total_cmp(&q.rotate(b.normal)[2]))
