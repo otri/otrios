@@ -74,3 +74,33 @@ test('persistent browser identity readiness is reported without granting account
   assert.equal(h.session.authenticated,false);assert.equal(h.session.browserIdentity,true);
   assert.deepEqual(h.states,[{authenticated:false,browserIdentity:true}]);
 });
+
+test('worker retries older-authority identity discovery and outages before allowing a managed guest join',async()=>{
+  const {readFileSync}=await import('node:fs'),{runInNewContext}=await import('node:vm');
+  const source=readFileSync(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8');
+  const functionSource=name=>{const start=source.indexOf(`function ${name}(`);assert.ok(start>=0);return source.slice(start,source.indexOf('\nfunction ',start+1));};
+  const timers=[],sent=[];let attempts=0,joins=0;
+  const context={stopped:false,browserIdentityReady:false,browserIdentityRefreshPending:false,browserIdentityRetry:null,browserIdentityDelay:1000,
+    transportReady:true,transportEpoch:1,chatSending:false,chatIdentityReady:false,chatIdentityRequested:false,
+    app:{space_managed:()=>true,screen:()=> 'brass-relay',chat_outgoing:()=>{joins++;return new Uint8Array([1]);}},
+    postMessage:message=>sent.push(message),setTimeout:(callback,delay)=>{timers.push({callback,delay});return timers.length;},Math};
+  context.monitoring=new MonitoringSession({fetcher:async()=>{
+    attempts++;if(attempts===1)throw Error('authority restarting');
+    return{ok:false,status:401,json:async()=>({monitoring:false,...(attempts>=10?{browser_identity:true}:{})})};
+  },onStatus:state=>{context.browserIdentityReady=!!state.browserIdentity;}});
+  runInNewContext(`${functionSource('refreshBrowserIdentity')}\n${functionSource('pumpChat')}`,context);
+  const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+  context.refreshBrowserIdentity();context.refreshBrowserIdentity();
+  assert.equal(attempts,1,'only one discovery request may be in flight');
+  await flush();
+  while(!context.browserIdentityReady){
+    context.pumpChat();assert.equal(joins,0,'no guest is minted before its cookie is confirmed');
+    assert.equal(timers.length,1,'one paced retry is queued');
+    const timer=timers.shift();assert.ok(timer.delay>=1000&&timer.delay<=30000);
+    timer.callback();context.refreshBrowserIdentity();await flush();
+  }
+  assert.equal(attempts,10);assert.equal(timers.length,0);
+  context.refreshBrowserIdentity();await flush();assert.equal(attempts,10,'readiness stops discovery retries');
+  context.pumpChat();assert.equal(joins,1);assert.equal(sent.at(-1).type,'chat-send');
+  assert.equal(context.monitoring.authenticated,false,'browser readiness never grants account access');
+});

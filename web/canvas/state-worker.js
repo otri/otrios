@@ -15,7 +15,7 @@ let viewportRevision=0,lastViewportExtent=null,lastTextGeneration=0,lastPaint=0,
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
-let browserIdentityReady=false,chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
+let browserIdentityReady=false,browserIdentityRefreshPending=false,browserIdentityRetry=null,browserIdentityDelay=1000,chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
 let chatLogKey='',spacesSending=false,signingOut=false,transferActor;
 function pumpSpaces(){if(transportReady&&!spacesSending){const bytes=app?.spaces_outgoing();if(bytes){spacesSending=true;postMessage({type:'spaces-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function pumpChat(){
@@ -104,6 +104,19 @@ function applyAuthenticationStatus(state){
       const chromeChanged=app.set_session_controls(authenticated)||accessChanged;
       postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
 }
+// A new worker can briefly reach an older authority during signed cutover.
+// Retry cookie discovery with one request/timer and capped exponential pacing;
+// no guest join is allowed until the current authority confirms readiness.
+function refreshBrowserIdentity(){
+  if(stopped||!monitoring||browserIdentityReady||browserIdentityRefreshPending||browserIdentityRetry!==null)return;
+  browserIdentityRefreshPending=true;
+  monitoring.refresh().catch(()=>monitoring.status({error:'Sign-in status is temporarily unavailable. Retrying…'})).finally(()=>{
+    browserIdentityRefreshPending=false;
+    if(stopped||browserIdentityReady)return;
+    browserIdentityRetry=setTimeout(()=>{browserIdentityRetry=null;refreshBrowserIdentity();},browserIdentityDelay);
+    browserIdentityDelay=Math.min(browserIdentityDelay*2,30000);
+  });
+}
 function connect(){stateOnline=false;transportReady=false;postMessage({type:'transport-ready'});}
 function receiveState(bytes,receivedAt){try{
   const workerReceived=timings?timingNow():0;
@@ -128,7 +141,7 @@ onmessage=async({data:m})=>{try{
     app.set_reduced_motion(!!m.reducedMotion);
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:applyAuthenticationStatus});
-    navigate(m.screen);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
+    navigate(m.screen);connect();refreshBrowserIdentity();
     if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
