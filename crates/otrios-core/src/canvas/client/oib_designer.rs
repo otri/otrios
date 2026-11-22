@@ -210,6 +210,7 @@ pub(super) struct Designer {
     focus_layout: bool,
     workspace_task: Task,
     appearance: Appearance,
+    pub(super) chrome_appearance: Appearance,
     palette_open: bool,
     placement_open: bool,
     layout_bounds: bool,
@@ -273,6 +274,7 @@ impl Clone for Designer {
             focus_layout: self.focus_layout,
             workspace_task: self.workspace_task,
             appearance: self.appearance,
+            chrome_appearance: self.chrome_appearance,
             palette_open: self.palette_open,
             placement_open: self.placement_open,
             layout_bounds: self.layout_bounds,
@@ -350,6 +352,7 @@ impl Designer {
             focus_layout: seed.instance_surface.is_some() && metadata.hierarchy_viewport.is_some(),
             workspace_task: Task::Inspect,
             appearance: Appearance::Dark,
+            chrome_appearance: Appearance::Dark,
             palette_open: false,
             placement_open: false,
             layout_bounds: false,
@@ -589,7 +592,7 @@ impl Designer {
             return Err("Designer object model budget exceeded".into());
         }
         let mut builder = Builder::at(self.next_id);
-        builder.palette = self.appearance.palette();
+        builder.palette = self.chrome_appearance.palette();
         let previous_management = self.management_nodes.clone();
         if structure {
             self.management_nodes.clear();
@@ -909,7 +912,7 @@ impl Designer {
                 }
             }
             .into();
-            *color = self.appearance.palette().text;
+            *color = self.chrome_appearance.palette().text;
         }
         if let Some(node) = find_node(root, oib_workspace::STATUS)
             && let Primitive::Text { value, .. } = &mut node.primitive
@@ -1033,7 +1036,7 @@ impl Designer {
                         FIRST - 9 + i as u32,
                         rect.width,
                         rect.height,
-                        self.appearance.palette().focus,
+                        self.chrome_appearance.palette().focus,
                         0.,
                     );
                     edge.frame = rect;

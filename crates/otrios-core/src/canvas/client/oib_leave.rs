@@ -13,6 +13,8 @@ pub(super) enum Target {
     Back,
     Navigate(String),
     Spaces,
+    Profile,
+    SignOut,
     Open { ui_ref: String, state_ref: String },
 }
 pub(super) struct Pending {
@@ -204,6 +206,12 @@ impl Client {
             Target::Navigate(path) => self.navigate(&path)?,
             Target::Spaces => {
                 self.show_spaces()?;
+            }
+            Target::Profile => {
+                self.open_profile()?;
+            }
+            Target::SignOut => {
+                self.sign_out_requested = true;
             }
             Target::Open { ui_ref, state_ref } => self.open(&ui_ref, &state_ref),
         };

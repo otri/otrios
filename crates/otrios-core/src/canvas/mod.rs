@@ -34,21 +34,6 @@ pub use transport::{
 };
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
-/// Preserve established public links when launcher placement changes.
-pub fn destination<'a>(catalog: &'a Catalog, path: &str) -> Option<&'a CatalogEntry> {
-    catalog
-        .apps
-        .iter()
-        .find(|entry| entry.path == path)
-        .or_else(|| {
-            let app = match path {
-                "test-playground/oib-designer" => "oib-designer",
-                "bundle-counter" => "bundle-counter",
-                _ => return None,
-            };
-            catalog.apps.iter().find(|entry| entry.app.id == app)
-        })
-}
 /// UI schema version is independent of the unchanged state sync protocol.
 pub fn validate_ui_format(ui: &Ui) -> Result<()> {
     if !matches!(

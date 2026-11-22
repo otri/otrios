@@ -33,7 +33,7 @@ fn transfer_fixture() -> Client {
 #[test]
 fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session_commit() {
     let mut client = transfer_fixture();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Counter");
     let right = |client: &Client, label: &str| {
         let scene = client.scene().unwrap();
@@ -137,7 +137,7 @@ fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session
 fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_replacement() {
     for close_early in [false, true] {
         let mut client = transfer_fixture();
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         click(&mut client, "Counter");
         click(&mut client, "Replace Data");
         click(&mut client, "Choose File");
@@ -166,7 +166,7 @@ fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_repla
 fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
     for revoke in [false, true] {
         let mut client = transfer_fixture();
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         click(&mut client, "Counter");
         click(&mut client, "Replace Data");
         click(&mut client, "Choose File");
@@ -197,7 +197,7 @@ fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
 #[test]
 fn app_upload_tile_and_explicit_host_wide_review_precede_import_commit() {
     let mut client = transfer_fixture();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Add app: Household");
     assert!(labels(&client).contains(&"Upload".into()));
     click(&mut client, "Upload");
@@ -259,7 +259,7 @@ fn share_link_is_immutable_and_appears_only_after_confirmed_publication() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Counter");
     click(&mut client, "Share App");
     assert!(!labels(&client).contains(&"Copy link".into()));
@@ -506,12 +506,97 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
     assert!(labels(&client).contains(&"OIB Designer".into()));
     assert!(!labels(&client).contains(&"Home".into()));
     assert!(!labels(&client).contains(&"Counter".into()));
+    let stale = client
+        .scene()
+        .unwrap()
+        .controls()
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Test Playground")
+        })
+        .unwrap()
+        .node
+        .id;
+    let epoch = client.epoch();
+    let profile = client
+        .scene()
+        .unwrap()
+        .controls()
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Profile")
+        })
+        .map(|c| {
+            [
+                c.origin[0] + c.node.frame.width * c.scale / 2.,
+                c.origin[1] + c.node.frame.height * c.scale / 2.,
+            ]
+        })
+        .unwrap();
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    assert!(
+        client
+            .pointer(
+                epoch,
+                PointerEvent {
+                    id: 42,
+                    phase: PointerPhase::Down,
+                    position: profile
+                }
+            )
+            .unwrap()
+    );
+    assert!(!client.effect_vertices().unwrap().is_empty());
+    assert!(!client.set_appearance("system", false).unwrap());
+    assert!(!client.set_appearance("system", true).unwrap());
+    client
+        .pointer(
+            epoch,
+            PointerEvent {
+                id: 42,
+                phase: PointerPhase::Move,
+                position: [0., 0.],
+            },
+        )
+        .unwrap();
+    assert!(client.effect_vertices().unwrap().is_empty());
+    client
+        .pointer(
+            epoch,
+            PointerEvent {
+                id: 42,
+                phase: PointerPhase::Up,
+                position: [0., 0.],
+            },
+        )
+        .unwrap();
+    client.tick(1, 0).unwrap();
+    assert!(client.appearance_is_dark());
+    assert!(labels(&client).contains(&"Test Playground".into()));
+    click(&mut client, "Profile");
+    assert!(!labels(&client).contains(&"Test Playground".into()));
+    assert!(!client.activate(epoch, stale).unwrap());
+    assert!(client.text_inputs().unwrap().is_empty());
+    click(&mut client, "Light");
+    assert_eq!(client.appearance_preference(), "light");
+    assert!(!client.appearance_is_dark());
+    assert_eq!(client.epoch(), epoch);
+    click(&mut client, "Dark");
+    assert!(client.appearance_is_dark());
+    client.back().unwrap();
+    assert_eq!(client.path(), "");
     click(&mut client, "Test Playground");
     assert_eq!(client.path(), "test-playground");
     assert_eq!(client.screen(), "test-playground");
     assert!(labels(&client).contains(&"Counter".into()));
     assert!(!labels(&client).contains(&"OIB Designer".into()));
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     assert!(
         labels(&client)
             .iter()
@@ -540,12 +625,8 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
     receive(&mut client, state);
     assert_eq!(client.path(), "");
     assert!(labels(&client).contains(&"Counter".into()));
-    assert_eq!(
-        destination(&catalog, "test-playground/oib-designer")
-            .unwrap()
-            .path,
-        "oib-designer"
-    );
+    assert!(client.navigate("test-playground/oib-designer").is_err());
+    assert!(client.navigate("bundle-counter").is_err());
     let mut direct = Client::default();
     direct
         .admit_catalog(&encode_catalog(&catalog).unwrap())
@@ -590,7 +671,7 @@ fn home(client: &mut Client) {
 }
 fn open_access(client: &mut Client) {
     home(client);
-    click(client, "Edit");
+    click(client, "Arrange apps");
     click(client, "Space settings: Household");
     click(client, "People & access");
 }
@@ -601,7 +682,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
         let (mut client, _) = fixture(role);
         assert!(client.spaces_ui());
         assert_eq!(
-            labels(&client).iter().any(|l| l == "Edit"),
+            labels(&client).iter().any(|l| l == "Arrange apps"),
             role == Role::Admin
         );
         for viewport in [[1280., 800.], [800., 1280.], [780., 844.]] {
@@ -630,7 +711,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
     client.set_viewport([390., 440.]).unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Counter");
     assert!(client.resource_usage().map_scroll.is_none());
     assert!(client.resource_usage().panel_scroll.as_ref().unwrap().limit[1] > 0.);
@@ -701,7 +782,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     let scene = client.scene().unwrap();
     let settings = scene
         .controls()
@@ -764,7 +845,7 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
 fn local_forms_use_the_shared_keyboard_without_synchronizing_drafts_as_app_data() {
     let (mut client, _) = fixture(Role::Admin);
     home(&mut client);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Add Space");
     click(&mut client, "Space name");
     assert!(client.keyboard_visible());
@@ -1619,7 +1700,10 @@ fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
         assert!(controls.contains(&"Profile".into()));
         assert!(controls.contains(&"Counter".into()));
         assert!(!controls.contains(&"Spaces".into()));
-        assert_eq!(controls.contains(&"Edit".into()), role == Role::Admin);
+        assert_eq!(
+            controls.contains(&"Arrange apps".into()),
+            role == Role::Admin
+        );
         let view = format!("{:?}", client.scene().unwrap());
         assert!(!view.contains("Your Spaces"));
         click(&mut client, "Profile");
@@ -1661,7 +1745,7 @@ fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
 #[test]
 fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Counter");
     let panel = labels(&client);
     for unwanted in ["Rename", "Move...", "Delete App"] {
@@ -1716,7 +1800,7 @@ fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
 #[test]
 fn title_and_corner_keyboard_actions_are_shared_generation_checked_metadata() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     let scene = client.scene().unwrap();
     let resize = scene
         .controls()
@@ -1746,7 +1830,7 @@ fn title_and_corner_keyboard_actions_are_shared_generation_checked_metadata() {
         }
     );
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Space settings: Household");
     click(&mut client, "Custom background color");
     assert!(!labels(&client).contains(&"Close".into()));
@@ -1798,7 +1882,7 @@ fn empty_spaces_are_edit_only_and_cancelled_drags_cannot_write() {
         )
         .unwrap();
     assert!(!labels(&client).contains(&"Space: Household".into()));
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     assert!(labels(&client).contains(&"Space: Household".into()));
     let scene = client.scene().unwrap();
     let title = scene
@@ -1849,7 +1933,7 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     let point = |label: &str| {
         let scene = client.scene().unwrap();
         let nodes = scene.controls();
@@ -2003,7 +2087,7 @@ fn add_app_scrolls_the_complete_installed_list_and_targets_the_last_item() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Add app: Household");
     for unwanted in ["Previous", "Next"] {
         assert!(!labels(&client).contains(&unwanted.into()));
@@ -2083,7 +2167,7 @@ fn oversized_management_lists_use_scrollable_bounded_batches_without_losing_targ
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "All retained data");
     assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
     client.scroll_map(client.epoch(), 1e6).unwrap();
@@ -2172,7 +2256,7 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     assert!(!labels(&client).contains(&"Next".into()));
     assert!(client.resource_usage().map_scroll.unwrap().limit[1] > 4000.);
     client.scroll_map(client.epoch(), 1e6).unwrap();
@@ -2211,7 +2295,7 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
             click(&mut client, "Profile");
             click(&mut client, "Deleted Spaces");
         } else {
-            click(&mut client, "Edit");
+            click(&mut client, "Arrange apps");
             let scene = client.scene().unwrap();
             let id = scene
                 .controls()
@@ -2236,7 +2320,7 @@ fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
 #[test]
 fn transfer_file_picker_scrolls_all_sixty_four_files_without_paging() {
     let mut client = transfer_fixture();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Add app: Household");
     click(&mut client, "Upload");
     click(&mut client, "Choose File");
@@ -2490,7 +2574,7 @@ fn populated_map_keeps_header_footer_and_viewport_fixed_during_scroll() {
         .unwrap();
     let fixed = |client: &Client| {
         let scene = client.scene().unwrap();
-        ["Profile", "Edit"].map(|label| {
+        ["Profile", "Arrange apps"].map(|label| {
             let controls = scene.controls();
             let c = controls
                 .iter()
@@ -2571,7 +2655,7 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
                 .unwrap(),
             )
             .unwrap();
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         let epoch = client.epoch();
         assert!(client.scroll_map(epoch, 100000.).unwrap());
         assert!(!labels(&client).contains(&"Space: Household".into()));
@@ -2679,7 +2763,7 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
             .unwrap(),
         )
         .unwrap();
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     let epoch = client.epoch();
     let scene = client.scene().unwrap();
     let title = scene
@@ -2750,7 +2834,7 @@ fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a
     };
     for delete_space in [false, true] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         if delete_space {
             click(&mut client, "Space settings: Household");
             click(&mut client, "Delete Space");
@@ -2809,7 +2893,7 @@ fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a
 fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_collection() {
     for remove_data in [false, true] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         click(&mut client, "Delete App: Counter in Household");
         assert!(client.spaces_outgoing().unwrap().is_none());
         assert!(labels(&client).contains(&"Remove Data".into()));
@@ -2854,7 +2938,7 @@ fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_coll
         assert!(!format!("{:?}", client.scene().unwrap()).contains("Saved."));
     }
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Delete App: Counter in Household");
     click(&mut client, "Remove Data");
     click(&mut client, "Cancel");
@@ -2872,7 +2956,7 @@ fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_coll
 fn map_delete_review_cannot_follow_generation_changes_or_lost_admin_access() {
     for role in [Role::Admin, Role::Member] {
         let (mut client, _) = fixture(Role::Admin);
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         click(&mut client, "Delete App: Counter in Household");
         let mut changed = snapshot(role, 2);
         changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
@@ -2936,7 +3020,7 @@ fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() 
             let title = if backup { "Earlier Counter" } else { "Counter" };
             let label = format!("{title} (data) in Household");
             assert!(!labels(&client).contains(&label));
-            click(&mut client, "Edit");
+            click(&mut client, "Arrange apps");
             assert!(labels(&client).contains(&label));
             if delete {
                 click(&mut client, &format!("Delete data: {title} in Household"));
@@ -2979,7 +3063,7 @@ fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() 
 #[test]
 fn deleted_space_recovers_from_profile_with_current_admin_access() {
     let (mut client, _) = fixture(Role::Admin);
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     click(&mut client, "Space settings: Household");
     click(&mut client, "Delete Space");
     assert!(client.spaces_outgoing().unwrap().is_none());
@@ -3010,7 +3094,7 @@ fn deleted_space_recovers_from_profile_with_current_admin_access() {
         )
         .unwrap();
     assert!(!labels(&client).contains(&"Space: Household".into()));
-    click(&mut client, "Edit");
+    click(&mut client, "Arrange apps");
     assert!(!labels(&client).contains(&"Space: Household".into()));
     click(&mut client, "Profile");
     click(&mut client, "Deleted Spaces");
@@ -3057,7 +3141,7 @@ fn cross_space_pickup_reviews_modes_publication_and_exact_current_bindings() {
                 .unwrap(),
             )
             .unwrap();
-        click(&mut client, "Edit");
+        click(&mut client, "Arrange apps");
         let id = client
             .scene()
             .unwrap()

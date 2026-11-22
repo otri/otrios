@@ -68,6 +68,7 @@ try{
   await init({module_or_path:wasmModule});const presenter=new CanvasPresentation();presenter.set_emoji_resource(emojiResource.bytes);presenter.set_font(fontResource.bytes,fontResource.hash);timings?.mark('presenterReady');
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let desiredViewport=layoutViewport(innerWidth,innerHeight);
+  let storedAppearance;
   let model=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
   const textInputs=new TextInputs(controlsLayer,m=>command(m));
   function command(m,event,downAt){if(timings&&(['activate','navigate','back'].includes(m.type)||(m.type==='pointer'&&m.args[0]===2)))m.timing=timings.input(event,downAt);if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}const previous=queue.at(-1);if(['text-input','text-scroll','map-scroll'].includes(m.type)&&previous?.type===m.type&&previous.epoch===m.epoch&&previous.id===m.id){if(m.type==='map-scroll')m.delta+=previous.delta;if(m.type==='text-input')m.selectionOnly=!!m.selectionOnly&&!!previous.selectionOnly;queue[queue.length-1]=m;}else queue.push(m);pump();}
@@ -100,7 +101,7 @@ try{
     const width=v?.width||innerWidth,height=v?.height||innerHeight;
     document.documentElement.style.setProperty('--visible-height',`${height}px`);document.documentElement.style.setProperty('--visible-width',`${width}px`);document.documentElement.style.setProperty('--visible-top',`${v?.offsetTop||0}px`);document.documentElement.style.setProperty('--visible-left',`${v?.offsetLeft||0}px`);
     baseViewport=layoutViewport(layoutWidth,layoutHeight,model?.viewportPolicy||{kind:'fit'});
-    if(model)requestViewport(model.presentation==='chat'?chatViewport(width,height):model.presentation==='spaces-map'?chatViewport(width,innerHeight):baseViewport);
+    if(model)requestViewport(model.presentation==='chat'?chatViewport(width,height):baseViewport);
     resize();
   };
   window.visualViewport?.addEventListener('resize',fitVisibleViewport);window.visualViewport?.addEventListener('scroll',fitVisibleViewport);fitVisibleViewport();
@@ -110,6 +111,7 @@ try{
   });
   function accept(f){
     if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',serial:f.serial,documentToken:f.document?.token,presentationToken:f.uiChunks?.token});return;}
+    if(['system','light','dark'].includes(f.appearance)){if(storedAppearance!==f.appearance){try{localStorage.setItem('otrios-appearance',f.appearance);}catch{}storedAppearance=f.appearance;}const resolved=f.appearanceDark?'dark':'light';if(document.documentElement.dataset.appearance!==resolved)document.documentElement.dataset.appearance=resolved;}
     const wasReflow=!!model?.reflow;if(model?.screen!==f.screen||model?.extent?.join('x')!==f.extent.join('x')){presenter.suspend();hudRevision=-1;scrollLabel='';}timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){textInputs.clear();for(const b of controls.values())b.remove();controls.clear();}
@@ -180,7 +182,10 @@ try{
   function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  const start={type:'start',clipboard:!!navigator.clipboard,space:new URL(location.href).searchParams.get('space'),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,layoutViewport:baseViewport,release:initialRelease,screen:restoreScreen()};
+  let appearance='system';try{const saved=localStorage.getItem('otrios-appearance');if(['system','light','dark'].includes(saved))appearance=saved;}catch{}
+  const systemAppearance=matchMedia('(prefers-color-scheme: dark)');
+  systemAppearance.addEventListener('change',()=>worker.postMessage({type:'appearance',preference:model?.appearance||appearance,systemDark:systemAppearance.matches}));
+  const start={type:'start',appearance,systemDark:systemAppearance.matches,clipboard:!!navigator.clipboard,space:new URL(location.href).searchParams.get('space'),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,layoutViewport:baseViewport,release:initialRelease,screen:restoreScreen()};
   try{worker.postMessage(start);}catch(error){
     // Older engines may instantiate Wasm but reject cloning compiled modules.
     if(error.name!=='DataCloneError')throw error;

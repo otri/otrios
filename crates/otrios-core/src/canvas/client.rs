@@ -2,6 +2,7 @@
 //! One admitted app activation. Durable state is authoritative; all client state is RAM only.
 use super::text_viewport::TextViewport;
 use super::*;
+mod breadcrumbs;
 mod host_access;
 mod host_map;
 mod host_moves;
@@ -17,6 +18,7 @@ mod oib_leave;
 mod oib_property_editor;
 mod oib_working_copy;
 mod oib_workspace;
+mod shell_style;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -74,6 +76,7 @@ struct CaptureValidation {
         oib_workspace::Appearance,
     )>,
     backdrop: Option<SceneNode>,
+    breadcrumbs: Option<breadcrumbs::Trail>,
 }
 struct DesignerPreview {
     generation: Option<u64>,
@@ -111,6 +114,8 @@ struct Mount {
     state_ref: String,
     binding: Option<otrios_interfaces::canvas::MountBinding>,
     quit_control: Option<u8>,
+    breadcrumbs: Option<breadcrumbs::Trail>,
+    shell_appearance: oib_workspace::Appearance,
     private: bool,
     session_controls: bool,
     private_access: bool,
@@ -316,6 +321,9 @@ pub struct Client {
     sign_in_requested: bool,
     selected_space: Option<String>,
     managed_transport: bool,
+    shell_preference: shell_style::Preference,
+    system_appearance: oib_workspace::Appearance,
+    pending_appearance: Option<(shell_style::Preference, bool)>,
 }
 impl Client {
     /// Losing the old transport ends the opportunity to confirm its RAM-only
@@ -502,6 +510,36 @@ impl Client {
             }
             mount.invalidate_local_scene();
         }
+        if changed
+            && !self.host_active
+            && let (Some(snapshot), Some(catalog), Some(mount)) = (
+                self.spaces.snapshot(),
+                self.catalog.as_ref(),
+                self.active.as_mut(),
+            )
+            && let Some(previous) = &mount.breadcrumbs
+            && let Some(entry) = catalog
+                .apps
+                .iter()
+                .find(|e| e.app.ui_ref == mount.ui.ui_ref)
+        {
+            let mut next = breadcrumbs::Trail::new(
+                catalog,
+                &entry.app.id,
+                Some(snapshot),
+                self.selected_space.as_deref(),
+                &mount.ui,
+                false,
+            )?;
+            next.account_open = previous.account_open;
+            next.preference = self.shell_preference;
+            next.sign_in = !self.chat_native;
+            if next != *previous {
+                mount.breadcrumbs = Some(next);
+                mount.invalidate();
+                rendered = true;
+            }
+        }
         if self.host_active && self.spaces.snapshot().is_none() {
             self.active = None;
             self.host_active = false;
@@ -663,6 +701,10 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        if self.host.requested_profile {
+            self.host.requested_profile = false;
+            self.host.pane = super::host_ui::Pane::Profile;
+        }
         self.host.routes = self
             .catalog
             .as_ref()
@@ -905,6 +947,31 @@ impl Client {
             },
         )?;
         mount.host_backdrop = rendered.backdrop;
+        mount.shell_appearance = self.shell_preference.resolve(self.system_appearance);
+        if let Some(catalog) = &self.catalog {
+            let app = self
+                .host
+                .collection
+                .as_ref()
+                .map_or("home", |(_, app)| app.as_str());
+            if catalog.apps.iter().any(|entry| entry.app.id == app) {
+                mount.breadcrumbs = Some(breadcrumbs::Trail::new(
+                    catalog,
+                    app,
+                    Some(&snapshot),
+                    self.host
+                        .collection
+                        .as_ref()
+                        .map(|(space, _)| space.as_str()),
+                    &mount.ui,
+                    true,
+                )?);
+            }
+        }
+        if let Some(trail) = &mut mount.breadcrumbs {
+            trail.preference = self.shell_preference;
+            trail.sign_in = !self.chat_native;
+        }
         mount.font = self.font.clone();
         mount.session_controls = self.session_controls;
         mount.private_access = self.private_access;
@@ -1562,6 +1629,36 @@ impl Client {
             .as_ref()
             .and_then(|m| m.chat.as_ref())
             .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())?;
+        if let Some(m) = &self.active {
+            let color = m
+                .shell_appearance
+                .palette()
+                .focus
+                .map(|v| f32::from(v) / 255.);
+            let rgba = [color[0], color[1], color[2], 0.16];
+            let scene = self.scene()?;
+            for id in m.input.pressed_controls() {
+                if let Some(path) = scene.path(id)
+                    && let Some(owner) = path.last()
+                {
+                    let x = owner.origin[0] + 2.;
+                    let y = owner.origin[1] + 2.;
+                    let w = (owner.node.frame.width * owner.scale - 4.).max(0.);
+                    let h = (owner.node.frame.height * owner.scale - 4.).max(0.);
+                    for [x, y] in [
+                        [x, y],
+                        [x + w, y],
+                        [x + w, y + h],
+                        [x, y],
+                        [x + w, y + h],
+                        [x, y + h],
+                    ] {
+                        vertices.extend([x, y]);
+                        vertices.extend(rgba);
+                    }
+                }
+            }
+        }
         if let Some(m) = &self.active
             && m.keyboard.visible
             && let Some(key) = m.keyboard.feedback_key()
@@ -1588,7 +1685,13 @@ impl Client {
                 let w = owner.node.frame.width * owner.scale;
                 let h = owner.node.frame.height * owner.scale;
                 let inset = 2. * owner.scale;
-                let color = [1., 0.86, 0.55, 0.28];
+                let focus = m.shell_appearance.palette().focus;
+                let color = [
+                    f32::from(focus[0]) / 255.,
+                    f32::from(focus[1]) / 255.,
+                    f32::from(focus[2]) / 255.,
+                    0.28,
+                ];
                 for [x, y] in [
                     [x + inset, y + inset],
                     [x + w - inset, y + inset],
@@ -1630,10 +1733,26 @@ impl Client {
         }
         Ok(())
     }
-    /// Signed sizing policy follows the active layout, including private previews.
+    /// Trusted shell density reserves navigation independently of fitted content.
+    /// Responsive apps retain any larger signed minimum.
     pub fn viewport_policy(&self) -> otrios_interfaces::layout::ViewportPolicy {
-        if self.host_active {
-            return otrios_interfaces::layout::ViewportPolicy::Fit;
+        if self.host_active
+            || self
+                .active
+                .as_ref()
+                .is_some_and(|m| m.breadcrumbs.is_some())
+        {
+            let minimum = self
+                .active
+                .as_ref()
+                .and_then(|m| match m.layout.viewport_policy() {
+                    otrios_interfaces::layout::ViewportPolicy::Responsive { minimum } => {
+                        Some([minimum[0].max(1280.), minimum[1].max(800.)])
+                    }
+                    _ => None,
+                })
+                .unwrap_or([1280., 800.]);
+            return otrios_interfaces::layout::ViewportPolicy::Responsive { minimum };
         }
         self.active
             .as_ref()
@@ -1650,7 +1769,8 @@ impl Client {
         }
         let presented_matches = self.host_active
             || self.active.as_ref().is_none_or(|m| {
-                let resize = m.layout.blueprint().composition.is_some()
+                let resize = m.breadcrumbs.is_some()
+                    || m.layout.blueprint().composition.is_some()
                     || m.layout.viewport_policy() != otrios_interfaces::layout::ViewportPolicy::Fit;
                 !resize || m.viewport == viewport
             });
@@ -1674,7 +1794,8 @@ impl Client {
             return Ok(true);
         }
         if let Some(m) = &mut self.active
-            && (m.layout.blueprint().composition.is_some()
+            && (m.breadcrumbs.is_some()
+                || m.layout.blueprint().composition.is_some()
                 || m.layout.viewport_policy() != otrios_interfaces::layout::ViewportPolicy::Fit)
         {
             let old = m.viewport;
@@ -2308,7 +2429,7 @@ impl Client {
                 if path.is_empty() {
                     c.apps.first()
                 } else {
-                    super::destination(c, path)
+                    c.apps.iter().find(|entry| entry.path == path)
                 }
             })
             .ok_or("Unknown admitted destination")?
@@ -2624,6 +2745,24 @@ impl Client {
                             writer: self.writer.ok_or("Missing writer nonce")?,
                         },
                     )?;
+                    candidate.breadcrumbs = Some(breadcrumbs::Trail::new(
+                        self.catalog.as_ref().ok_or("Missing catalog")?,
+                        &e.app.id,
+                        self.spaces.snapshot(),
+                        self.selected_space.as_deref(),
+                        &candidate.ui,
+                        false,
+                    )?);
+                    if let Some(trail) = &mut candidate.breadcrumbs {
+                        trail.preference = self.shell_preference;
+                        trail.sign_in = !self.chat_native;
+                    }
+                    candidate.shell_appearance =
+                        self.shell_preference.resolve(self.system_appearance);
+                    if let Some(designer) = &mut candidate.designer {
+                        designer.chrome_appearance = candidate.shell_appearance;
+                        designer.revision = None;
+                    }
                     candidate.binding = binding;
                     if candidate.binding.is_some() {
                         candidate.quit_control = (0..=u8::MAX).rev().find(|control| {
@@ -2692,6 +2831,9 @@ impl Client {
                             chat.synchronize_document(reader)?;
                         }
                     }
+                    // Qualify the first frame with the selected shell appearance
+                    // and admitted editing policy, before publishing any pixels.
+                    candidate.refresh()?;
                     let scene = resolve_scene(&candidate)?;
                     if let Some(reader) = &mut candidate.text_document {
                         reader.sync(&scene, candidate.font.as_ref())?;
@@ -2919,6 +3061,8 @@ impl Client {
             current.visible = candidate.visible;
             current.view = candidate.view;
             current.quit_control = candidate.quit_control;
+            current.breadcrumbs = candidate.breadcrumbs.clone();
+            current.shell_appearance = candidate.shell_appearance;
             current.sync_designer_preview()?;
             current.visible = selected_values(&current)?;
             current.invalidate();
@@ -3429,6 +3573,20 @@ impl Client {
             event.phase = PointerPhase::Cancel;
             event.position = [0., 0.];
         }
+        if epoch == self.epoch()
+            && self
+                .active
+                .as_ref()
+                .and_then(|m| m.breadcrumbs.as_ref())
+                .is_some_and(|t| t.account_open)
+        {
+            let scene = self.scene()?;
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            let before = m.input.pressed_controls();
+            let delivery = m.input.dispatch_at(scene, event, at);
+            let feedback = before != m.input.pressed_controls();
+            return Ok(self.deliver(delivery, None)? || feedback);
+        }
         if self.host_active
             && let Some(changed) = self.host_map_pointer(epoch, event, at)?
         {
@@ -3613,7 +3771,9 @@ impl Client {
             return Ok(true);
         }
         let prior_action = m.input.drag_action(event.id);
+        let before = m.input.pressed_controls();
         let delivery = m.input.dispatch_at(scene.clone(), event, at);
+        let feedback = before != m.input.pressed_controls();
         let pointer_owned = prior_action.is_some() || m.input.dragging(event.id);
         if event.phase == PointerPhase::Down
             && let Some(Action::AppEvent(control)) = m.input.drag_action(event.id)
@@ -3671,7 +3831,7 @@ impl Client {
         if pad {
             m.pad_preview.clear();
         }
-        let changed = self.deliver(delivery, Some((event.id, pointer_owned)))? || pad;
+        let changed = self.deliver(delivery, Some((event.id, pointer_owned)))? || pad || feedback;
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
@@ -3690,6 +3850,17 @@ impl Client {
         }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
+        }
+        if self
+            .active
+            .as_ref()
+            .and_then(|m| m.breadcrumbs.as_ref())
+            .is_some_and(|t| t.account_open)
+        {
+            if !(breadcrumbs::BASE + 300..breadcrumbs::BASE + 400).contains(&id) {
+                return Ok(false);
+            }
+            return self.deliver(InputRouter::activate(self.scene()?.as_ref(), id), None);
         }
         if !self.host_active
             && let Some(changed) = self.designer_activate(id)?
@@ -3768,6 +3939,14 @@ impl Client {
         }
         match d.action {
             Some(Action::AppNavigate(id)) => {
+                if let Some(command) = self
+                    .active
+                    .as_ref()
+                    .and_then(|m| m.breadcrumbs.as_ref())
+                    .and_then(|trail| trail.command(id))
+                {
+                    return self.shell_command(command);
+                }
                 if self.active.as_ref().is_some_and(Mount::designer_testing) {
                     return Ok(false);
                 }
@@ -4113,6 +4292,14 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if self
+            .active
+            .as_ref()
+            .and_then(|m| m.breadcrumbs.as_ref())
+            .is_some_and(|t| t.account_open)
+        {
+            return self.shell_command(breadcrumbs::Command::Close);
+        }
         if let Some(m) = &mut self.active
             && m.delete_review.is_some()
         {
@@ -4184,6 +4371,11 @@ impl Client {
         Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        if !self.input_busy()
+            && let Some((preference, dark)) = self.pending_appearance.take()
+        {
+            return self.set_appearance(preference.name(), dark);
+        }
         if self.poll_leave()? {
             return Ok(true);
         };
@@ -4817,6 +5009,7 @@ impl Mount {
                 )
             }),
             backdrop: self.host_backdrop.clone(),
+            breadcrumbs: self.breadcrumbs.clone(),
         })
     }
     fn capture_bounds_stable(&self, capture: &CaptureValidation) -> Result<bool> {
@@ -4841,6 +5034,7 @@ impl Mount {
             || self.ui.handlers != capture.handlers
             || (self.private, self.private_access, self.session_controls) != capture.access
             || self.quit_control != capture.quit_control
+            || self.breadcrumbs != capture.breadcrumbs
             || self.binding != capture.binding
             || self.designer.as_ref().map(|d| {
                 (
@@ -5421,6 +5615,8 @@ fn qualify(
         state_ref: state_ref.into(),
         binding: None,
         quit_control: None,
+        breadcrumbs: None,
+        shell_appearance: oib_workspace::Appearance::Dark,
         private,
         session_controls: false,
         private_access: false,
@@ -5654,15 +5850,16 @@ fn resolve_layout_arc(m: &Mount, incremental: bool) -> Result<Arc<Scene>> {
                 .find(|h| matches!(h.operation, Operation::Back))
                 .map(|h| h.control)
         });
-        Arc::new(oib_workspace::project(
+        Arc::new(oib_workspace::project_with_header(
             &scene,
             seed,
             back,
             m.keyboard.visible,
             designer.workspace_task(),
             designer.workspace_mode(),
-            designer.appearance(),
+            m.shell_appearance,
             &m.editor_chrome(),
+            m.breadcrumbs.is_some(),
         )?)
     } else {
         scene
@@ -5736,9 +5933,23 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         }
         append(&mut root, control, &m.ink);
     }
-    if let Some(Presentation::View { frame }) = m.ui.presentation
+    if let Some(Presentation::View { mut frame }) = m.ui.presentation
         && let Some(view) = &m.view
     {
+        if m.breadcrumbs.is_some() {
+            root.frame.width = m.viewport[0];
+            root.frame.height = m.viewport[1];
+            if let Some(backdrop) = root.children.first_mut() {
+                backdrop.frame.width = m.viewport[0];
+                backdrop.frame.height = m.viewport[1];
+            }
+            frame = [
+                24.,
+                112.,
+                (m.viewport[0] - 48.).max(1.),
+                (m.viewport[1] - 136.).max(1.),
+            ];
+        }
         let mut content = view.resolve_slots(&BTreeMap::new())?.root().clone();
         fn remap(n: &mut SceneNode) {
             n.id = n.id.saturating_add(3_000_000_000);
@@ -5852,18 +6063,22 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         disable_oib(&mut root, &m.ui);
     }
     if let Some(control) = m.quit_control
+        && m.breadcrumbs.is_none()
         && m.chat.is_none()
         && !m.designer.as_ref().is_some_and(|d| d.focus_layout())
     {
         host_map::present_breadcrumb(&mut root, m, control);
     }
-    if let Some(designer) = &m.designer {
+    shell_style::present(&mut root, m);
+    breadcrumbs::present(&mut root, m);
+    breadcrumbs::present_account(&mut root, m);
+    if m.designer.is_some() {
         let chrome = m.editor_chrome();
         oib_workspace::present_modal(
             &mut root,
             chrome.modal.as_ref(),
             m.keyboard.visible,
-            designer.appearance(),
+            m.shell_appearance,
         )?;
     }
     let scene = Scene::new(root)?;

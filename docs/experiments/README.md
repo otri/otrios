@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Shared shell — 2026-11-22](shared-shell-2026-11-22.md): canonical breadcrumbs,
+  paired appearances, shared account access, Designer draft/preview isolation and
+  fixed-aspect Monitoring. Signed OrbStack/Web activation; physical Frame deferred.
+
 - [OIB executable library L2 — 2026-11-10](../OIB_LIBRARY_L2.md): bounded typed
   Wasmi component ABI, library-owned Slider, signed guest-only update/rollback
   with unchanged Frame/Web hosts and retained values/overrides.

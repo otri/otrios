@@ -70,7 +70,7 @@ pub fn description() -> Ui {
     .flex_height();
     AppUi::new("oib-designer", "OIB Designer", super::state::description())
         .with_responsive_viewport([800., 480.])
-        .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
+        .with_breadcrumbs(&[("OTriOS", "home")])
         .with_composition(
             column(24., vec![heading(), wide]).flex_height(),
             column(24., vec![heading(), tall]).flex_height(),

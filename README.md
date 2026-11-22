@@ -49,9 +49,10 @@ the same hosts. XR remains a separate later runtime milestone in
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The [launcher collection record](docs/experiments/launcher-collections-2026-11-22.md) covers the consolidated Home and experiment navigation. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
-The proposed [OTriOS design reference](DESIGN.md) selects Brass Relay for dark
-appearance and Home for light appearance, with equivalent Designer navigation
-and capabilities in both. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
+The [OTriOS design reference](DESIGN.md) uses Brass Relay for dark appearance
+and Home for light appearance. The [shared shell](docs/experiments/shared-shell-2026-11-22.md)
+provides consistent breadcrumbs, account access and paired Designer chrome, with
+equivalent commands in both modes. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
 named styles, descriptive variables, Light/Dark modes and state resolution;
 named color styles and Light/Dark variables are enabled in Designer. Library-owned
 styles use stable ownership with exact signed import locks; see the

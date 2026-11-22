@@ -33,7 +33,7 @@ python3 scripts/install-app.py --runtime /PRIVATE/OTriOSDashboard \
 
 That stages a complete signed registry release with unchanged host binaries.
 Add the established `--deploy-config /PRIVATE/config.json` to install on Frame.
-Home discovers the new card; `/bundle-counter` opens it in the browser. The
+Test Playground discovers the new card; `/test-playground/bundle-counter` opens it in the browser. The
 private signing key is never copied to Frame.
 
 Uninstallation uses `--remove bundle-counter` instead of `--bundle`; it removes

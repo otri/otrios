@@ -14,7 +14,7 @@ const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
 const WHITE: [u8; 4] = [255, 254, 250, 255];
-pub(super) const TOP: f32 = 104.;
+pub(super) const TOP: f32 = 176.;
 pub(super) const FOOT: f32 = 80.;
 #[derive(Clone, Debug)]
 pub(in crate::canvas) enum DragKind {
@@ -1392,15 +1392,8 @@ fn map_body<'a>(
     b.actions.extend(content.actions);
     // Only the header masks content. Footer controls float above the edge fade.
     b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
-    if model.collection.is_some() {
-        b.flat(
-            "Back to Home",
-            "< OTriOS",
-            [28., 22., 188., 56.],
-            HostAction::CollectionBack,
-        );
-    } else {
-        b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
+    if !model.routes.contains_key("home") {
+        b.nodes.push(text("OTriOS", [24., 26., 168., 42.], 3.));
     }
     // Profile is appended again here so overflow masking cannot hide it.
     if let Some(identity) = &snapshot.identity {
@@ -1445,19 +1438,34 @@ fn map_body<'a>(
             HostAction::Page(1),
         );
     }
-    if model.editing {
+    if !model.editing {
+        b.nodes.push(text(
+            if model.collection.is_some() {
+                "Apps"
+            } else {
+                "Spaces"
+            },
+            [margin, 116., 240., 36.],
+            2.,
+        ));
+    }
+    if model.editing && model.collection.is_none() {
         b.flat(
             "Add Space",
             "+ Space",
-            [margin, h - 68., 112., 48.],
+            [margin, 112., 140., 48.],
             HostAction::Pane(Pane::Create),
         );
     }
     if any_admin {
         b.flat(
-            if model.editing { "Done" } else { "Edit" },
-            if model.editing { "Done" } else { "Edit" },
-            [w - 100., h - 68., 80., 48.],
+            if model.editing {
+                "Done"
+            } else {
+                "Arrange apps"
+            },
+            if model.editing { "Done" } else { "Arrange" },
+            [w - 180., 112., 152., 48.],
             HostAction::Edit,
         );
     }

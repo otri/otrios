@@ -170,7 +170,9 @@ fn compose(
             entries
                 .iter()
                 .map(|entry| {
-                    let icon = if entry.private {
+                    let icon = if entry.app.id == "oib-designer" {
+                        components::LaunchIcon::Designer
+                    } else if entry.private {
                         components::LaunchIcon::Monitoring
                     } else if entry
                         .app

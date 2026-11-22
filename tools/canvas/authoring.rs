@@ -666,8 +666,12 @@ fn breadcrumb_header(title: &str, ancestors: &[(String, String)]) -> Element {
     let y = (60. - height) / 2.;
     let mut nodes = vec![];
     let mut x = 0.;
-    for (label, app) in ancestors {
-        let caption = format!("< {label}");
+    for (index, (label, app)) in ancestors.iter().enumerate() {
+        if index > 0 {
+            nodes.push(text(">").frame([x, y, 24., height]).font_scale(scale));
+            x += font.text_width(">", scale) + 18.;
+        }
+        let caption = label.clone();
         let width = font.text_width(&caption, scale) + 8.;
         nodes.push(
             canvas(vec![
@@ -683,12 +687,12 @@ fn breadcrumb_header(title: &str, ancestors: &[(String, String)]) -> Element {
     }
     if !ancestors.is_empty() {
         nodes.push(
-            text("•")
+            text(">")
                 .frame([x, y, 24., height])
                 .font_scale(scale)
-                .color(ACCENT),
+                .color(WHITE),
         );
-        x += font.text_width("•", scale) + 18.;
+        x += font.text_width(">", scale) + 18.;
     }
     nodes.push(
         text(title)

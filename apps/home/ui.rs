@@ -39,7 +39,7 @@ pub fn description() -> Ui {
                     "oib-designer",
                     "OIB Designer",
                     "Design components and interfaces",
-                    LaunchIcon::Playground,
+                    LaunchIcon::Designer,
                 ),
                 launch_card(
                     "test-playground",

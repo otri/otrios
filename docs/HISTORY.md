@@ -5,6 +5,13 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Shared shell](experiments/shared-shell-2026-11-22.md), deployed 2026-11-22,
+consolidates route breadcrumbs, account access, paired Light/Dark presentation and
+Designer chrome. Monitoring keeps a fitted 16:10 canvas below the common header.
+Focused scene/WSS checks and signed OrbStack/Web activation passed; physical
+Frame and production browser pixel review remain deferred. State v40/control v1
+and all installed signed app/library authority files are unchanged.
+
 [Executable OIB library L2](OIB_LIBRARY_L2.md), qualified 2026-11-10, adds a
 bounded typed Wasmi component ABI and a library-owned Slider. Signed guest-only
 behavior updates and compatible rollback reuse the Frame/Web/authority hosts.

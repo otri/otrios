@@ -36,6 +36,7 @@ pub(super) const MODAL_LINK_END: u32 = MODAL_LINK_START + 255;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct EditorChrome {
     pub(super) component_name: Option<String>,
+    pub(super) preview_appearance: Appearance,
     pub(super) management: bool,
     pub(super) new_component: bool,
     pub(super) undo: bool,
@@ -86,28 +87,31 @@ pub(super) struct Palette {
     pub(super) text: Color,
     pub(super) muted: Color,
     pub(super) line: Color,
+    pub(super) divider: Color,
     pub(super) selected: Color,
     pub(super) focus: Color,
 }
 pub(super) fn palette(appearance: Appearance) -> Palette {
     match appearance {
         Appearance::Dark => Palette {
-            background: [0, 0, 0, 255],
-            surface: [16, 16, 16, 255],
-            text: [245, 245, 245, 255],
-            muted: [184, 184, 184, 255],
-            line: [112, 112, 112, 255],
-            selected: [245, 245, 245, 255],
-            focus: [255, 255, 255, 255],
+            background: [23, 27, 32, 255],
+            surface: [35, 40, 46, 255],
+            text: [239, 241, 237, 255],
+            muted: [172, 179, 187, 255],
+            line: [112, 122, 132, 255],
+            divider: [66, 73, 81, 255],
+            selected: [216, 183, 117, 255],
+            focus: [216, 183, 117, 255],
         },
         Appearance::Light => Palette {
-            background: [255, 255, 255, 255],
-            surface: [244, 244, 244, 255],
-            text: [21, 21, 21, 255],
-            muted: [82, 82, 82, 255],
-            line: [112, 112, 112, 255],
-            selected: [21, 21, 21, 255],
-            focus: [0, 0, 0, 255],
+            background: [247, 246, 240, 255],
+            surface: [255, 254, 250, 255],
+            text: [44, 50, 43, 255],
+            muted: [109, 116, 105, 255],
+            line: [109, 116, 105, 255],
+            divider: [221, 223, 212, 255],
+            selected: [52, 77, 61, 255],
+            focus: [52, 77, 61, 255],
         },
     }
 }
@@ -174,7 +178,7 @@ fn control(id: u32, frame: Rect, value: &str, selected: bool, tab: bool, p: Pale
             id + 1000,
             Rect::new(2., 2., (frame.width - 4.).max(1.), 44.),
             if selected { p.selected } else { p.surface },
-            5.,
+            12.,
         ));
     }
     children.push(label(
@@ -203,19 +207,29 @@ fn command(id: u32, frame: Rect, value: &str, enabled: bool, p: Palette) -> Scen
         id,
         frame,
         vec![
-            rect(id + 1000, Rect::new(0., 0., frame.width, 48.), p.line, 5.),
+            rect(id + 1000, Rect::new(0., 0., frame.width, 48.), p.line, 12.),
             rect(
                 id + 1100,
                 Rect::new(1., 1., frame.width - 2., 46.),
-                p.surface,
-                4.,
+                if enabled && id == APPLY {
+                    p.focus
+                } else {
+                    p.surface
+                },
+                11.,
             ),
             label(
                 id + 2000,
                 Rect::new(12., 10., frame.width - 24., 28.),
                 value,
                 2,
-                if enabled { p.text } else { p.muted },
+                if enabled && id == APPLY {
+                    p.background
+                } else if enabled {
+                    p.text
+                } else {
+                    p.muted
+                },
             ),
         ],
     );
@@ -653,12 +667,12 @@ fn segment_surface(id: u32, frame: Rect, p: Palette) -> SceneNode {
         id,
         frame,
         vec![
-            rect(id + 1, Rect::new(0., 0., frame.width, 48.), p.line, 7.),
+            rect(id + 1, Rect::new(0., 0., frame.width, 48.), p.line, 12.),
             rect(
                 id + 2,
                 Rect::new(1., 1., frame.width - 2., 46.),
                 p.surface,
-                6.,
+                11.,
             ),
         ],
     );
@@ -678,6 +692,7 @@ fn hide(node: &mut SceneNode) {
 /// exact frames, colors, responders and semantic identities. Inactive viewports
 /// remain findable but carry no current input/paint children.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn project(
     scene: &Scene,
     seed: &Seed,
@@ -687,6 +702,30 @@ pub(super) fn project(
     mode: DesignerMode,
     appearance: Appearance,
     editor: &EditorChrome,
+) -> Result<Scene, String> {
+    project_with_header(
+        scene,
+        seed,
+        back_action,
+        keyboard,
+        task,
+        mode,
+        appearance,
+        editor,
+        false,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(super) fn project_with_header(
+    scene: &Scene,
+    seed: &Seed,
+    back_action: Option<u8>,
+    keyboard: bool,
+    task: Task,
+    mode: DesignerMode,
+    appearance: Appearance,
+    editor: &EditorChrome,
+    global_header: bool,
 ) -> Result<Scene, String> {
     let management = editor.management;
     let metadata = seed.designer.as_ref().ok_or("Missing designer metadata")?;
@@ -716,71 +755,114 @@ pub(super) fn project(
         p.background,
         0.,
     )];
-    let mut preview_back = None;
-    if let Some(original) = back(scene.root(), back_action) {
-        let mut node = original.clone();
-        node.frame = Rect::new(16., 12., 48., 48.);
-        node.primitive = Primitive::Canvas { clip: true };
-        node.children = vec![
-            rect(BASE + 101, Rect::new(0., 0., 48., 48.), p.surface, 6.),
-            label(BASE + 102, Rect::new(16., 10., 28., 28.), "<", 2, p.text),
-        ];
-        preview_back = Some(node);
-    } else if let Some(action) = back_action {
-        let mut node = control(
-            BASE + 30,
-            Rect::new(16., 12., 48., 48.),
-            "<",
-            false,
-            false,
-            p,
-        );
-        node.responder = Some(TouchResponder::Activate(Action::AppEvent(action)));
-        node.semantics = Some(SwitchSemantics {
-            label: "Back to OTriOS".into(),
-            checked: false,
-        });
-        preview_back = Some(node);
-    }
-    let heading_width = (width
-        - 96.
-        - if editor.component_name.is_some() {
-            232.
-        } else {
-            0.
-        })
-    .max(1.);
-    chrome.push(label(
-        BASE + 103,
-        Rect::new(80., 4., heading_width, 40.),
-        editor.component_name.as_deref().unwrap_or("OIB Designer"),
-        3,
-        p.text,
-    ));
-    chrome.push(label(
-        STATUS,
-        Rect::new(80., 42., heading_width, 28.),
-        "All changes applied",
-        2,
-        p.muted,
-    ));
-    if editor.component_name.is_some() {
-        // Scope navigation has no command outline or selected mode treatment.
-        chrome.push(control(
-            BACK_DOCUMENT,
-            Rect::new(width - 232., 12., 216., 48.),
-            "Back to document",
-            false,
-            true,
-            p,
+    let mut y = if global_header {
+        chrome.push(label(
+            BASE + 103,
+            Rect::new(24., 104., (width - 360.).max(1.), 28.),
+            editor.component_name.as_deref().unwrap_or("Document"),
+            2,
+            p.text,
         ));
-    }
-    if let Some(node) = preview_back {
-        chrome.push(node);
-    }
+        chrome.push(label(
+            STATUS,
+            Rect::new(
+                if editor.component_name.is_some() {
+                    24.
+                } else {
+                    (width - 330.).max(24.)
+                },
+                if editor.component_name.is_some() {
+                    140.
+                } else {
+                    104.
+                },
+                (width - 48.).min(306.).max(1.),
+                28.,
+            ),
+            "All changes applied",
+            2,
+            p.muted,
+        ));
+        if editor.component_name.is_some() {
+            chrome.push(control(
+                BACK_DOCUMENT,
+                Rect::new(width - 240., 98., 216., 48.),
+                "Back to document",
+                false,
+                true,
+                p,
+            ));
+            220.
+        } else {
+            184.
+        }
+    } else {
+        let mut preview_back = None;
+        if let Some(original) = back(scene.root(), back_action) {
+            let mut node = original.clone();
+            node.frame = Rect::new(16., 12., 48., 48.);
+            node.primitive = Primitive::Canvas { clip: true };
+            node.children = vec![
+                rect(BASE + 101, Rect::new(0., 0., 48., 48.), p.surface, 6.),
+                label(BASE + 102, Rect::new(16., 10., 28., 28.), "<", 2, p.text),
+            ];
+            preview_back = Some(node);
+        } else if let Some(action) = back_action {
+            let mut node = control(
+                BASE + 30,
+                Rect::new(16., 12., 48., 48.),
+                "<",
+                false,
+                false,
+                p,
+            );
+            node.responder = Some(TouchResponder::Activate(Action::AppEvent(action)));
+            node.semantics = Some(SwitchSemantics {
+                label: "Back to OTriOS".into(),
+                checked: false,
+            });
+            preview_back = Some(node);
+        }
+        let heading_width = (width
+            - 96.
+            - if editor.component_name.is_some() {
+                232.
+            } else {
+                0.
+            })
+        .max(1.);
+        chrome.push(label(
+            BASE + 103,
+            Rect::new(80., 4., heading_width, 40.),
+            editor.component_name.as_deref().unwrap_or("OIB Designer"),
+            3,
+            p.text,
+        ));
+        chrome.push(label(
+            STATUS,
+            Rect::new(80., 42., heading_width, 28.),
+            "All changes applied",
+            2,
+            p.muted,
+        ));
+        if editor.component_name.is_some() {
+            // Scope navigation has no command outline or selected mode treatment.
+            chrome.push(control(
+                BACK_DOCUMENT,
+                Rect::new(width - 232., 12., 216., 48.),
+                "Back to document",
+                false,
+                true,
+                p,
+            ));
+        }
+        if let Some(node) = preview_back {
+            chrome.push(node);
+        }
 
-    let mut x = 16.;
-    let mut y = 104.;
+        104.
+    };
+    let mut x = 24.;
     let mut group_origins = Vec::with_capacity(3);
     for group_width in [288., 192., 192.] {
         if x > 16. && x + group_width > width - 16. {
@@ -811,7 +893,7 @@ pub(super) fn project(
     }
     for (group_id, origin, title) in [
         (BASE + 110, interaction, "Interaction"),
-        (BASE + 120, appearance_at, "Appearance"),
+        (BASE + 120, appearance_at, "Preview appearance"),
     ] {
         chrome.push(label(
             group_id + 3,
@@ -847,9 +929,22 @@ pub(super) fn project(
             p,
         ));
     }
+    let preview_appearance = if global_header {
+        editor.preview_appearance
+    } else {
+        appearance
+    };
     for (index, (id, value, selected)) in [
-        (APPEARANCE_DARK, "Dark", appearance == Appearance::Dark),
-        (APPEARANCE_LIGHT, "Light", appearance == Appearance::Light),
+        (
+            APPEARANCE_DARK,
+            "Dark",
+            preview_appearance == Appearance::Dark,
+        ),
+        (
+            APPEARANCE_LIGHT,
+            "Light",
+            preview_appearance == Appearance::Light,
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -894,7 +989,7 @@ pub(super) fn project(
     chrome.push(rect(
         BASE + 130,
         Rect::new(0., header_height - 1., width, 1.),
-        p.line,
+        p.divider,
         0.,
     ));
     let body_top = header_height + 16.;

@@ -669,7 +669,7 @@ impl Designer {
             return Ok(());
         }
         let width = root.frame.width;
-        let palette = self.appearance.palette();
+        let palette = self.chrome_appearance.palette();
         let mut children = vec![background(KEY_BASE, width, 240., palette.surface, 0.)];
         for key in 0..KEY_COUNT {
             let (row, col, columns): (u16, u16, u16) = match key {

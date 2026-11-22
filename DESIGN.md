@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OTriOS design reference
 
-Date: 2026-11-22. Status: **launcher hierarchy implemented; Designer appearance consolidation proposed**.
-This is the human-readable reference for future OTriOS shell, Designer and base
-2D controls. It does not describe a completed visual cutover. The deployed system
-uses its existing app appearances. The technical contract, resolution rules and
-remaining delivery gates are tracked in [RFC 0037](docs/rfcs/0037-oib-design-system.md).
+Date: 2026-11-22. Status: **shared shell and Designer chrome implemented**.
+This is the human-readable reference for OTriOS shell, Designer and base 2D
+controls. Shared breadcrumbs, account access and paired shell appearances are
+implemented; the full authored control/style catalog remains incremental work.
+The technical contract, resolution rules and remaining delivery gates are tracked
+in [RFC 0037](docs/rfcs/0037-oib-design-system.md).
 
 ## Character
 
@@ -45,23 +46,23 @@ app data remain separate from launcher placement: grouping an experiment must
 not uninstall it, detach its collection or reset its values.
 
 Navigation returns from an experiment to Test Playground, then to its Space/Home.
-Preserve useful direct links when establishing canonical routes. Collection Edit
+Preserve useful direct links when establishing canonical routes. Collection arrangement
 must retain reordering and access to child app information, sharing, export,
 replacement and removal under the same permissions; Home simplification must
 not make those functions unreachable. Apply the same hierarchy in Light/Dark,
 using the selected visual references rather than maintaining two app lists.
 
-## Shared breadcrumb plan
+## Shared breadcrumbs
 
-Status: proposed header behavior; route inventory checked against active signed
-release `3d2531716f051fb9ab0d3382dd0632b50022849247b978322909596c8098a68d`
-on 2026-11-22. This plan does not change the deployed header.
+Implemented in the shared Rust client for all current catalog routes. See the
+[shared shell release record](docs/experiments/shared-shell-2026-11-22.md) for
+build, deployment and acceptance evidence.
 
 Use one global location row, with the account control consistently at its right:
 
-`OTriOS › Current app                                            Profile`
+`OTriOS > Current app                                            Profile`
 
-`OTriOS › Collection › Current app                               Profile`
+`OTriOS > Collection > Current app                               Profile`
 
 Root Home displays `OTriOS`, with Public and Operations as content sections.
 Spaces are omitted from every breadcrumb. The visible path describes only the
@@ -70,30 +71,28 @@ admission and data selection. Ancestor navigation retains that selected Space;
 access checks and discovery visibility continue to apply. Space settings and
 membership remain accessible through their existing management controls.
 
-| Current canonical route | Proposed breadcrumb |
+| Canonical route | Breadcrumb |
 | --- | --- |
 | `/` | **OTriOS** |
-| `/brass-relay` | OTriOS › **The Brass Relay** |
-| `/oib-designer` | OTriOS › **OIB Designer** |
-| `/test-playground` | OTriOS › **Test Playground** |
-| `/test-playground/components` | OTriOS › Test Playground › **Components** |
-| `/test-playground/layouts` | OTriOS › Test Playground › **Layouts** |
-| `/test-playground/long-document` | OTriOS › Test Playground › **Long Document** |
-| `/test-playground/text-panning` | OTriOS › Test Playground › **Text Panning** |
-| `/test-playground/text-input` | OTriOS › Test Playground › **Text Input** |
-| `/test-playground/animations-two-d` | OTriOS › Test Playground › **2D Animations** |
-| `/test-playground/animations-three-d` | OTriOS › Test Playground › **3D Animations** |
-| `/test-playground/bundle-counter` | OTriOS › Test Playground › **Bundle Counter** |
-| `/monitoring` | OTriOS › **Monitoring** |
+| `/brass-relay` | OTriOS > **The Brass Relay** |
+| `/oib-designer` | OTriOS > **OIB Designer** |
+| `/test-playground` | OTriOS > **Test Playground** |
+| `/test-playground/components` | OTriOS > Test Playground > **Components** |
+| `/test-playground/layouts` | OTriOS > Test Playground > **Layouts** |
+| `/test-playground/long-document` | OTriOS > Test Playground > **Long Document** |
+| `/test-playground/text-panning` | OTriOS > Test Playground > **Text Panning** |
+| `/test-playground/text-input` | OTriOS > Test Playground > **Text Input** |
+| `/test-playground/animations-two-d` | OTriOS > Test Playground > **2D Animations** |
+| `/test-playground/animations-three-d` | OTriOS > Test Playground > **3D Animations** |
+| `/test-playground/bundle-counter` | OTriOS > Test Playground > **Bundle Counter** |
+| `/monitoring` | OTriOS > **Monitoring** |
 
-Both legacy aliases use their canonical destination's breadcrumb:
-
-- `/bundle-counter` → `/test-playground/bundle-counter`.
-- `/test-playground/oib-designer` → `/oib-designer`.
+The obsolete `/bundle-counter` and `/test-playground/oib-designer` aliases are
+removed. Use only the canonical routes above; retired Live UI also stays absent.
 
 ### Common behavior and geometry
 
-- Render ancestors as links with one `›` separator; render the final item as the
+- Render ancestors as links with one `>` separator; render the final item as the
   current page title. Each ancestor has a distinct destination. OTriOS opens the
   launcher; a collection crumb opens that collection in the same Space.
   Back follows the nearest
@@ -107,9 +106,9 @@ Both legacy aliases use their canonical destination's breadcrumb:
   divider and account target in both appearances. Keep the header at the viewport
   top. App titles share one scale; body layout and fitted content cannot move the
   header down. Resolve the paired Brass Relay/Home semantic palette.
-- For a long path, collapse intermediate ancestors into a labeled overflow menu
-  while retaining access to the full path. Preserve the current title and usable
-  touch targets. Reflow when the supported viewport cannot fit the remaining row.
+- Current paths fit the supported landscape shell (minimum 1280 × 800 logical
+  units). Before adding longer/deeper paths, provide labeled overflow or reflow
+  while preserving the title and usable touch targets; overflow is not implemented.
 - Use the same Profile/Sign in entry on every app. Place Sign out inside the
   account menu. Chat participants and chat identity remain room-specific actions
   under their existing permissions and identities.
@@ -120,7 +119,7 @@ Both legacy aliases use their canonical destination's breadcrumb:
 
 ### Views within a route
 
-Designer retains `OTriOS › OIB Designer` while Library, Layers and
+Designer retains `OTriOS > OIB Designer` while Library, Layers and
 Inspect switch workspace panels. Its local scope row identifies the current
 document, component and instance; a component name cannot replace the global app
 title. Appearance and Edit/Test remain modes. Apply/Discard and property drafts
@@ -136,22 +135,26 @@ remains outside the breadcrumb path.
 
 Monitoring may preserve a fixed dashboard canvas matching the Frame design,
 scaled proportionally within the area below the shared header. Keep the global
-`OTriOS › Monitoring` row anchored and sized like every other app;
+`OTriOS > Monitoring` row anchored and sized like every other app;
 letterboxing belongs to dashboard content. The account control stays at normal
 header size. Fitting the dashboard must preserve its internal chart arrangement
 and leave header navigation independent of dashboard scaling.
 
-### Delivery order
+### Delivered scope and further qualification
 
-1. Share the location model and header geometry across the launcher, collections,
-   authored apps, Designer and Monitoring; retain current routes, Space context,
-   permissions and leave handling.
-2. Unify account placement and separate app toolbars and Designer scope navigation.
-3. Apply shared type, spacing, control, icon and Light/Dark styles throughout the
-   shell, including panels, dialogs and their interactive states.
-4. Review every route above in both appearances, with matching actions and an
-   authorized/anonymous account where applicable. Check long titles, navigation
-   after refresh/direct links, aliases and Monitoring's fixed canvas separately.
+The shell shares location/account geometry, paired semantic colors, button
+geometry, app icons and separate app toolbars across the current routes. Home and
+Playground use “Arrange apps” rather than a generic Edit action. Designer has its
+own document/component scope, save status and editing commands below the global
+header. The account menu contains System/Light/Dark, account settings and sign-out
+when signed in. Web remembers only the local appearance preference; System follows
+the browser/OS. Native hosts without an appearance signal default to Dark.
+
+Focused scene/protocol checks cover every current route in both modes, matching
+commands and checked state, account barriers and Monitoring fit. Existing leave
+checks and a draft-preservation regression cover Designer. Physical Frame and
+production browser pixel review remain acceptance follow-ups; Frame is offline.
+The complete base-control state/contrast catalog below remains a design target.
 
 ## Shared navigation and functional parity
 
@@ -212,9 +215,9 @@ controls. Several styles can reference the same shared variable intentionally.
 ## Reference palette
 
 These opaque sRGB values map the existing app motifs to shared semantic roles.
-They are consolidation targets, not a completed Designer visual cutover. Validate
-rendered combinations and complete pressed/disabled/selected/focus treatments
-before acceptance, including nested and overridden surfaces.
+The shared shell and Designer chrome use these paired values. The authored
+preview retains its own styles and explicit literals. Complete base-control
+state/contrast qualification remains required, including nested/overridden surfaces.
 
 | Variable | Dark | Light | Role |
 | --- | --- | --- | --- |
@@ -223,6 +226,7 @@ before acceptance, including nested and overridden surfaces.
 | `text_primary` | `#EFF1ED` | `#2C322B` | Main text and icons |
 | `text_secondary` | `#ACB3BB` | `#6D7469` | Descriptions and metadata |
 | `divider_stroke` | `#424951` | `#DDDFD4` | Decorative separation |
+| `control_stroke` | `#707A84` | `#6D7469` | Interactive control boundaries |
 | `action_background` | `#D8B775` | `#344D3D` | Primary action fill |
 | `action_text` | `#171B20` | `#FFFEFA` | Primary action text/icons |
 
@@ -272,7 +276,7 @@ Interactive targets must not overlap. Dense desktop presentations may use a
 separately reviewed density style; never shrink the Frame's controls to fit.
 
 Use the existing Brass Relay button motif as the control reference and Home's
-card/icon treatment for light identity surfaces. Consolidate radii and padding
+card/icon treatment for light identity surfaces. Shared shell controls use a 12-unit radius in both modes. Consolidate padding
 across modes rather than preserving separate per-app recipes. A radius is
 clamped to the available shape. Default strokes are
 1 logical unit, with final device-scale snapping verified on each host.
@@ -288,7 +292,7 @@ viewport; avoid Previous/Next navigation for ordinary inspector content.
 
 | Style | Appearance and behavior |
 | --- | --- |
-| `button.primary` | Solid action background, action text/icon, 8-unit radius |
+| `button.primary` | Solid action background, action text/icon, 12-unit radius |
 | `button.secondary` | Surface background, primary text, visible control stroke |
 | `button.quiet` | Transparent fill, primary text; hover/pressed surface treatment |
 | `field.default` | Surface fill, primary text, secondary placeholder, visible boundary |
@@ -371,5 +375,5 @@ The [Designer design package](docs/oib-designer/README.md) specifies the complet
 workspace and component lifecycle, with stable UX journey IDs, technical contracts,
 a representative control qualification ledger and a disposable tested prototype.
 It targets landscape Frame and desktop authoring; phone portrait is unsupported.
-The Designer appearance consolidation described here remains proposed; it is
-separate from the already deployed Designer authoring capabilities.
+Designer chrome now follows the shared shell palette. Preview appearance remains
+a separate local mode, preserving authored literals and existing style bindings.

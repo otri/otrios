@@ -592,7 +592,7 @@ impl Client {
         // of the denser chat body and keyboard-shortened visual viewport.
         let header_w = self.header_width.unwrap_or(w.max(800.));
         let header_ratio = w / header_w;
-        let header_bottom = 96. * header_ratio;
+        let header_bottom = if self.managed { 176. } else { 96. } * header_ratio;
         let page_w = w - 48. - side;
         let mut p = Paint {
             nodes: vec![],
@@ -658,16 +658,34 @@ impl Client {
         p.rect([24., 95., header_w - 48., 1.], LINE, 0.);
         p.button(
             3,
-            [header_w - 224., 24., 96., 60.],
-            "Members",
-            &format!("{} users", self.members.len()),
+            [
+                if self.managed { 24. } else { header_w - 224. },
+                if self.managed { 112. } else { 24. },
+                if self.managed { 196. } else { 96. },
+                60.,
+            ],
+            "Participants",
+            &format!(
+                "{} {}",
+                self.members.len(),
+                if self.members.len() == 1 {
+                    "participant"
+                } else {
+                    "participants"
+                }
+            ),
             false,
         );
         p.button(
             4,
-            [header_w - 116., 24., 92., 60.],
-            "Edit profile",
-            "You",
+            [
+                if self.managed { 232. } else { header_w - 116. },
+                if self.managed { 112. } else { 24. },
+                if self.managed { 196. } else { 92. },
+                60.,
+            ],
+            "Chat identity",
+            "Chat identity",
             false,
         );
         let mut header = node(

@@ -109,6 +109,10 @@ impl Mount {
             .as_ref()
             .is_some_and(|d| d.drafts.drafts().iter().any(|f| f.dirty));
         oib_workspace::EditorChrome {
+            preview_appearance: self
+                .designer
+                .as_ref()
+                .map_or(oib_workspace::Appearance::Dark, |d| d.appearance()),
             component_name: self
                 .designer
                 .as_ref()

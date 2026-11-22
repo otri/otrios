@@ -346,7 +346,7 @@ impl Client {
             if epoch != self.epoch() || self.host.drag.is_some() {
                 return Ok(None);
             }
-            if event.position[1] < 104. || event.position[1] >= viewport[1] {
+            if event.position[1] < 176. || event.position[1] >= viewport[1] {
                 return Ok(None);
             }
             let action = self.map_action_at(event.position)?;

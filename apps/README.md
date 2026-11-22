@@ -267,15 +267,17 @@ screen declarations requires repacking the complete catalog. Test Playground dec
 
 ## Test Playground navigation
 
-Home contains The Brass Relay, Test Playground and Monitoring. `test-playground/app.rs`
+Home contains The Brass Relay, OIB Designer and Test Playground in Public;
+Monitoring belongs to Operations. `test-playground/app.rs`
 registers its hub and all seven demo screens. Its UI owns their relative route
 names (`components`, `layouts`, `long-document`, `text-panning`, `text-input`,
 `animations-two-d`, `animations-three-d`). Demo package/UI/State identities stay stable;
 the catalog resolves them under `/test-playground/`. Layouts no longer owns the
-reader/panning edges. The shared header shows `< OTriOS < Test Playground • App`;
+reader/panning edges. The shared runtime header shows `OTriOS > Test Playground > App`;
 its two ancestors navigate to `/` and the hub through stable app identities.
 
-`AppUi::with_breadcrumbs` declares those ancestors. The shared authoring header
+`AppUi::with_breadcrumbs` declares standalone preview ancestors. The running client
+derives the common header from signed catalog placement and admission. The shared authoring header
 and outlined controls use `otrios_interfaces::theme` tokens, also consumed by
 runtime-owned presentations and the Monitoring adapter. All seven demos support
 portrait and landscape. The common motion-screen component provides a flexible
@@ -294,10 +296,17 @@ OIB Designer remains a primary destination. If a parent is not attached in a
 Space, its attached children remain reachable at the next available level.
 Placement never changes attachment, admission, collection identity or saved data.
 
-Collection Edit uses the same host app settings, sharing, data export/replacement,
+“Arrange apps” uses the same host app settings, sharing, data export/replacement,
 removal and ordering controls as Home. Retained datasets remain accessible through
-Data. Back follows catalog parents. The previous `/bundle-counter` and
-`/test-playground/oib-designer` links resolve to their current canonical entries.
+Data. Back follows catalog parents. The obsolete `/bundle-counter` and
+`/test-playground/oib-designer` aliases are removed; use
+`/test-playground/bundle-counter` and `/oib-designer`.
+
+Every current route shares the global breadcrumb and account menu. The account
+menu provides System/Light/Dark without changing app values or Designer drafts.
+Designer preview appearance is independent of shell appearance. Monitoring keeps
+its 16:10 content canvas fitted below the unscaled header. See
+[shared shell acceptance](../docs/experiments/shared-shell-2026-11-22.md).
 
 Source-owned routes still come from app navigation. `launcher-routes.json` supplies
 registry placement overrides for an existing route and the independently shipped

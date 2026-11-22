@@ -42,7 +42,7 @@ function sendFrame(){
   const extent=Array.from(app.viewport_size());
   if(lastViewportExtent&&extent.some((value,index)=>value!==lastViewportExtent[index]))viewportRevision++;
   lastViewportExtent=extent;
-  const frame={transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent,viewportPolicy:JSON.parse(app.viewport_policy()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const frame={appearance:app.appearance_preference(),appearanceDark:app.appearance_is_dark(),transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent,viewportPolicy:JSON.parse(app.viewport_policy()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   const chunkMetadata=ui?JSON.parse(app.presentation_frame()):null,chunked=chunkMetadata!==null;
@@ -121,7 +121,7 @@ function navigate(screen){
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
-    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);app.configure_spaces(m.space||undefined);app.set_transfer_host(new URL(hostUrl).origin,true,true,!!m.clipboard);activeRelease=m.release;
+    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_appearance(m.appearance||'system',m.systemDark!==false);app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);app.configure_spaces(m.space||undefined);app.set_transfer_host(new URL(hostUrl).origin,true,true,!!m.clipboard);activeRelease=m.release;
     app.set_reduced_motion(!!m.reducedMotion);
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:applyAuthenticationStatus});
@@ -169,6 +169,7 @@ onmessage=async({data:m})=>{try{
     case 'chat-attachment':changed=app.send_chat_attachment(m.epoch,m.name,m.bytes);break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
+    case 'appearance':app.set_appearance(m.preference,m.systemDark);publish();break;
     case 'navigate':if(updateBusy&&app.catalog_update_pending())break;navigate(m.screen);changed=true;break;
     case 'back':changed=app.back();break;
     case 'text-focus':changed=app.activate(m.epoch,m.id);break;

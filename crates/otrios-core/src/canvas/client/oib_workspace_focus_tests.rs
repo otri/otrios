@@ -174,3 +174,129 @@ fn workspace_mode_preserves_focus_while_pointer_is_captured() {
     assert_eq!(designer.pending_mode, Some(DesignerMode::Test));
     assert!(mount.doc.confirmed());
 }
+
+#[test]
+fn shell_appearance_and_account_preserve_invalid_draft_and_preview_mode() {
+    let (mut client, _authority, _session, id) = focused_width();
+    // This low-level fixture bypasses Client::receive, so supply the same local
+    // shell metadata that an admitted app receives in production.
+    let mount = client.active.as_mut().unwrap();
+    let app_id = mount
+        .ui
+        .ui_ref
+        .strip_prefix("app:")
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap()
+        .to_string();
+    let catalog = otrios_interfaces::canvas::Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![otrios_interfaces::canvas::CatalogEntry {
+            app: otrios_interfaces::canvas::App {
+                id: app_id.clone(),
+                title: "OIB Designer".into(),
+                ui_ref: mount.ui.ui_ref.clone(),
+                state_ref: mount.state_ref.clone(),
+                status: "canvas-app".into(),
+                dependencies: vec![],
+            },
+            path: "oib-designer".into(),
+            private: false,
+            ui_hash: vec![0; 32],
+        }],
+    };
+    mount.breadcrumbs =
+        Some(breadcrumbs::Trail::new(&catalog, &app_id, None, None, &mount.ui, false).unwrap());
+    mount.invalidate();
+    client
+        .admit_catalog(&encode_catalog(&catalog).unwrap())
+        .unwrap();
+    replace(&mut client, id, "invalid");
+    let value = client.typed_value(1).ok();
+    let before = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let selection = before.selection.clone();
+    let preview = before.appearance();
+    client.set_appearance("light", true).unwrap();
+    assert!(!client.appearance_is_dark());
+    assert_eq!(client.typed_value(1).ok(), value);
+    let editor = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(editor.selection, selection);
+    assert_eq!(editor.appearance(), preview);
+    assert!(
+        editor
+            .drafts
+            .draft(&editor_address(2))
+            .unwrap()
+            .error
+            .is_some()
+    );
+    client.shell_command(breadcrumbs::Command::Account).unwrap();
+    assert!(client.text_inputs().unwrap().is_empty());
+    assert!(
+        !client
+            .edit_text_input(client.epoch(), id, &Edit::Commit("stale".into()))
+            .unwrap()
+    );
+    client.back().unwrap();
+    let field = client
+        .text_inputs()
+        .unwrap()
+        .into_iter()
+        .find(|field| field.id == id)
+        .unwrap();
+    assert_eq!(field.value, "invalid");
+    assert!(field.focused);
+    let editor = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(editor.selection, selection);
+    assert_eq!(editor.appearance(), preview);
+    assert!(
+        editor
+            .drafts
+            .draft(&editor_address(2))
+            .unwrap()
+            .error
+            .is_some()
+    );
+    client.configure_spaces(Some(&"a".repeat(32))).unwrap();
+    client.spaces_outgoing().unwrap();
+    let snapshot = otrios_interfaces::spaces::Discovery {
+        version: 1,
+        cursor: otrios_interfaces::spaces::DiscoveryCursor {
+            authority: "c".repeat(32),
+            revision: 1,
+        },
+        generation: 1,
+        catalog: vec![],
+        identity: Some("alice".into()),
+        profile: None,
+        spaces: vec![],
+        selected: None,
+    };
+    client
+        .receive_spaces(
+            &crate::spaces::encode_event(&otrios_interfaces::spaces::Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(snapshot),
+                resync: true,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .breadcrumbs
+            .as_ref()
+            .unwrap()
+            .identity
+            .as_deref(),
+        Some("alice")
+    );
+    assert_eq!(client.typed_value(1).ok(), value);
+    client.shell_command(breadcrumbs::Command::Account).unwrap();
+    client.shell_command(breadcrumbs::Command::Profile).unwrap();
+    assert!(client.active.as_ref().unwrap().leave.is_some());
+}

@@ -39,6 +39,15 @@ impl CanvasApp {
         app.inner.set_software_keyboard(false);
         app
     }
+    pub fn appearance_preference(&self) -> String {
+        self.inner.appearance_preference().into()
+    }
+    pub fn appearance_is_dark(&self) -> bool {
+        self.inner.appearance_is_dark()
+    }
+    pub fn set_appearance(&mut self, preference: &str, system_dark: bool) -> Result<bool, String> {
+        self.inner.set_appearance(preference, system_dark)
+    }
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {
         self.inner.set_viewport([width, height])
     }

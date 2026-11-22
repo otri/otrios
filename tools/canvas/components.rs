@@ -67,6 +67,7 @@ pub fn keyboard() -> Element {
 pub enum LaunchIcon {
     Chat,
     Playground,
+    Designer,
     Components,
     Layouts,
     Document,
@@ -97,6 +98,17 @@ fn launch_icon(kind: LaunchIcon) -> Element {
             circle(TEAL).frame([28., 0., 20., 20.]),
             bar(0., 28., 20., 20.),
             bar(28., 28., 20., 20.),
+        ],
+        LaunchIcon::Designer => vec![
+            bar(2., 2., 44., 4.),
+            bar(2., 42., 44., 4.),
+            bar(2., 2., 4., 44.),
+            bar(42., 2., 4., 44.),
+            bar(12., 12., 24., 4.),
+            bar(12., 12., 4., 24.),
+            bar(12., 32., 24., 4.),
+            bar(32., 12., 4., 24.),
+            circle(TEAL).frame([18., 18., 12., 12.]),
         ],
         LaunchIcon::Components => vec![
             bar(0., 8., 48., 4.),
@@ -163,6 +175,7 @@ fn launch_icon(kind: LaunchIcon) -> Element {
 pub fn app_icon(app: &str) -> Element {
     launch_icon(match app {
         "brass-relay" => LaunchIcon::Chat,
+        "oib-designer" => LaunchIcon::Designer,
         "component-playground" => LaunchIcon::Components,
         "layout-lab" => LaunchIcon::Layouts,
         "layout-document" => LaunchIcon::Document,

@@ -20,7 +20,8 @@ fn summary(value: &str) -> String {
 }
 impl Mount {
     pub(super) fn local_modal_open(&self) -> bool {
-        self.leave.is_some()
+        self.breadcrumbs.as_ref().is_some_and(|t| t.account_open)
+            || self.leave.is_some()
             || self.delete_review.is_some()
             || self
                 .working_copy

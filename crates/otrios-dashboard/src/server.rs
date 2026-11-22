@@ -426,7 +426,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             Ok(catalog) => catalog,
             Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
         };
-        let Some(entry) = otrios_core::canvas::destination(&catalog, screen) else {
+        let Some(entry) = catalog.apps.iter().find(|entry| entry.path == screen) else {
             return failure(StatusCode::NOT_FOUND, "Not found");
         };
         entry.app.title.clone()

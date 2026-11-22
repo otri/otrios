@@ -96,6 +96,7 @@ pub(super) struct Model {
     pub routes: BTreeMap<String, String>,
     pub collection: Option<(String, String)>,
     pub pending_collection: Option<String>,
+    pub requested_profile: bool,
     pub pane: Pane,
     pub page: usize,
     pub map_page: usize,

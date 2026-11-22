@@ -60,10 +60,7 @@ impl Model {
         for space in &mut shown.spaces {
             let original = snapshot.spaces.iter().find(|s| s.id == space.id).unwrap();
             space.apps.retain(|app| self.visible(original, &app.app));
-            if let Some((_, parent)) = &self.collection {
-                if let Some(app) = original.apps.iter().find(|a| a.app == *parent) {
-                    space.name = format!("{} · {}", space.name, app.title);
-                }
+            if self.collection.is_some() {
                 space.retained.clear();
                 space.attached_count = 1;
             }

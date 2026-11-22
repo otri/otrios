@@ -9,6 +9,7 @@ function workerContext(fields){
   if(fields.fake){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
+    app.appearance_preference??=()=> 'system';app.appearance_is_dark??=()=>true;app.set_appearance??=()=>false;
     app.presentation_frame??=()=> 'null';
     app.viewport_policy??=()=>JSON.stringify({kind:'fit'});
     app.control_is_checkbox??=()=>false;app.text_paints??=()=>new Float32Array();app.overlay_paints??=()=>new Float32Array();

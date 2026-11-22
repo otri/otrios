@@ -67,7 +67,7 @@ pub fn description(code: &[u8], step: u16) -> otrios_interfaces::canvas::Ui {
         )
     };
     AppUi::new("bundle-counter", "Bundle Counter", state::schema())
-        .with_breadcrumbs(&[("OTriOS", "home")])
+        .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
         .with_composition(arrangement(), arrangement())
         .with_behavior(code, &[COUNT])
         .build("Bundle Counter", vec![card, increment, reset])

@@ -70,6 +70,22 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
     (result, None)
 }
 impl InputRouter {
+    /// Active buttons whose captured pointer is still within their admitted bounds.
+    pub(crate) fn pressed_controls(&self) -> Vec<NodeId> {
+        self.captures
+            .values()
+            .filter(|c| matches!(c.responder, TouchResponder::Activate(_)))
+            .filter(|c| {
+                c.history.last().is_some_and(|s| {
+                    c.scene
+                        .hit_path(s.position.map(|n| n as f32))
+                        .iter()
+                        .any(|n| n.node.id == c.owner)
+                })
+            })
+            .map(|c| c.owner)
+            .collect()
+    }
     pub fn active(&self) -> bool {
         !self.captures.is_empty()
     }
