@@ -58,3 +58,39 @@ Admin behavior is covered by authenticated-role fixtures; the live admin login
 was not repeated. These browser checks use a desktop engine at phone dimensions,
 not physical iPhone Safari. Logs and acceptance metadata are retained under
 `~/Library/Application Support/OTriOSOrbStack/`.
+
+## Follow-up: scroll edge and pencil alignment
+
+Commit `a4da191` fixes the Space pencil moving incorrectly when its control is
+partly clipped. Its vector paint now exists before scroll clipping adjusts the
+control frame and child offsets. The icon and Space therefore share the same
+translation while the visible target remains clickable.
+
+Home's scrolling viewport now begins at the header divider (y = 96 logical
+pixels); it no longer reserves an empty phone breadcrumb row or the extra
+16-pixel gap. Nested collections retain the second breadcrumb row and meet their
+own divider. Side margins reduce from 16 to 12 on narrow screens and 28 to 24 on
+larger screens. Both scroll edges use a 24-pixel pass-through fade, shown only when
+content is hidden beyond that edge. Fades preserve alpha while taking the current
+Light/Dark background color; the previous 80-pixel bottom fade is removed.
+
+The extended existing scroll-reversal regression passes, including partially
+clipped pencil paint translation, divider alignment, top-fade input pass-through,
+Dark fade color and clearing the fade at the start. The existing admitted-bounds
+and partly-visible-app-through-fade tests also pass (three focused tests total).
+No full suite was run for this follow-up. Mac tooling, release browser Wasm,
+Linux authority/checker and ARMv7 direct host were rebuilt.
+
+Signed release:
+`0eb8d7d9d05d52ae2ba2331be467f8adba9a7fa23e1efa0dfb89f7a6b3fa1ed3`.
+Full signed closure verification passed on Mac and Linux, retaining all 85
+independent authority files, app contracts and catalog bytes. The previous signed
+release and compatible authority executable remain available for rollback.
+
+The live public browser automatically loaded this release at 390 × 440 CSS
+pixels. The first app tile moved from y = 212 to y = 160, matching the removed
+52-pixel gap. A 72-pixel scroll clips the tile's semantic target at y = 96 directly
+under the divider; Sign in stays fixed at y = 22, with no application error.
+The admin pencil's partial-clipping behavior is verified by the shared runtime
+regression; physical iPhone Safari was not retested. Authority, tunnel and
+Monitoring timer remain active, and the disposable builder is stopped.
