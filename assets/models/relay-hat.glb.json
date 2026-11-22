@@ -1,0 +1,15 @@
+{
+  "inputBytes": 2833832,
+  "outputBytes": 249264,
+  "sourceSha256": "04c8e123f7f5cc606f26f291ad32521a53085ee7dd77c03800a6bf913551a8ab",
+  "outputSha256": "8a8ed631656a1e5dbf0cab15c088db1f3c909fc40c9426b5f215a5fc3a38eaa4",
+  "ratio": 0.18,
+  "textureSize": 512,
+  "textureFormat": "JPEG",
+  "textureQuality": 84,
+  "occlusionBaked": true,
+  "meshes": 1,
+  "primitives": 1,
+  "triangles": 8989,
+  "vertices": 5277
+}
