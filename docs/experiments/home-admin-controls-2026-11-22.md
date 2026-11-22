@@ -94,3 +94,33 @@ under the divider; Sign in stays fixed at y = 22, with no application error.
 The admin pencil's partial-clipping behavior is verified by the shared runtime
 regression; physical iPhone Safari was not retested. Authority, tunnel and
 Monitoring timer remain active, and the disposable builder is stopped.
+
+## Follow-up: one gutter for Space spacing and fades
+
+Commit `7edd599` uses one responsive spacing value for the outer gutter, the gap
+between Spaces, and the scroll fade depth: 12 logical pixels on narrow screens,
+24 on larger screens. The first Space starts one gutter below the divider. This
+padding belongs to scrolling content; the viewport still reaches the divider.
+At rest, the future top fade lies entirely over empty gutter. The first one-pixel
+scroll therefore only brings one pixel of the card edge into its faintest band,
+rather than switching a full gradient over a card already touching the divider.
+The trailing gutter is the same size; extra bottom clearance is reserved only
+when fixed paging or status controls are present.
+
+The existing scroll-reversal regression passes with added checks that the first
+Space's top and side gutters match, the top fade ends at its initial card edge,
+and a one-pixel scroll moves the card by exactly one pixel. Existing pencil
+clipping/input, theme and reverse-scroll checks still pass in that regression.
+Mac tooling, browser Wasm, Linux authority/checker and ARMv7 host builds passed.
+No full suite was run for this spacing change.
+
+Signed release:
+`9e41291c49adb4bd532250768782e49cfd9a555e503048eb30d7dcdd00980d21`.
+Full Mac/Linux signature and closure verification passed before activation; all
+85 independent authority files, app contracts and catalog bytes are unchanged.
+The prior signed release and compatible authority executable remain available.
+A public WSS journey using the shared runtime and real Public Space passed at
+390 × 440: matching 12-pixel gutter/fade, one-pixel scroll, return to the start,
+unchanged mount epoch and no management writes. This is live session/scene
+acceptance, not a physical iPhone pixel check. Authority, tunnel and Monitoring
+timer remain active; the disposable builder is stopped after the builds.
