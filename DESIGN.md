@@ -305,8 +305,10 @@ Browser pinch zoom remains available for personal magnification. A calibrated
 physical-size requirement would need explicit host calibration, not CSS `mm`.
 
 Monitoring keeps its fixed 16:10 chart canvas fitted below its readable shell.
-Designer and the experiment canvases retain their current desktop/content minima;
-this phone pass does not qualify full phone authoring or all experiment content.
+Designer and the experiment canvases retain their current desktop/content minima.
+Opening Designer on a phone is allowed through its fitted desktop workspace;
+incoming mounts qualify against their own minima while Home remains phone-sized.
+This phone pass does not qualify full phone authoring or all experiment content.
 
 ## Base control catalog
 

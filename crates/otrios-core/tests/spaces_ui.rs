@@ -928,7 +928,35 @@ fn unavailable_metadata_discards_the_private_host_view_and_switching_forgets_the
 
 #[test]
 fn launcher_launch_retains_phone_density_until_cached_app_activation() {
-    let (mut client, ui) = fixture(Role::Admin);
+    let (mut client, original) = fixture(Role::Admin);
+    let ui = a::AppUi::new("counter", "Counter", original.state_schema)
+        .with_responsive_viewport([800., 480.])
+        .with_composition(
+            a::column(0., vec![a::heading()]),
+            a::column(0., vec![a::heading()]),
+        )
+        .build("Counter", vec![]);
+    client
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![CatalogEntry {
+                    app: App {
+                        id: "counter".into(),
+                        title: "Counter".into(),
+                        ui_ref: ui.ui_ref.clone(),
+                        state_ref: "app:counter/state".into(),
+                        status: "canvas-app".into(),
+                        dependencies: vec![],
+                    },
+                    path: "".into(),
+                    ui_hash: hash(&encode_ui(&ui).unwrap()),
+                    private: false,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
     let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
     let bytes = encode_ui(&ui).unwrap();
     for cycle in 0..2 {
@@ -1001,6 +1029,15 @@ fn launcher_launch_retains_phone_density_until_cached_app_activation() {
             .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
             .unwrap();
         assert!(!client.spaces_ui());
+        let frame = client.scene().unwrap().root().frame;
+        assert!(
+            frame.width >= 1280. && frame.height >= 800.,
+            "incoming layout qualifies against its own minimum"
+        );
+        assert!(
+            (frame.width / frame.height - 390. / 720.).abs() < 0.001,
+            "qualification preserves the host aspect"
+        );
         client.tick(100 + u64::from(cycle), 0).unwrap();
         assert!(
             !client.spaces_ui(),

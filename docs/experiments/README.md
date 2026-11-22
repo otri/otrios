@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Designer phone opening — 2026-11-22](designer-phone-opening-2026-11-22.md):
+  qualify the incoming desktop workspace independently of phone Home sizing,
+  preserving aspect and existing admission/resource limits.
+
 - [Relay Light and rounded fields — 2026-11-22](relay-light-rendering-2026-11-22.md):
   retained transcript foreground repaint, matching Canvas/HTML field curves and
   explicit placeholder contrast.

@@ -41,8 +41,10 @@ foundation without rewriting those qualification records.
 - One responsive workspace, no Frame/Desktop switch. Underlined task tabs, matching
   segmented Edit/Test and Dark/Light controls have distinct roles.
 - Required design targets: logical Frame 1280×800 landscape and desktop 1920×1080.
-  Phone portrait authoring is unsupported. A smaller landscape floor is proposed,
-  not a reason to shrink Frame targets or raise scene limits.
+  Phone opening is allowed through the fitted desktop workspace; see the
+  [mount qualification](../experiments/designer-phone-opening-2026-11-22.md).
+  Full phone portrait authoring remains unsupported. A smaller landscape floor
+  is proposed, not a reason to shrink Frame targets or raise scene limits.
 - Unknown dependencies use conservative compilation. Proven color-only changes
   update paint; layout and geometry work are classified separately.
 - Full lifecycle completeness does not mean full Figma/SwiftUI feature parity.

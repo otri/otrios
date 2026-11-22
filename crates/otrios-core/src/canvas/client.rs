@@ -1744,38 +1744,15 @@ impl Client {
                     .active
                     .as_ref()
                     .is_some_and(|m| m.state_ref == "host:spaces/state");
-        if host_visible
-            || self
-                .active
-                .as_ref()
-                .is_some_and(|m| m.breadcrumbs.is_some())
-        {
-            if host_visible
-                || self.active.as_ref().is_some_and(|m| {
-                    m.chat.is_some() || matches!(m.ui.presentation, Some(Presentation::View { .. }))
-                })
-            {
-                return otrios_interfaces::layout::ViewportPolicy::Responsive {
-                    minimum: [320., 300.],
-                };
-            }
-            let minimum = self
-                .active
-                .as_ref()
-                .and_then(|m| match m.layout.viewport_policy() {
-                    otrios_interfaces::layout::ViewportPolicy::Responsive { minimum } => {
-                        Some([minimum[0].max(1280.), minimum[1].max(800.)])
-                    }
-                    _ => None,
-                })
-                .unwrap_or([1280., 800.]);
-            return otrios_interfaces::layout::ViewportPolicy::Responsive { minimum };
+        if host_visible {
+            return otrios_interfaces::layout::ViewportPolicy::Responsive {
+                minimum: [320., 300.],
+            };
         }
-        self.active
-            .as_ref()
-            .map_or(otrios_interfaces::layout::ViewportPolicy::Fit, |m| {
-                m.layout.viewport_policy()
-            })
+        self.active.as_ref().map_or(
+            otrios_interfaces::layout::ViewportPolicy::Fit,
+            Mount::viewport_policy,
+        )
     }
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
         if viewport
@@ -2838,6 +2815,9 @@ impl Client {
                             self.layout_viewport.or(self.viewport)
                         }
                         .unwrap_or([1280., 800.]);
+                    // Qualify the incoming app using its own sizing contract.
+                    // The retained launcher may still have a phone-sized scene.
+                    candidate.viewport = candidate.supported_viewport(candidate.viewport)?;
                     if let Some(chat) = &mut candidate.chat {
                         chat.prepare(
                             candidate.viewport,
@@ -4809,6 +4789,40 @@ impl Mount {
             .cloned()
             .map(Ok)
             .unwrap_or_else(|| self.sample_doc().typed_value(id))
+    }
+    fn viewport_policy(&self) -> otrios_interfaces::layout::ViewportPolicy {
+        use otrios_interfaces::layout::ViewportPolicy;
+        if self.breadcrumbs.is_none() {
+            return self.layout.viewport_policy();
+        }
+        if self.chat.is_some() || matches!(self.ui.presentation, Some(Presentation::View { .. })) {
+            return ViewportPolicy::Responsive {
+                minimum: [320., 300.],
+            };
+        }
+        let minimum = match self.layout.viewport_policy() {
+            ViewportPolicy::Responsive { minimum } => [minimum[0].max(1280.), minimum[1].max(800.)],
+            ViewportPolicy::Fit => [1280., 800.],
+        };
+        ViewportPolicy::Responsive { minimum }
+    }
+    fn supported_viewport(&self, viewport: [f32; 2]) -> Result<[f32; 2]> {
+        let otrios_interfaces::layout::ViewportPolicy::Responsive { minimum } =
+            self.viewport_policy()
+        else {
+            return Ok(viewport);
+        };
+        let scale = (minimum[0] / viewport[0])
+            .max(minimum[1] / viewport[1])
+            .max(1.);
+        let viewport = viewport.map(|value| value * scale);
+        if viewport
+            .iter()
+            .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
+        {
+            return Err("Available aspect ratio exceeds app viewport bounds".into());
+        }
+        Ok(viewport)
     }
     fn invalidate(&mut self) {
         if self.chat.is_some()
