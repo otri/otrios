@@ -93,3 +93,39 @@ an application error; no salute or profile change is submitted. Overflow and
 68-person behavior are covered by the focused fixture, not a live crowded room.
 Physical iPhone Safari was not retested. Authority, tunnel and Monitoring timer
 remain active; the disposable builder is stopped.
+
+## Modal focus stays inside the dialog
+
+Commit `3873be2` fixes the empty outline over the roster heading. The browser's
+modal auto-focus chose Back to OTriOS because background controls were still
+included in its accessibility control list. Its transparent button displayed a
+focus outline at [24, 24, 78.84, 48], through the modal paint.
+
+Relay now marks its modal barrier explicitly and clears background responders
+and semantics after composing the shared navigation. Background paint remains
+unchanged. Accessibility text excludes the covered backdrop. A local frame flag
+identifies every Relay dialog, including those without scrolling, so browser
+focus trapping and dialog labeling apply consistently. Keyboard focus indicators
+remain enabled for the controls inside the dialog.
+
+The extended existing `brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handbook`
+regression passes (1 passed, 69 filtered). It verifies no background control can
+receive focus or stale activation, background text is not announced, name entry
+and handbook scrolling still work, and navigation returns after closing. Mac
+tooling, browser Wasm, Linux authority/checker and ARMv7 host builds passed; no
+full suite was run. The frame flag is local presentation metadata; shared state
+and the release bootstrap protocol are unchanged.
+
+Signed release:
+`0dc8adaf77cea0e08d8d85dbd9b8dff9a56a897b40af83960f89a8deaf440f96`.
+Full Mac/Linux signed closure verification passed, with all 85 independent
+authority files, app contracts and catalog bytes unchanged. Compatible rollback
+remains available and the restored publisher pointer matches the active host.
+
+The real browser reproduced focus on Back to OTriOS before deployment at
+390 × 720. After automatically loading the signed update, opening Participants
+exposes only Close and the user row, focuses Close dialog, labels the group as a
+Relay dialog, and announces only dialog text. Closing restores normal navigation
+without an application error. This qualifies the browser DOM/focus behavior;
+physical iPhone Safari pixels were not retested. Authority, tunnel and Monitoring
+timer remain active; the disposable builder is stopped after builds.
