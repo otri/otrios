@@ -154,6 +154,10 @@ fn replace(root: &mut SceneNode, id: u32, node: &SceneNode) -> bool {
         .iter_mut()
         .any(|child| replace(child, id, node))
 }
+/// Narrow phone headers use a second location row instead of shrinking targets.
+pub(in crate::canvas) fn compact_extra(width: f32) -> f32 {
+    if width < 600. { 36. } else { 0. }
+}
 pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     let Some(trail) = &mount.breadcrumbs else {
         return;
@@ -168,12 +172,18 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     let designer = mount.designer.as_ref().filter(|d| d.focus_layout());
     let palette = mount.shell_appearance.palette();
     let (foreground, divider) = (palette.text, palette.divider);
-    let scale = otrios_interfaces::theme::HEADER_FONT_SCALE;
+    let compact = compact_extra(mount.viewport[0]) > 0.;
+    let scale = if compact {
+        2
+    } else {
+        otrios_interfaces::theme::HEADER_FONT_SCALE
+    };
     let height = mount
         .font
         .as_ref()
         .map_or(40., |f| f.metrics().line_height(scale as f32));
-    let y = (60. - height) / 2.;
+    let row_height = if compact { 48. } else { 60. };
+    let y = (row_height - height) / 2.;
     let width = if mount.chat.is_some() {
         find_mut(root, 7_000_000)
             .map(|header| match header.primitive {
@@ -194,11 +204,16 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     };
     let mut children = vec![];
     let mut x = 0.;
+    let mut row = 0.;
     for (index, item) in trail.items.iter().enumerate() {
+        if compact && index == 1 {
+            x = 0.;
+            row = row_height;
+        }
         if index > 0 {
             children.push(text(
                 BASE + index as u32 * 4,
-                Rect::new(x, y, 24., height),
+                Rect::new(x, y + row, 24., height),
                 ">",
                 scale,
                 foreground,
@@ -208,7 +223,7 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         let item_width = measure(&item.label) + 8.;
         let mut node = canvas(
             BASE + index as u32 * 4 + 1,
-            Rect::new(x, 0., item_width, 60.),
+            Rect::new(x, row, item_width, row_height),
             vec![text(
                 BASE + index as u32 * 4 + 2,
                 Rect::new(0., y, item_width, height),
@@ -232,7 +247,13 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         x += item_width + 12.;
     }
     let mut line = crate::dashboard::components::background(BASE + 100, width, 1., divider, 0.);
-    line.frame = Rect::new(0., 71., width, 1.);
+    let header_height = 72.
+        + if compact && trail.items.len() > 1 {
+            36.
+        } else {
+            0.
+        };
+    line.frame = Rect::new(0., header_height - 1., width, 1.);
     line.responder = Some(TouchResponder::PassThrough);
     children.push(line);
     let caption = trail
@@ -306,7 +327,7 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     children.push(account);
     let header = canvas(
         BASE + 101,
-        Rect::new(24., 24., width.max(1.), 72.),
+        Rect::new(24., 24., width.max(1.), header_height),
         children,
     );
     if mount.chat.is_some()
@@ -345,7 +366,10 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
     let index = if trail.host {
         root.children
             .iter()
-            .position(|n| n.frame.y == 0. && n.frame.height == 176.)
+            .position(|n| {
+                n.frame.y == 0.
+                    && n.frame.height == super::super::host_ui::map_top(mount.viewport[0])
+            })
             .map(|index| index + 1)
     } else {
         None

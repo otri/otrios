@@ -15,6 +15,9 @@ const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
 const WHITE: [u8; 4] = [255, 254, 250, 255];
 pub(super) const TOP: f32 = 176.;
+pub(super) fn top(width: f32) -> f32 {
+    TOP + crate::canvas::client::breadcrumbs::compact_extra(width)
+}
 pub(super) const FOOT: f32 = 80.;
 #[derive(Clone, Debug)]
 pub(in crate::canvas) enum DragKind {
@@ -1120,6 +1123,8 @@ fn map_body<'a>(
     let launcher = model.launcher(snapshot);
     let snapshot = &launcher;
     let [w, h] = viewport;
+    let top = self::top(w);
+    let toolbar_y = top - 64.;
     let any_admin = snapshot.spaces.iter().any(|s| s.role == Some(Role::Admin));
     let mut b = Builder {
         font,
@@ -1213,7 +1218,7 @@ fn map_body<'a>(
     let total = skyline.into_iter().fold(0., f32::max);
     // The fixed controls float over the map. Padding belongs to the scrolling
     // content, so its final item can clear the controls at the end of a scroll.
-    model.scroll_limit = (total + foot - (h - TOP)).max(0.);
+    model.scroll_limit = (total + foot - (h - top)).max(0.);
     model.scroll = model.scroll.clamp(0., model.scroll_limit);
     for (space, frame, columns) in positions {
         let [x, y, width, height] = frame;
@@ -1386,12 +1391,12 @@ fn map_body<'a>(
     }
     b.nodes.push(
         a::canvas(content.nodes)
-            .frame([0., TOP, w, (h - TOP).max(1.)])
+            .frame([0., top, w, (h - top).max(1.)])
             .semantic_label("Spaces map"),
     );
     b.actions.extend(content.actions);
     // Only the header masks content. Footer controls float above the edge fade.
-    b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
+    b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, top]));
     if !model.routes.contains_key("home") {
         b.nodes.push(text("OTriOS", [24., 26., 168., 42.], 3.));
     }
@@ -1418,7 +1423,7 @@ fn map_body<'a>(
     if shown.is_empty() {
         b.nodes.push(text(
             "No apps yet.",
-            [margin, TOP + 20., available, 40.],
+            [margin, top + 20., available, 40.],
             2.,
         ));
     }
@@ -1445,7 +1450,7 @@ fn map_body<'a>(
             } else {
                 "Spaces"
             },
-            [margin, 116., 240., 36.],
+            [margin, toolbar_y + 4., 160., 36.],
             2.,
         ));
     }
@@ -1453,7 +1458,7 @@ fn map_body<'a>(
         b.flat(
             "Add Space",
             "+ Space",
-            [margin, 112., 140., 48.],
+            [margin, toolbar_y, 140., 48.],
             HostAction::Pane(Pane::Create),
         );
     }
@@ -1465,7 +1470,7 @@ fn map_body<'a>(
                 "Arrange apps"
             },
             if model.editing { "Done" } else { "Arrange" },
-            [w - 180., 112., 152., 48.],
+            [w - 180., toolbar_y, 152., 48.],
             HostAction::Edit,
         );
     }

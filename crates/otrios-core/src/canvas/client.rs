@@ -2,7 +2,7 @@
 //! One admitted app activation. Durable state is authoritative; all client state is RAM only.
 use super::text_viewport::TextViewport;
 use super::*;
-mod breadcrumbs;
+pub(super) mod breadcrumbs;
 mod host_access;
 mod host_map;
 mod host_moves;
@@ -1742,6 +1742,17 @@ impl Client {
                 .as_ref()
                 .is_some_and(|m| m.breadcrumbs.is_some())
         {
+            // Phone-capable surfaces reflow in device-independent browser units.
+            // Their navigation must not inherit a desktop content-canvas minimum.
+            if self.host_active
+                || self.active.as_ref().is_some_and(|m| {
+                    m.chat.is_some() || matches!(m.ui.presentation, Some(Presentation::View { .. }))
+                })
+            {
+                return otrios_interfaces::layout::ViewportPolicy::Responsive {
+                    minimum: [320., 300.],
+                };
+            }
             let minimum = self
                 .active
                 .as_ref()
@@ -5945,9 +5956,9 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             }
             frame = [
                 24.,
-                112.,
+                112. + breadcrumbs::compact_extra(m.viewport[0]),
                 (m.viewport[0] - 48.).max(1.),
-                (m.viewport[1] - 136.).max(1.),
+                (m.viewport[1] - 136. - breadcrumbs::compact_extra(m.viewport[0])).max(1.),
             ];
         }
         let mut content = view.resolve_slots(&BTreeMap::new())?.root().clone();

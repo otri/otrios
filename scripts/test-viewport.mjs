@@ -17,13 +17,13 @@ test('portrait pointer and accessibility bounds describe the same rendered recta
 });
 
 test('chat preserves full width and UI scale as the visual keyboard changes height',()=>{
-  assert.deepEqual(chatViewport(390,844),[534,1155]);
-  assert.deepEqual(chatViewport(390,420),[534,575]);
-  assert.deepEqual(chatViewport(390,300),[534,410]);
-  assert.deepEqual(chatViewport(320,568),[534,947]);
-  assert.deepEqual(chatViewport(599,900),[534,802]);
-  assert.deepEqual(chatViewport(600,900),[800,1200]);
-  assert.deepEqual(chatViewport(844,390),[800,369]);
+  assert.deepEqual(chatViewport(390,844),[390,844]);
+  assert.deepEqual(chatViewport(390,420),[390,420]);
+  assert.deepEqual(chatViewport(390,300),[390,300]);
+  assert.deepEqual(chatViewport(320,568),[320,568]);
+  assert.deepEqual(chatViewport(599,900),[599,900]);
+  assert.deepEqual(chatViewport(600,900),[600,900]);
+  assert.deepEqual(chatViewport(844,390),[844,390]);
   assert.deepEqual(chatViewport(1280,800),[1280,800]);
   assert.deepEqual(chatViewport(800,1280),[800,1280]);
   assert.throws(()=>chatViewport(NaN,420));
@@ -54,4 +54,15 @@ test('policy and mount entry trigger sizing even at identical current dimensions
   assert(viewportRequestNeeded(extent,extent,'responsive:epoch2','responsive:epoch3'));
   assert(!viewportRequestNeeded(extent,extent,'responsive:epoch3','responsive:epoch3'));
   assert(viewportRequestNeeded(extent,[1920,1080],'responsive:epoch3','responsive:epoch3'));
+});
+
+// The phone shell must not fit a 1280-unit desktop canvas into its CSS width.
+test('phone shell retains CSS-pixel density through device width and rotation',()=>{
+  const shell={kind:'responsive',minimum:[320,300]};
+  for(const [width,height] of [[320,568],[375,667],[390,844],[430,932],[844,390]]){
+    assert.deepEqual(layoutViewport(width,height,shell),[width,height]);
+    assert.deepEqual(chatViewport(width,height),[width,height]);
+    const target=semanticBounds([24,24,60,60],[width,height]);
+    assert(Math.abs(parseFloat(target.width)*width/100-60)<1e-9);
+  }
 });

@@ -14,13 +14,12 @@ export function layoutViewport(width,height,policy={kind:'fit'}){
 export function viewportRequestNeeded(previous,next,previousContext,nextContext){
   return previousContext!==nextContext||next.some((n,i)=>n!==previous[i]);
 }
-// Chat reflows vertically into the visual viewport. Keyboard height must never
-// select a landscape design or reduce the horizontal UI scale.
+// Browser layout is measured in CSS pixels, independently of backing-store DPR.
+// Keep the same unit density through rotation and visual-keyboard resizing.
 export function chatViewport(width,height){
   layoutViewport(width,height); // Validate the available CSS dimensions.
-  // Phones need a readable density: 800 / 534 is approximately 1.5x.
-  const logicalWidth=width<600?534:width>=1100?1280:800;
-  return [logicalWidth,Math.max(300,Math.min(8192,Math.floor(logicalWidth*height/width)))];
+  const scale=Math.min(1,8192/Math.max(width,height));
+  return [width*scale,Math.max(300,height*scale)];
 }
 export function pointerPosition(x,y,bounds,extent){
   return [(x-bounds.left)*extent[0]/bounds.width,(y-bounds.top)*extent[1]/bounds.height];

@@ -106,7 +106,8 @@ removed. Use only the canonical routes above; retired Live UI also stays absent.
   divider and account target in both appearances. Keep the header at the viewport
   top. App titles share one scale; body layout and fitted content cannot move the
   header down. Resolve the paired Brass Relay/Home semantic palette.
-- Current paths fit the supported landscape shell (minimum 1280 × 800 logical
+- Home, collections, chat and Monitoring have a compact phone header. Other
+  current paths retain their landscape content minima (1280 × 800 logical
   units). Before adding longer/deeper paths, provide labeled overflow or reflow
   while preserving the title and usable touch targets; overflow is not implemented.
 - Use the same Profile/Sign in entry on every app. Place Sign out inside the
@@ -287,6 +288,25 @@ wrap/grid support. Children use Fixed, Hug or Fill per axis, with padding, gap
 and alignment. There is no constraint solver. Free positioning is explicit and
 reserved for overlays or illustrations. Scroll panels when content exceeds the
 viewport; avoid Previous/Next navigation for ordinary inspector content.
+
+## Browser density and phones
+
+The web host uses CSS pixels as device-independent interface units for Home,
+collections and chat. One scene unit maps to one CSS pixel at normal browser zoom
+when the viewport is at least 320 pixels wide. Device-pixel ratio affects backing
+resolution, not text or touch-target size. Do not fit a 1280-unit desktop shell
+into a phone width. Rotation and keyboard height changes must not select an
+unrelated horizontal density. Narrow headers use a compact heading role and stack
+app location beneath the root/account row; launcher cards reflow and scroll.
+
+CSS reference pixels do not promise exact physical millimetres on screens; see
+[CSS reference units](https://www.w3.org/TR/css3-values/#absolute-lengths).
+Browser pinch zoom remains available for personal magnification. A calibrated
+physical-size requirement would need explicit host calibration, not CSS `mm`.
+
+Monitoring keeps its fixed 16:10 chart canvas fitted below its readable shell.
+Designer and the experiment canvases retain their current desktop/content minima;
+this phone pass does not qualify full phone authoring or all experiment content.
 
 ## Base control catalog
 

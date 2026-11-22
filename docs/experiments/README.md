@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Browser interface density — 2026-11-22](phone-density-2026-11-22.md): CSS-pixel
+  sizing and compact phone navigation for launcher/chat/Monitoring, with viewport
+  and live scene checks; physical iPhone acceptance remains pending.
+
 - [Shared shell — 2026-11-22](shared-shell-2026-11-22.md): canonical breadcrumbs,
   paired appearances, shared account access, Designer draft/preview isolation and
   fixed-aspect Monitoring. Signed OrbStack/Web activation; physical Frame deferred.

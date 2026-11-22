@@ -592,7 +592,13 @@ impl Client {
         // of the denser chat body and keyboard-shortened visual viewport.
         let header_w = self.header_width.unwrap_or(w.max(800.));
         let header_ratio = w / header_w;
-        let header_bottom = if self.managed { 176. } else { 96. } * header_ratio;
+        let compact_extra = if self.managed {
+            crate::canvas::client::breadcrumbs::compact_extra(header_w)
+        } else {
+            0.
+        };
+        let header_bottom = (if self.managed { 176. } else { 96. } + compact_extra) * header_ratio;
+        let room_width = ((header_w - 60.) / 2.).min(196.);
         let page_w = w - 48. - side;
         let mut p = Paint {
             nodes: vec![],
@@ -660,15 +666,21 @@ impl Client {
             3,
             [
                 if self.managed { 24. } else { header_w - 224. },
-                if self.managed { 112. } else { 24. },
-                if self.managed { 196. } else { 96. },
+                if self.managed {
+                    112. + compact_extra
+                } else {
+                    24.
+                },
+                if self.managed { room_width } else { 96. },
                 60.,
             ],
             "Participants",
             &format!(
                 "{} {}",
                 self.members.len(),
-                if self.members.len() == 1 {
+                if compact_extra > 0. {
+                    "online"
+                } else if self.members.len() == 1 {
                     "participant"
                 } else {
                     "participants"
@@ -679,13 +691,25 @@ impl Client {
         p.button(
             4,
             [
-                if self.managed { 232. } else { header_w - 116. },
-                if self.managed { 112. } else { 24. },
-                if self.managed { 196. } else { 92. },
+                if self.managed {
+                    36. + room_width
+                } else {
+                    header_w - 116.
+                },
+                if self.managed {
+                    112. + compact_extra
+                } else {
+                    24.
+                },
+                if self.managed { room_width } else { 92. },
                 60.,
             ],
             "Chat identity",
-            "Chat identity",
+            if compact_extra > 0. {
+                "Identity"
+            } else {
+                "Chat identity"
+            },
             false,
         );
         let mut header = node(
@@ -697,9 +721,9 @@ impl Client {
         );
         header.children = p.nodes.split_off(header_start);
         p.nodes.push(header);
-        let page_y = header_bottom + 12.;
+        let page_y = header_bottom + if h < 400. { 0. } else { 12. };
         let draft_h = self.draft_height();
-        let content_h = self.draft_y() - page_y;
+        let content_h = (self.draft_y() - page_y).max(0.);
         p.surface(
             [
                 24.,
@@ -713,7 +737,12 @@ impl Client {
         );
         let mut viewport = canvas(
             u32::from(VIEWPORT),
-            Rect::new(24., page_y + 16., (page_w - 16.).max(1.), content_h - 24.),
+            Rect::new(
+                24.,
+                page_y + 16.,
+                (page_w - 16.).max(1.),
+                (content_h - 24.).max(1.),
+            ),
             vec![],
         );
         viewport.responder = None;
@@ -760,7 +789,7 @@ impl Client {
             .iter()
             .filter(|(_, d)| !d.text.is_empty())
             .take(1);
-        if let Some((id, draft)) = active.next() {
+        if let Some((id, draft)) = active.next().filter(|_| draft_h > 0.) {
             let who = self
                 .members
                 .iter()

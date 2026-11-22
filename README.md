@@ -52,7 +52,9 @@ The [app packages](apps/README.md) include The Brass Relay, Test Playground and 
 The [OTriOS design reference](DESIGN.md) uses Brass Relay for dark appearance
 and Home for light appearance. The [shared shell](docs/experiments/shared-shell-2026-11-22.md)
 provides consistent breadcrumbs, account access and paired Designer chrome, with
-equivalent commands in both modes. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
+equivalent commands in both modes. [Phone interface sizing](docs/experiments/phone-density-2026-11-22.md)
+uses browser logical pixels for Home, chat and Monitoring navigation; Designer
+and experiment content retain desktop minima. [RFC 0037](docs/rfcs/0037-oib-design-system.md) specifies
 named styles, descriptive variables, Light/Dark modes and state resolution;
 named color styles and Light/Dark variables are enabled in Designer. Library-owned
 styles use stable ownership with exact signed import locks; see the

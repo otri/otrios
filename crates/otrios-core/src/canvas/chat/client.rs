@@ -1340,6 +1340,9 @@ impl Client {
         (self.compose_layout.lines.len().clamp(1, rows) as f32 * self.line_height() + 24.).max(60.)
     }
     pub(crate) fn draft_height(&self) -> f32 {
+        if self.viewport[1] < 400. {
+            return 0.;
+        }
         self.drafts.values().next().map_or(32., |d| {
             (d.layout.lines.len().clamp(1, 4) as f32 * d.layout.line_height.max(20.) + 36.).max(72.)
         })

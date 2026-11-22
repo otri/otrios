@@ -613,6 +613,38 @@ fn launcher_collections_preserve_admission_management_and_parent_navigation() {
     click(&mut client, "Close");
     assert_eq!(client.path(), "test-playground");
     assert!(labels(&client).contains(&"Counter".into()));
+    // A phone reflows the shell instead of shrinking the desktop minimum.
+    assert_eq!(
+        client.viewport_policy(),
+        otrios_interfaces::layout::ViewportPolicy::Responsive {
+            minimum: [320., 300.]
+        }
+    );
+    for width in [320., 390., 430.] {
+        client.set_viewport([width, 844.]).unwrap();
+        let scene = client.scene().unwrap();
+        assert_eq!(scene.root().frame.width, width);
+        for label in ["Back to OTriOS", "Profile", "Done"] {
+            let control = scene
+                .controls()
+                .into_iter()
+                .find(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == label))
+                .unwrap();
+            assert!(
+                control.origin[0] >= 0.
+                    && control.origin[0] + control.node.frame.width * control.scale <= width + 0.01,
+                "{label} must fit the phone"
+            );
+            assert!(
+                control.node.frame.height * control.scale >= 48.,
+                "{label} must stay touch-sized"
+            );
+        }
+        let header = scene.path(4_100_100_101).unwrap().last().unwrap().node;
+        assert_eq!(header.frame.height, 108.);
+    }
+    client.set_viewport([1280., 800.]).unwrap();
+
     client.back().unwrap();
     assert_eq!(client.path(), "");
     client.navigate("test-playground").unwrap();
