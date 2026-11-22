@@ -53,3 +53,43 @@ and is not counted as acceptance. Its logs are retained with the successful
 regression/build/browser evidence under `~/Library/Application Support/OTriOSOrbStack/`.
 Physical iPhone Safari pixels were not retested. Authority, tunnel and Monitoring
 timer remain active; the disposable builder is stopped.
+
+## Scrolling user list
+
+Commit `eb83a47` replaces the roster's eight-person pages with one scrollable
+list covering all 68 admitted members. Only rows intersecting the viewport are
+painted, keeping avatars and controls within the existing scene limits without
+Previous/Next buttons. The summary and member names wrap to their measured
+available widths. Short rosters size the panel to their content instead of
+leaving a nearly empty full-height dialog. Close stays fixed, as does the legacy
+admin sign-in action where applicable.
+
+The roster reuses the handbook's local wheel/touch/momentum scrolling. Clipped
+row portions remain clickable. A drag never opens a member; a tap captures the
+member's identity, so reordering the roster before release cannot select a
+different person. No chat writes are sent by browsing. Long Unicode labels are
+bounded by UTF-8 bytes and wrapped-name lines use separate scene ID allocations.
+Retired paging command numbers remain harmless for stale queued controls.
+
+`cargo test --locked -p otrios-core --features canvas --lib
+roster_scrolls_all_members_with_bounded_scenes_and_stable_tap_identity`: 1 passed
+(591 filtered). The fixture walks all 68 members at 320 × 568, 390 × 720 and
+1280 × 800, including maximum-length wide Latin/Japanese names. It verifies scene
+admission, bounded visible controls, clipping, name wrapping, absent paging,
+stable tap identity after reorder, drag behavior, no writes and compact one-user
+sizing. No full suite was run. Mac tooling, browser Wasm, Linux authority/checker
+and ARMv7 host builds passed.
+
+Signed release:
+`f384a90d9456076c2ac3fb97d56fa21eecff902bdc70ce935e3d498346afd071`.
+Full Mac/Linux closure verification passed; all 85 independent authority files,
+app contracts and catalog bytes are unchanged. The prior signed release and
+compatible authority executable remain available for rollback.
+
+The public browser automatically loaded this release at 390 × 720 CSS pixels.
+Participants opens the compact one-user roster, with its row and Close inside
+the panel and no paging buttons. Selecting the user opens their details without
+an application error; no salute or profile change is submitted. Overflow and
+68-person behavior are covered by the focused fixture, not a live crowded room.
+Physical iPhone Safari was not retested. Authority, tunnel and Monitoring timer
+remain active; the disposable builder is stopped.
