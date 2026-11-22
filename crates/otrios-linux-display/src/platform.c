@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "platform.h"
 #include "slug_shaders.h"
+#include "model_shaders.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -70,6 +71,8 @@ struct ot_display {
     uint32_t curve_width,curve_height,band_width,band_height;
     uint64_t text_hits,text_misses,cache_generation;
     int profile_text,stable_text,alpha_atlas,alpha_enabled;uint64_t cached_upload_bytes;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
+    GLuint model_program,model_vbo,model_textures[4],model_depth;
+    uint32_t model_draws[16*4];size_t model_words;float model_clip_depth[2];
     GLuint scene_fbo,scene_texture,resolve_program,resolve_vbo,encode_texture;
     GLuint cache_fbo,cache_texture,cache_scratch,cache_program,cache_upload;
     GLint cache_sampler,cache_transform;
@@ -178,7 +181,7 @@ ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t h
     if(!get_platform){fail(d,"EGL platform display unavailable");goto bad;}
     d->egl=get_platform(headless?EGL_PLATFORM_SURFACELESS_MESA:EGL_PLATFORM_GBM_KHR,d->gbm,NULL);
     if(d->egl==EGL_NO_DISPLAY || !eglInitialize(d->egl,NULL,NULL) || !eglBindAPI(EGL_OPENGL_ES_API)){fail(d,"Initialize GBM EGL GLES API");goto bad;}
-    EGLint attrs[]={EGL_SURFACE_TYPE,headless?EGL_PBUFFER_BIT:EGL_WINDOW_BIT,EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_RED_SIZE,rgb565?5:8,EGL_GREEN_SIZE,rgb565?6:8,EGL_BLUE_SIZE,rgb565?5:8,EGL_ALPHA_SIZE,0,EGL_DEPTH_SIZE,0,EGL_STENCIL_SIZE,0,EGL_NONE};
+    EGLint attrs[]={EGL_SURFACE_TYPE,headless?EGL_PBUFFER_BIT:EGL_WINDOW_BIT,EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_RED_SIZE,rgb565?5:8,EGL_GREEN_SIZE,rgb565?6:8,EGL_BLUE_SIZE,rgb565?5:8,EGL_ALPHA_SIZE,0,EGL_DEPTH_SIZE,16,EGL_STENCIL_SIZE,0,EGL_NONE};
     EGLConfig configs[128],config=NULL;EGLint count=0;
     if(!eglChooseConfig(d->egl,attrs,configs,128,&count)){fail(d,"Enumerate EGL configs");goto bad;}
     for(int i=0;i<count;i++) {
@@ -201,6 +204,71 @@ bad:
     snprintf(error,capacity,"%s",d->error);ot_close(d);return NULL;
 }
 void ot_get_info(ot_display *d,ot_info *info){*info=d->info;}
+// Model resource allocation is lazy; animations update only the bounded VBO.
+static int model_program(ot_display *d) {
+    if(d->model_program)return 0;
+    GLuint vs=shader(d,GL_VERTEX_SHADER,ot_model_vs);if(!vs)return -1;
+    GLuint fs=shader(d,GL_FRAGMENT_SHADER,ot_model_fs);if(!fs){glDeleteShader(vs);return -1;}
+    d->model_program=glCreateProgram();glAttachShader(d->model_program,vs);glAttachShader(d->model_program,fs);
+    glBindAttribLocation(d->model_program,0,"position");glBindAttribLocation(d->model_program,1,"texcoord");
+    glBindAttribLocation(d->model_program,2,"normal");glBindAttribLocation(d->model_program,3,"color");
+    glLinkProgram(d->model_program);glDeleteShader(vs);glDeleteShader(fs);
+    GLint ok=0;glGetProgramiv(d->model_program,GL_LINK_STATUS,&ok);
+    if(!ok){glGetProgramInfoLog(d->model_program,sizeof(d->error),NULL,d->error);return -1;}
+    glGenBuffers(1,&d->model_vbo);return gl_ok(d,"Create static model program");
+}
+int ot_model_texture(ot_display *d,uint32_t slot,uint32_t width,uint32_t height,int repeat_s,int repeat_t,const uint8_t *rgba,size_t bytes) {
+    if(slot>=4 || !width || !height || width>1024 || height>1024 || bytes!=(size_t)width*height*4 || !rgba ||
+       (repeat_s!=0 && repeat_s!=1) || (repeat_t!=0 && repeat_t!=1) ||
+       ((repeat_s || repeat_t) && ((width&(width-1)) || (height&(height-1)))))return fail(d,"Invalid model texture dimensions");
+    if(!d->model_textures[slot])glGenTextures(1,&d->model_textures[slot]);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->model_textures[slot]);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,repeat_s?GL_REPEAT:GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,repeat_t?GL_REPEAT:GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,(GLsizei)width,(GLsizei)height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,4);return gl_ok(d,"Upload immutable model texture");
+}
+int ot_model_upload(ot_display *d,const float *vertices,size_t floats,const uint32_t *draws,size_t words,const float *depth) {
+    if(floats%(12*3) || floats>12000*3*12 || words%4 || words>16*4 || (floats && !vertices) || (words && !draws) || !depth)return fail(d,"Invalid model geometry dimensions");
+    for(size_t i=0;i<words;i+=4)if(draws[i]>floats/12 || draws[i+1]>floats/12-draws[i] || draws[i]%3 || draws[i+1]%3 || draws[i+2]>=4 || draws[i+3]>1 || !d->model_textures[draws[i+2]])return fail(d,"Invalid model draw range");
+    if(words && model_program(d)<0)return -1;
+    if(d->model_vbo){glBindBuffer(GL_ARRAY_BUFFER,d->model_vbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(floats*sizeof(float)),vertices,GL_STREAM_DRAW);}
+    if(words)memcpy(d->model_draws,draws,words*sizeof(uint32_t));
+    d->model_words=words;d->model_clip_depth[0]=depth[0];d->model_clip_depth[1]=depth[1];
+    return gl_ok(d,"Upload model instance frame");
+}
+static int draw_model(ot_display *d,const float *projection) {
+    if(!d->model_words)return 0;
+    if(d->linear_scene && !d->model_depth){
+        glGenRenderbuffers(1,&d->model_depth);glBindRenderbuffer(GL_RENDERBUFFER,d->model_depth);
+        glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,(GLsizei)d->width,(GLsizei)d->height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,d->model_depth);
+        if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return fail(d,"Model depth attachment incomplete");
+    }
+    glUseProgram(d->model_program);glUniformMatrix3fv(glGetUniformLocation(d->model_program,"transform"),1,GL_FALSE,projection);
+    glUniform2fv(glGetUniformLocation(d->model_program,"depth"),1,d->model_clip_depth);
+    glUniform1f(glGetUniformLocation(d->model_program,"linearTarget"),d->linear_scene?1.f:0.f);
+    glUniform1i(glGetUniformLocation(d->model_program,"image"),0);
+    glDisable(GL_SCISSOR_TEST);glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS);glDepthMask(GL_TRUE);glClearDepthf(1.f);glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_BLEND);glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+    glBindBuffer(GL_ARRAY_BUFFER,d->model_vbo);
+    for(GLuint i=0;i<4;i++){glEnableVertexAttribArray(i);}glDisableVertexAttribArray(4);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12*sizeof(float),(void*)0);
+    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,12*sizeof(float),(void*)(3*sizeof(float)));
+    glVertexAttribPointer(2,3,GL_FLOAT,GL_FALSE,12*sizeof(float),(void*)(5*sizeof(float)));
+    glVertexAttribPointer(3,4,GL_FLOAT,GL_FALSE,12*sizeof(float),(void*)(8*sizeof(float)));
+    glFrontFace(GL_CCW);glCullFace(GL_BACK);
+    for(size_t i=0;i<d->model_words;i+=4){
+        const uint32_t *r=d->model_draws+i;
+        if(r[3])glDisable(GL_CULL_FACE);else glEnable(GL_CULL_FACE);
+        glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->model_textures[r[2]]);
+        glDrawArrays(GL_TRIANGLES,(GLint)r[0],(GLsizei)r[1]);
+    }
+    glDisable(GL_CULL_FACE);glDisable(GL_DEPTH_TEST);
+    return gl_ok(d,"Draw textured static models");
+}
 int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats) {
     if(slot>=OT_MAX_SCENE_SLOTS || floats%18 || floats/6>MAX_VERTICES)return fail(d,"Invalid mesh length");
     size_t count=floats/6;
@@ -557,7 +625,7 @@ int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,si
     if(d->linear_scene)glClearColor(0.0051815167f,0.0116122452f,0.0221738848f,1);
     else glClearColor(16.f/255,28.f/255,41.f/255,1);
     glClear(GL_COLOR_BUFFER_BIT);
-    for(size_t i=0;i<count;i++){draw_slot(d,slots[i],projection);if(d->emoji_failed)return -1;}
+    for(size_t i=0;i<count;i++){draw_slot(d,slots[i],projection);if(d->emoji_failed)return -1;if(slots[i]==2 && draw_model(d,projection)<0)return -1;}
     if(!d->linear_scene)return gl_ok(d,"Draw direct cached glyphs and primitives");
     glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,d->width,d->height);
     glUseProgram(d->resolve_program);glDisable(GL_BLEND);
@@ -1048,6 +1116,8 @@ void ot_close(ot_display *d) {
             if(d->band_texture)glDeleteTextures(1,&d->band_texture);
             glDeleteTextures(EMOJI_PAGES,d->emoji_pages);glDeleteBuffers(1,&d->emoji_scratch);
             if(d->program)glDeleteProgram(d->program);
+            glDeleteProgram(d->model_program);glDeleteBuffers(1,&d->model_vbo);
+            glDeleteTextures(4,d->model_textures);glDeleteRenderbuffers(1,&d->model_depth);
             if(d->resolve_program)glDeleteProgram(d->resolve_program);
             if(d->cache_program)glDeleteProgram(d->cache_program);
             glDeleteBuffers(1,&d->resolve_vbo);glDeleteBuffers(1,&d->cache_upload);

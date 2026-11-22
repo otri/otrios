@@ -11,6 +11,7 @@ mod effects;
 mod history;
 pub mod icons;
 mod journal;
+mod model_effects;
 mod portable;
 mod replay;
 pub use portable::{PinnedHistory, QualifiedHistory};

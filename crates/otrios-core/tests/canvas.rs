@@ -4437,7 +4437,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
             .unwrap(),
         )
         .unwrap();
-    client.tick(1700, 1_700_000_000).unwrap();
+    client.tick(3200, 1_700_000_000).unwrap();
     let start = composer.compose(&mut client, &font).unwrap().clone();
     assert_eq!(start.revisions.content, idle.revisions.content);
     assert_eq!(start.revisions.semantics, idle.revisions.semantics);
@@ -4446,7 +4446,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     let first = client.effect_vertices().unwrap();
     assert!(!first.is_empty());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
-    client.tick(1800, 1_700_000_000).unwrap();
+    client.tick(3300, 1_700_000_000).unwrap();
     let moving = composer.compose(&mut client, &font).unwrap().clone();
     assert_ne!(moving.revisions.effects, start.revisions.effects);
     assert_eq!(moving.revisions.content, start.revisions.content);
@@ -4470,6 +4470,53 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     assert!(Arc::ptr_eq(&unchanged.effects, &ended.effects));
     assert!(client.effect_vertices().unwrap().is_empty());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client
+        .receive_chat(
+            &chat::encode_event(&Event::Effect {
+                sequence: 2,
+                event: chat::MessageEvent::Salute {
+                    seed: 9,
+                    target: Profile {
+                        id: "1".repeat(32),
+                        name: "Captain Cache".into(),
+                        avatar: 1,
+                    },
+                },
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.tick(10_600, 1_700_000_000).unwrap();
+    let hat = composer.compose(&mut client, &font).unwrap().clone();
+    assert!(
+        hat.model_effects
+            .as_ref()
+            .is_some_and(|m| !m.vertices.is_empty())
+    );
+    assert!(Arc::ptr_eq(&hat.base.mesh, &ended.base.mesh));
+    assert_eq!(hat.order.last(), Some(&Layer::Effects));
+    edit(&mut client, "Commands", 0, 0);
+    let modal = composer.compose(&mut client, &font).unwrap().clone();
+    assert!(
+        modal.model_effects.is_none(),
+        "modal hides textured playback"
+    );
+    client.back().unwrap();
+    assert!(
+        composer
+            .compose(&mut client, &font)
+            .unwrap()
+            .model_effects
+            .is_some()
+    );
+    client.tick(12_200, 1_700_000_000).unwrap();
+    assert!(
+        composer
+            .compose(&mut client, &font)
+            .unwrap()
+            .model_effects
+            .is_none()
+    );
 }
 
 #[test]

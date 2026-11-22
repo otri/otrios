@@ -19,6 +19,7 @@ pub struct Frame {
     pub document: Option<document::Frame>,
     pub reflow: Option<reflow::Frame>,
     pub effects: Arc<Vec<f32>>,
+    pub model_effects: Option<Arc<super::model::Frame>>,
     pub viewport: [f32; 2],
     pub motion: Option<[f32; 4]>,
     pub order: Vec<Layer>,
@@ -162,6 +163,19 @@ impl Composer {
             advance(&mut self.revisions.semantics);
             self.semantic_overlay_revision = semantic_overlay_revision;
         }
+        let model_effects = client.model_effects()?;
+        let model_changed = match (
+            self.frame.as_ref().and_then(|f| f.model_effects.as_ref()),
+            &model_effects,
+        ) {
+            (Some(old), Some(new)) => !old.same_content(new),
+            (None, None) => false,
+            _ => true,
+        };
+        if model_changed {
+            advance(&mut self.revisions.effects);
+        }
+        let model_effects = model_effects.map(Arc::new);
         let effects = client.effect_vertices()?;
         client.feedback_prepared();
         let effects = if let Some(old) = &self.frame
@@ -180,7 +194,7 @@ impl Composer {
         if overlay.is_some() {
             order.push(Layer::Overlay);
         }
-        if !effects.is_empty() {
+        if !effects.is_empty() || model_effects.is_some() {
             order.push(Layer::Effects);
         }
         self.frame = Some(Frame {
@@ -189,6 +203,7 @@ impl Composer {
             overlay,
             document,
             effects,
+            model_effects,
             order,
             reflow: client.reflow_frame()?,
             viewport: [scene.root().frame.width, scene.root().frame.height],

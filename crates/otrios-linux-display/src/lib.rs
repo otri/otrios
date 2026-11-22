@@ -109,6 +109,42 @@ pub fn validate_text_mesh(
     }
     Ok(())
 }
+/// The model ABI uses homogeneous logical positions, UVs, normals and RGBA.
+pub fn validate_model(vertices: &[f32], draws: &[u32], depth: [f32; 2]) -> Result<(), String> {
+    if !vertices.len().is_multiple_of(36)
+        || vertices.len() > 12_000 * 3 * 12
+        || !draws.len().is_multiple_of(4)
+        || draws.len() > 16 * 4
+        || depth.iter().any(|n| !n.is_finite() || n.abs() > 100_000.)
+    {
+        return Err("Model frame dimensions".into());
+    }
+    for v in vertices.chunks_exact(12) {
+        if v.iter().any(|n| !n.is_finite() || n.abs() > 100_000.)
+            || v[2] <= 0.
+            || v[3..5].iter().any(|n| n.abs() > 64.)
+            || v[5..8].iter().any(|n| n.abs() > 1.001)
+            || v[8..].iter().any(|n| !(0. ..=1.).contains(n))
+        {
+            return Err("Invalid model vertex".into());
+        }
+    }
+    let count = vertices.len() / 12;
+    for r in draws.chunks_exact(4) {
+        let first = r[0] as usize;
+        let n = r[1] as usize;
+        if first > count
+            || n > count - first
+            || !first.is_multiple_of(3)
+            || !n.is_multiple_of(3)
+            || r[2] >= 4
+            || r[3] > 1
+        {
+            return Err("Invalid model draw range".into());
+        }
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

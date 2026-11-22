@@ -11,7 +11,7 @@ license = "LGPL-3.0-only"
 otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
-canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex", "dep:flate2"]
+canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:serde_json", "dep:zune-jpeg", "dep:zune-core", "dep:lz4_flex", "dep:flate2"]
 signed-bundles = ["canvas", "dep:ring", "dep:base64"]
 merkle = ["dep:sha2"]
 default = []
@@ -70,6 +70,25 @@ optional = true
 [dependencies.serde]
 version = "=1.0.229"
 features = ["derive"]
+optional = true
+
+# Bounded embedded static GLB metadata. This exact JSON parser is already locked.
+[dependencies.serde_json]
+version = "=1.0.154"
+optional = true
+
+# Pure Rust JPEG decoding shared by wasm32 and ARMv7. Disable SIMD/unsafe backend
+# features; texture decode happens once, outside the animation frame loop.
+[dependencies.zune-jpeg]
+version = "=0.5.15"
+default-features = false
+features = ["std"]
+optional = true
+
+[dependencies.zune-core]
+version = "=0.5.3"
+default-features = false
+features = ["std"]
 optional = true
 
 [[example]]

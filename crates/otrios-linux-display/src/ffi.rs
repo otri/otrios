@@ -55,6 +55,24 @@ unsafe extern "C" {
     fn ot_error(d: *mut c_void) -> *const c_char;
     fn ot_get_info(d: *mut c_void, info: *mut Info);
     fn ot_upload(d: *mut c_void, slot: u32, vertices: *const f32, floats: usize) -> c_int;
+    fn ot_model_texture(
+        d: *mut c_void,
+        slot: u32,
+        width: u32,
+        height: u32,
+        repeat_s: c_int,
+        repeat_t: c_int,
+        rgba: *const u8,
+        bytes: usize,
+    ) -> c_int;
+    fn ot_model_upload(
+        d: *mut c_void,
+        vertices: *const f32,
+        floats: usize,
+        draws: *const u32,
+        words: usize,
+        depth: *const f32,
+    ) -> c_int;
     fn ot_draw(d: *mut c_void, projection: *const f32, animated: c_int) -> c_int;
     fn ot_draw_slots(
         d: *mut c_void,
@@ -132,6 +150,7 @@ unsafe extern "C" fn rasterize_emoji(
 pub struct Display {
     owner: NonNull<c_void>,
     emoji_rasterizer: Option<Box<EmojiRasterizer>>,
+    model_texture_ids: [Option<[u8; 32]>; 4],
     _thread: PhantomData<Rc<()>>,
 }
 impl Display {
@@ -181,6 +200,7 @@ impl Display {
         Ok(Self {
             owner,
             emoji_rasterizer: None,
+            model_texture_ids: [None; 4],
             _thread: PhantomData,
         })
     }
@@ -199,6 +219,64 @@ impl Display {
         // SAFETY: live owner, correctly sized initialized output, no retention.
         unsafe { ot_get_info(self.owner.as_ptr(), &mut info) };
         info
+    }
+    /// Immutable texture resources are uploaded only when the content changes.
+    pub fn model_texture(
+        &mut self,
+        slot: u32,
+        id: [u8; 32],
+        size: [u32; 2],
+        repeat: [bool; 2],
+        rgba: &[u8],
+    ) -> Result<(), String> {
+        let [w, h] = size;
+        if slot >= 4
+            || w == 0
+            || h == 0
+            || w > 1024
+            || h > 1024
+            || rgba.len() != w as usize * h as usize * 4
+        {
+            return Err("Invalid model texture dimensions".into());
+        }
+        if self.model_texture_ids[slot as usize] == Some(id) {
+            return Ok(());
+        }
+        // SAFETY: checked dimensions and live owner; C copies pixels to GL during this call.
+        self.result(unsafe {
+            ot_model_texture(
+                self.owner.as_ptr(),
+                slot,
+                w,
+                h,
+                repeat[0].into(),
+                repeat[1].into(),
+                rgba.as_ptr(),
+                rgba.len(),
+            )
+        })?;
+        self.model_texture_ids[slot as usize] = Some(id);
+        Ok(())
+    }
+    /// Geometry and draw ranges are validated before crossing the graphics ABI.
+    pub fn upload_model(
+        &mut self,
+        vertices: &[f32],
+        draws: &[u32],
+        depth: [f32; 2],
+    ) -> Result<(), String> {
+        crate::validate_model(vertices, draws, depth)?;
+        // SAFETY: bounded finite slices; C checks draw ranges and borrows/copies synchronously.
+        self.result(unsafe {
+            ot_model_upload(
+                self.owner.as_ptr(),
+                vertices.as_ptr(),
+                vertices.len(),
+                draws.as_ptr(),
+                draws.len(),
+                depth.as_ptr(),
+            )
+        })
     }
     pub fn upload(&mut self, slot: u32, vertices: &[f32]) -> Result<(), String> {
         self.upload_geometry(slot, vertices)?;

@@ -30,3 +30,7 @@ required-features = ["platform"]
 [[example]]
 name = "document_scroll_probe"
 required-features = ["platform"]
+
+[[example]]
+name = "model_pixel_probe"
+required-features = ["platform"]

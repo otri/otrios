@@ -236,6 +236,17 @@ pub(super) struct Roster {
     pub footer: Option<f32>,
 }
 impl Client {
+    pub(crate) fn model_effects(&self) -> Result<Option<crate::canvas::model::Frame>> {
+        if self.panel != Panel::None || self.kicked.is_some() {
+            return Ok(None);
+        }
+        self.replay.model_frame(
+            self.now,
+            self.viewport,
+            self.effects == 1,
+            self.effects != 0,
+        )
+    }
     pub(crate) fn effect_vertices(&self, dark: bool) -> Result<Vec<f32>> {
         if self.panel != Panel::None || self.kicked.is_some() {
             return Ok(vec![]);

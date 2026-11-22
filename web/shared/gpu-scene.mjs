@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared WebGL1 host for retained geometry and analytic quadratic glyph quads.
 import {slugVertex,slugFragment} from './slug-shaders.mjs';
+import {modelVertex,modelFragment} from './model-shaders.mjs';
 const MAX_FLOATS=8*1024*1024,MAX_GLYPH_VERTICES=65536;
 const DECODE_SRGB='vec3 decodeSrgb(vec3 c){vec3 lo=c/12.92;vec3 hi=pow((c+0.055)/1.055,vec3(2.4));return vec3(c.r<=0.04045?lo.r:hi.r,c.g<=0.04045?lo.g:hi.g,c.b<=0.04045?lo.b:hi.b);}';
 
@@ -143,6 +144,7 @@ export class SceneRenderer {
     gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.ONE,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
   }
   assertReady(){if(this.lost||this.gl.isContextLost())throw Error('Graphics context lost. Reload to reconnect.');}
+  createModelLayer(){this.assertReady();if(this.modelLayer)throw Error('Only one retained model overlay is supported');return this.modelLayer=new ModelLayer(this);}
   createLayer(){this.assertReady();const layer=new SceneLayer(this);this.layers.add(layer);return layer;}
   setFont(packet){
     this.assertReady();if(this.font)throw Error('A presentation context already owns its font resource');
@@ -228,6 +230,7 @@ export class SceneRenderer {
     this.assertReady();const gl=this.gl,limit=gl.getParameter(gl.MAX_TEXTURE_SIZE);
     if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>limit||height>limit)throw Error('Invalid physical presentation size');
     if(this.width===width&&this.height===height)return false;
+    this.modelLayer?.resizeDepth(width,height);
     if(this.linearLight){gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,this.linearTexture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
     if(gl.getError()!==gl.NO_ERROR)throw Error('Unable to resize the linear presentation target');}
     this.width=width;this.height=height;this.scaleX=width/this.logicalWidth;this.scaleY=height/this.logicalHeight;
@@ -267,9 +270,9 @@ export class SceneRenderer {
       for(let i=0;i<layers.length;i++)layers[i].preparedGeneration=generations[i];gammaLayer?.dispose();this.beginFrame();for(const layer of layers)layer.draw();this.endFrame();
     }
   }
-  contextLost(){this.lost=true;this.font=null;if(this.emoji){this.emoji.pages=[];this.emoji.entries.clear();this.emoji.stats.bytes=0;}this.activeAttributes.clear();for(const layer of this.layers)layer.invalid=true;}
+  contextLost(){if(this.modelLayer)this.modelLayer.invalid=true;this.lost=true;this.font=null;if(this.emoji){this.emoji.pages=[];this.emoji.entries.clear();this.emoji.stats.bytes=0;}this.activeAttributes.clear();for(const layer of this.layers)layer.invalid=true;}
   dispose(){
-    const gl=this.gl;for(const layer of [...this.layers])layer.dispose();
+    const gl=this.gl;this.modelLayer?.dispose();for(const layer of [...this.layers])layer.dispose();
     if(this.font){gl.deleteTexture(this.font.curves);gl.deleteTexture(this.font.bands);}this.emoji?.dispose();gl.deleteBuffer(this.indices);gl.deleteBuffer(this.scratch);gl.deleteTexture(this.atlas);gl.deleteFramebuffer(this.atlasFramebuffer);if(this.linearLight){gl.deleteTexture(this.encodeTexture);gl.deleteTexture(this.linearTexture);gl.deleteFramebuffer(this.linearFramebuffer);gl.deleteBuffer(this.resolveBuffer);gl.deleteProgram(this.resolveProgram);}gl.deleteProgram(this.cacheProgram);gl.deleteProgram(this.geometry);gl.deleteProgram(this.text);this.contextLost();
   }
 }
@@ -329,4 +332,67 @@ class SceneLayer {
     }
   }
   dispose(){if(!this.invalid){this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);}this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.paints=new Float32Array();this.preparedDraws=null;this.preparedGroups=[];}
+}
+
+// Static resources are separate from glyph preparation and persist across poses.
+class ModelLayer {
+  constructor(owner){this.owner=owner;this.textures=new Map();this.batches=[];this.invalid=false;this.glyphVertices=new Float32Array();}
+  setFrame(packet){
+    const owner=this.owner;owner.assertReady();if(this.invalid)throw Error('Model layer is unavailable');
+    if(!packet){this.batches=[];return;}
+    const {vertices,batches,depth,textures=[]}=packet,gl=owner.gl;
+    floats(vertices,36,'model triangles');
+    if(vertices.length>12000*3*12||!Array.isArray(batches)||batches.length>16||!Array.isArray(depth)||depth.length!==2||depth.some(n=>!Number.isFinite(n)||Math.abs(n)>100000))throw Error('Invalid model frame dimensions');
+    for(let i=0;i<vertices.length;i+=12){
+      const v=vertices.subarray(i,i+12);
+      if(v.some(n=>Math.abs(n)>100000)||v[2]<=0||v.subarray(3,5).some(n=>Math.abs(n)>64)||v.subarray(5,8).some(n=>Math.abs(n)>1.001)||v.subarray(8).some(n=>n<0||n>1))throw Error('Invalid model vertex');
+    }
+    const wanted=new Set(batches.map(b=>b.texture));if(wanted.size>4||textures.length>4)throw Error('Model texture budget');
+    for(const b of batches)if(!Number.isInteger(b.first)||!Number.isInteger(b.count)||b.first<0||b.count<0||b.first%3||b.count%3||b.first>vertices.length/12||b.count>vertices.length/12-b.first||typeof b.doubleSided!=='boolean'||!/^[a-f0-9]{64}$/.test(b.texture))throw Error('Invalid model draw range');
+    for(const [id,image]of this.textures)if(!wanted.has(id)){gl.deleteTexture(image);this.textures.delete(id);}
+    for(const t of textures){
+      if(!wanted.has(t.id)||!Number.isInteger(t.width)||!Number.isInteger(t.height)||t.width<1||t.height<1||t.width>1024||t.height>1024||!(t.pixels instanceof Uint8Array)||t.pixels.length!==t.width*t.height*4||!Array.isArray(t.repeat)||t.repeat.length!==2||t.repeat.some(v=>typeof v!=='boolean')||t.repeat.some(Boolean)&&((t.width&(t.width-1))||(t.height&(t.height-1))))throw Error('Invalid model texture');
+      if(this.textures.has(t.id))continue;
+      for(const [id,image]of this.textures)if(this.textures.size>=4&&!wanted.has(id)){gl.deleteTexture(image);this.textures.delete(id);}
+      if(this.textures.size>=4)throw Error('Model texture cache budget');
+      const image=gl.createTexture();if(!image)throw Error('Unable to allocate a model texture');
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,image);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,t.repeat[0]?gl.REPEAT:gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,t.repeat[1]?gl.REPEAT:gl.CLAMP_TO_EDGE);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,t.width,t.height,0,gl.RGBA,gl.UNSIGNED_BYTE,t.pixels);gl.pixelStorei(gl.UNPACK_ALIGNMENT,4);
+      if(gl.getError()!==gl.NO_ERROR){gl.deleteTexture(image);throw Error('GPU rejected model texture');}this.textures.set(t.id,image);
+    }
+    for(const id of wanted)if(!this.textures.has(id))throw Error('Model frame references a missing texture');
+    if(!this.program){
+      this.program=program(gl,modelVertex,modelFragment);this.attributes=['position','texcoord','normal','color'].map(n=>attribute(gl,this.program,n));
+      this.uniforms=Object.fromEntries(['transform','depth','image','linearTarget'].map(n=>[n,required(gl,this.program,n)]));
+      this.buffer=gl.createBuffer();if(!this.buffer)throw Error('Unable to allocate a model buffer');
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STREAM_DRAW);
+    if(gl.getError()!==gl.NO_ERROR)throw Error('GPU rejected model geometry');
+    this.batches=batches;this.depth=depth;
+  }
+  resizeDepth(width,height){
+    if(!this.depthBuffer)return;const gl=this.owner.gl;
+    gl.bindRenderbuffer(gl.RENDERBUFFER,this.depthBuffer);gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT16,width,height);
+    if(gl.getError()!==gl.NO_ERROR)throw Error('Unable to resize model depth buffer');
+  }
+  draw(){
+    if(!this.batches.length)return;const o=this.owner,gl=o.gl;o.assertReady();
+    if(o.linearLight&&!this.depthBuffer){
+      this.depthBuffer=gl.createRenderbuffer();if(!this.depthBuffer)throw Error('Unable to allocate model depth buffer');
+      this.resizeDepth(o.width,o.height);gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,this.depthBuffer);
+      if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Model depth framebuffer is unavailable');
+    }
+    gl.useProgram(this.program);gl.uniformMatrix3fv(this.uniforms.transform,false,o.transform);gl.uniform2fv(this.uniforms.depth,this.depth);gl.uniform1i(this.uniforms.image,0);gl.uniform1f(this.uniforms.linearTarget,o.linearLight?1:0);
+    gl.disable(gl.SCISSOR_TEST);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LESS);gl.depthMask(true);gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.ONE,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+    o.useAttributes(this.attributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
+    for(const [i,size,offset]of [[0,3,0],[1,2,12],[2,3,20],[3,4,32]])gl.vertexAttribPointer(this.attributes[i],size,gl.FLOAT,false,48,offset);
+    gl.frontFace(gl.CCW);gl.cullFace(gl.BACK);
+    try{for(const batch of this.batches){if(batch.doubleSided)gl.disable(gl.CULL_FACE);else gl.enable(gl.CULL_FACE);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.textures.get(batch.texture));gl.drawArrays(gl.TRIANGLES,batch.first,batch.count);}}
+    finally{gl.disable(gl.CULL_FACE);gl.disable(gl.DEPTH_TEST);}
+    if(gl.getError()!==gl.NO_ERROR)throw Error('GPU rejected the textured model draw');
+  }
+  dispose(){if(!this.invalid){const gl=this.owner.gl;for(const t of this.textures.values())gl.deleteTexture(t);if(this.buffer)gl.deleteBuffer(this.buffer);if(this.program)gl.deleteProgram(this.program);if(this.depthBuffer)gl.deleteRenderbuffer(this.depthBuffer);}this.textures.clear();this.batches=[];this.invalid=true;}
 }

@@ -84,3 +84,24 @@ simultaneously in the pages. GL ordering preserves earlier draws when a later
 upload reuses a slot. Runtime font parsing and emoji shaping are not copied into
 the platform crate. The safe provider method adds no public raw-pointer API or
 unsafe-lint scope.
+
+## Static textured model overlay (2026-11-22)
+
+Model parsing, scene transforms, texture decoding and animation remain safe
+LGPL runtime operations in `canvas::model` and its chat adapter. The existing
+single-threaded graphics boundary now accepts synchronous borrowed slices for
+one bounded model vertex buffer, sixteen draw ranges and four RGBA textures.
+The safe wrapper validates complete triangles, finite homogeneous positions,
+UV/normal/color ranges, depth constants and texture dimensions before FFI. C
+independently checks dimensions, draw offsets and owned texture slots before
+copying into GL-owned resources. No Rust pointer survives a call, and no new
+unsafe module, callback or lint exception is introduced.
+
+The adapter retains at most four 1024 × 1024 RGBA images and one 12,000-triangle
+VBO. Immutable texture IDs prevent per-pose uploads. The GLSL ES 1.00 source in
+`web/shared/model-shaders.mjs` is compiled by both WebGL1 and native GLES2.
+Perspective interpolation, front/back normal handling and depth testing stay in
+the host GPU path. Native EGL requests a 16-bit depth buffer; linear scene targets
+attach one lazily when a model first draws. Model retirement clears the draw plan;
+textures remain reusable until owner destruction. The manual `model_pixel_probe`
+example checks the textured native draw and retirement on surfaceless Mesa.

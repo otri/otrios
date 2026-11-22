@@ -270,7 +270,7 @@ pub(super) fn duration(event: &MessageEvent) -> u64 {
     match event {
         MessageEvent::Steam { .. } => 6800,
         MessageEvent::Boop { .. } => 5600,
-        MessageEvent::Salute { .. } => 4000,
+        MessageEvent::Salute { .. } => 2100,
         MessageEvent::Dice { .. } => 4300,
     }
 }
@@ -304,7 +304,7 @@ pub(super) fn vertices(
     match event {
         MessageEvent::Steam { seed } => steam(&mut canvas, *seed, t, origin, dark, quiet),
         MessageEvent::Boop { seed, .. } => boop(&mut canvas, *seed, t, origin, dark, quiet),
-        MessageEvent::Salute { seed, .. } => salute(&mut canvas, *seed, t, origin, dark, quiet),
+        MessageEvent::Salute { .. } => {}
         MessageEvent::Dice { seed, sides, rolls } => {
             dice(&mut canvas, *seed, *sides, rolls, t, origin, dark, quiet)
         }
@@ -624,126 +624,6 @@ fn boop(canvas: &mut Canvas, seed: u32, t: f32, at: [f32; 2], dark: bool, quiet:
             canvas.triangle(p2, p1, p3, color);
         }
     }
-}
-fn top_hat() -> &'static Vec<SolidFace> {
-    static HAT: OnceLock<Vec<SolidFace>> = OnceLock::new();
-    HAT.get_or_init(|| {
-        let mut faces = vec![];
-        let point = |radius: [f32; 2], y: f32, angle: f32| {
-            [angle.cos() * radius[0], y, angle.sin() * radius[1]]
-        };
-        let mut cylinder = |bottom: [f32; 2], top: [f32; 2], y0: f32, y1: f32, color: [f32; 3]| {
-            for i in 0..40 {
-                let a = i as f32 / 40. * TAU;
-                let b = (i + 1) as f32 / 40. * TAU;
-                faces.push(SolidFace::new(
-                    vec![
-                        point(bottom, y0, a),
-                        point(bottom, y0, b),
-                        point(top, y1, b),
-                        point(top, y1, a),
-                    ],
-                    color,
-                    [((a + b) * 0.5).cos(), 0., ((a + b) * 0.5).sin()],
-                ));
-            }
-        };
-        cylinder([1.66, 1.35], [1.66, 1.35], -1.15, -0.99, [0.27, 0.24, 0.18]);
-        // Split the crown at the band boundaries. Separate overlapping
-        // full-height cylinders would defeat painter-order occlusion while tipped.
-        cylinder(
-            [0.78, 0.78],
-            [0.7833, 0.7833],
-            -0.99,
-            -0.94,
-            [0.19, 0.21, 0.245],
-        );
-        cylinder(
-            [0.7833, 0.7833],
-            [0.8188, 0.8188],
-            -0.94,
-            -0.41,
-            [0.74, 0.46, 0.24],
-        );
-        cylinder(
-            [0.8188, 0.8188],
-            [0.95, 0.95],
-            -0.41,
-            1.55,
-            [0.19, 0.21, 0.245],
-        );
-        for i in 0..40 {
-            let a = i as f32 / 40. * TAU;
-            let b = (i + 1) as f32 / 40. * TAU;
-            faces.push(SolidFace::new(
-                vec![
-                    [0., 1.55, 0.],
-                    point([0.95, 0.95], 1.55, a),
-                    point([0.95, 0.95], 1.55, b),
-                ],
-                [0.24, 0.265, 0.30],
-                [0., 1., 0.],
-            ));
-            faces.push(SolidFace::new(
-                vec![
-                    point([0.78, 0.78], -0.99, a),
-                    point([1.66, 1.35], -0.99, a),
-                    point([1.66, 1.35], -0.99, b),
-                    point([0.78, 0.78], -0.99, b),
-                ],
-                [0.22, 0.24, 0.27],
-                [0., 1., 0.],
-            ));
-            faces.push(SolidFace::new(
-                vec![
-                    [0., -1.15, 0.],
-                    point([1.66, 1.35], -1.15, a),
-                    point([1.66, 1.35], -1.15, b),
-                ],
-                [0.11, 0.12, 0.14],
-                [0., -1., 0.],
-            ));
-        }
-        faces
-    })
-}
-fn salute(canvas: &mut Canvas, seed: u32, t: f32, _at: [f32; 2], _dark: bool, quiet: bool) {
-    let [w, h] = canvas.viewport;
-    let enter = smooth(t / 0.55);
-    let leave = smooth((t - 2.7) / 1.25);
-    let tip = ((t - 0.45) / 2.3 * PI).sin().max(0.);
-    let scale = w.min(h * 0.85) / 3.25
-        * (1.08 + tip * if quiet { 0.03 } else { 0.13 })
-        * (1. - leave * 0.25);
-    let center = [
-        w * 0.5 + (t * 2.).sin() * w * if quiet { 0.005 } else { 0.025 },
-        if quiet {
-            h * 0.53 - leave * h * 0.4
-        } else {
-            mix(h + scale * 1.7, h * 0.53, enter) - leave * h * 0.5
-        },
-    ];
-    let rotation = Q::axis([0., 0., 1.], -tip * if quiet { 0.10 } else { 0.32 })
-        .product(Q::axis(
-            [1., 0., 0.],
-            0.30 + tip * if quiet { 0.12 } else { 0.55 },
-        ))
-        .product(Q::axis(
-            [0., 1., 0.],
-            (t * 1.8 + (seed % 4096) as f32 / 4096. * TAU).sin() * if quiet { 0.08 } else { 0.35 },
-        ));
-    let alpha = smooth(t / 0.2) * (1. - leave);
-    solid(
-        canvas,
-        top_hat(),
-        &Stage {
-            center,
-            scale,
-            rotation,
-        },
-        alpha,
-        [0.66, 0.53, 0.34, 0.],
-    );
 }
 
 struct Body {

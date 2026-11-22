@@ -1618,6 +1618,10 @@ impl Client {
     pub fn take_collection_revoked(&mut self) -> bool {
         std::mem::take(&mut self.collection_revoked)
     }
+    pub fn model_effects(&self) -> Result<Option<super::model::Frame>> {
+        self.interactive_chat()
+            .map_or(Ok(None), |chat| chat.model_effects())
+    }
     pub fn effect_vertices(&self) -> Result<Vec<f32>> {
         self.sync_responder_focus()?;
         let mut vertices = self.interactive_chat().map_or_else(

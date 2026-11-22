@@ -9,7 +9,7 @@ function device(){
     getExtension:name=>name==='OES_texture_float'||name==='OES_standard_derivatives'?{}:null,
     getShaderPrecisionFormat:()=>({precision:23}),isContextLost:()=>false,
     getShaderParameter:()=>true,getProgramParameter:()=>true,
-    getUniformLocation:(_p,name)=>name,getAttribLocation:(_p,name)=>['position','color','renderCoord','bandTransform','glyph','uv'].indexOf(name),
+    getUniformLocation:(_p,name)=>name,getAttribLocation:(_p,name)=>['position','color','renderCoord','bandTransform','glyph','uv','texcoord','normal'].indexOf(name),
     getParameter:name=>name==='MAX_TEXTURE_SIZE'?4096:name==='VIEWPORT'?viewport:name==='FRAMEBUFFER_BINDING'?framebuffer:undefined,
     checkFramebufferStatus:()=> 'FRAMEBUFFER_COMPLETE',getError:()=> 'NO_ERROR',
     bindFramebuffer:(_target,value)=>{framebuffer=value;},viewport:(...value)=>{viewport=value;},
@@ -252,4 +252,26 @@ test('retained UI chunk updates upload one resource and draw unchanged neighbors
   assert.deepEqual(calls.filter(c=>c[0]==='vertexAttrib4fv').map(c=>Array.from(c[2])),[...Array(3).fill(colors.purple),...Array(3).fill(colors.green),...Array(3).fill(colors.blue)]);
   assert.equal(calls.filter(c=>c[0]==='drawArrays').length,9);
   renderer.contextLost();calls.length=0;layers.clear();assert.equal(layers.resources.size,0);assert.equal(calls.filter(c=>c[0]==='deleteBuffer').length,0,'lost handles are never reused or deleted');
+});
+
+test('static model poses reuse texture uploads and retire cleanly under modal and context loss',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createModelLayer();
+  const id='a'.repeat(64),vertices=new Float32Array([
+    10,10,3,0,0,0,0,1,1,1,1,1,
+    50,10,4,1,0,0,0,1,1,1,1,1,
+    10,50,3,0,1,0,0,1,1,1,1,1,
+  ]);
+  const pose={vertices,depth:[1.285714,-2.285714],batches:[{first:0,count:3,texture:id,doubleSided:true}]};
+  calls.length=0;layer.setFrame({...pose,textures:[{id,width:2,height:2,repeat:[true,true],pixels:new Uint8Array(16).fill(255)}]});
+  assert.equal(calls.filter(c=>c[0]==='texImage2D').length,1);
+  calls.length=0;layer.setFrame(pose);renderer.beginFrame();layer.draw();renderer.endFrame();
+  assert.equal(calls.filter(c=>c[0]==='texImage2D').length,0,'pose updates retain the immutable image');
+  assert.deepEqual(calls.filter(c=>c[0]==='drawArrays').map(c=>c.slice(2)),[[0,3]]);
+  assert(calls.some(c=>c[0]==='enable'&&c[1]===gl.DEPTH_TEST));
+  assert(calls.some(c=>c[0]==='disable'&&c[1]===gl.DEPTH_TEST));
+  calls.length=0;layer.setFrame(null);layer.draw();assert.equal(calls.length,0,'a suppressed model leaves no draw');
+  const invalid=vertices.slice();invalid[2]=0;assert.throws(()=>layer.setFrame({...pose,vertices:invalid}),/Invalid model vertex/);
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,0,'invalid poses cannot replace GPU geometry');
+  renderer.contextLost();calls.length=0;layer.dispose();assert.equal(layer.textures.size,0);
+  assert.equal(calls.filter(c=>c[0].startsWith('delete')).length,0,'lost handles are abandoned');
 });

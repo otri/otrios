@@ -54,6 +54,30 @@ fn main() {
         shaders.push_str(";\n");
     }
     fs::write(out.join("slug_shaders.h"), shaders).unwrap();
+    // The same GLSL ES 1.00 text feeds WebGL1 and native GLES2; no shader fork.
+    let model_path = "../../web/shared/model-shaders.mjs";
+    println!("cargo:rerun-if-changed={model_path}");
+    let source = fs::read_to_string(model_path).unwrap();
+    let mut model = String::new();
+    for (symbol, export) in [
+        ("ot_model_vs", "modelVertex"),
+        ("ot_model_fs", "modelFragment"),
+    ] {
+        let marker = format!("export const {export}=`");
+        let glsl = source
+            .split_once(&marker)
+            .unwrap()
+            .1
+            .split_once("`;")
+            .unwrap()
+            .0;
+        model.push_str(&format!("static const char *{symbol} =\n"));
+        for line in glsl.lines() {
+            model.push_str(&format!("{:?}\n", format!("{line}\n")));
+        }
+        model.push_str(";\n");
+    }
+    fs::write(out.join("model_shaders.h"), model).unwrap();
     for source in ["platform", "touch"] {
         assert!(
             Command::new(&compiler)

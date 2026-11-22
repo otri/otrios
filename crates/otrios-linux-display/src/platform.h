@@ -16,6 +16,10 @@ void ot_get_info(ot_display *d,ot_info *info);
 /* Internal ABI: Rust validates finite scalar/colour/attribute contents before
  * these synchronous calls. C validates dimensions, ranges and owned allocations. */
 int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats);
+/* Static model overlay: 12 floats per vertex, four words per draw
+ * (first,count,texture slot,double sided). Texture pixels are copied to GL. */
+int ot_model_texture(ot_display *d,uint32_t slot,uint32_t width,uint32_t height,int repeat_s,int repeat_t,const uint8_t *rgba,size_t bytes);
+int ot_model_upload(ot_display *d,const float *vertices,size_t floats,const uint32_t *draws,size_t words,const float *depth);
 int ot_set_font(ot_display *d,uint32_t cw,uint32_t ch,const float *curves,size_t curve_floats,uint32_t bw,uint32_t bh,const uint8_t *bands,size_t band_bytes);
 typedef int (*ot_emoji_rasterizer)(void *context,uint32_t id,uint8_t *alpha,size_t bytes);
 void ot_set_emoji_rasterizer(ot_display *d,ot_emoji_rasterizer rasterize,void *context);

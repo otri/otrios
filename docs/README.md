@@ -5,6 +5,7 @@
 | --- | --- |
 | New Designer UX, lifecycle and prototype | [Design package and recovery guide](oib-designer/README.md) |
 | Visual language and proposed style system | [Design reference](../DESIGN.md), [technical design](rfcs/0037-oib-design-system.md) |
+| Shared static GLB models and textures | [Model rendering](MODEL_RENDERING.md), [compact Relay assets](../assets/models/README.md) |
 | Current apps and development | [Dashboard](DASHBOARD.md), [app packages](../apps/README.md) |
 | Frame operation, signing, deployment and rollback | [Frame hosting](FRAME_HOSTING.md) |
 | Public routes and private Monitoring | [Public access](PUBLIC_ACCESS.md), [Monitoring](MONITORING.md) |

@@ -211,6 +211,30 @@ impl Replay {
                 },
             )
     }
+    pub fn model_frame(
+        &self,
+        now: u64,
+        viewport: [f32; 2],
+        quiet: bool,
+        enabled: bool,
+    ) -> Result<Option<crate::canvas::model::Frame>> {
+        if !enabled
+            || option_env!("OTRIOS_RELAY_EFFECTS_DISABLED") == Some("1")
+            || self.clip[2] <= self.clip[0]
+            || self.clip[3] <= self.clip[1]
+        {
+            return Ok(None);
+        }
+        let Some(playing) = self
+            .playing
+            .iter()
+            .rev()
+            .find(|p| matches!(p.event, MessageEvent::Salute { .. }))
+        else {
+            return Ok(None);
+        };
+        super::model_effects::hat_frame(now.saturating_sub(playing.at), viewport, quiet)
+    }
     pub fn vertices(
         &self,
         now: u64,

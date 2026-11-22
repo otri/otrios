@@ -69,13 +69,17 @@ use the same shared responder focus. Replays create no message or room command.
 Procedural shaded d6 cubes and d20 meshes tumble with seeded bounce/spin, then
 settle onto the recorded face. Other admitted side counts retain their exact
 results in numbered result blocks. Dice enter from the left with clockwise
-forward roll. Steam fills the viewport with rising clouds; Salute tips a large
-shaded 3D top hat. Boop rolls a shrinking 3D soccer ball in from the right,
+forward roll and a bounded shared collision simulation. Steam accompanies a
+rolling locomotive: its rotating wheels and connecting rod carry a moving
+chimney that emits stable, feathered clouds. Salute gives the actual website
+hat a short forward tip through the shared [textured model path](MODEL_RENDERING.md).
+The complete GLB is under 300 KB. Boop rolls a shrinking 3D soccer ball in from the right,
 bounces it off the target avatar (or event message), and sends perspective
 ripples toward the horizon. Animations span the app viewport in the shared
 effects layer, remain input pass-through, and hide behind open dialogs,
-without rebuilding retained text/chrome. One throw and at most two other effects
-can coexist, with a bounded geometry budget. Off/reduced-motion suppress playback;
+without rebuilding retained text/chrome. At most three replay records
+coexist, including one throw. One textured model frame is drawn for the newest
+active Salute, with separate bounded model and procedural geometry budgets. Off/reduced-motion suppress playback;
 Quiet reduces movement and particles. Dice outcomes are never rolled again by a
 replay.
 

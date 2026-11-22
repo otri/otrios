@@ -575,6 +575,43 @@ impl CanvasApp {
             .as_ref()
             .clone())
     }
+    /// Metadata and resource IDs only. The worker transfers each RGBA image once
+    /// per graphics generation; changing poses transfer only the vertex buffer.
+    pub fn model_frame(&self) -> Result<String, String> {
+        let Some(model) = &self.frame()?.model_effects else {
+            return Ok("null".into());
+        };
+        serde_json::to_string(&serde_json::json!({
+            "depth":model.depth,
+            "batches":model.batches.iter().map(|b|serde_json::json!({
+                "first":b.first,"count":b.count,"texture":b.texture.id.iter().map(|n|format!("{n:02x}")).collect::<String>(),
+                "doubleSided":b.double_sided,"width":b.texture.width,"height":b.texture.height,"repeat":b.texture.repeat,
+            })).collect::<Vec<_>>()
+        })).map_err(|e|e.to_string())
+    }
+    pub fn model_vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self
+            .frame()?
+            .model_effects
+            .as_ref()
+            .map_or_else(Vec::new, |m| m.vertices.clone()))
+    }
+    pub fn model_texture(&self, id: &str) -> Result<Vec<u8>, String> {
+        let frame = self.frame()?;
+        let texture = frame.model_effects.as_ref().and_then(|m| {
+            m.batches.iter().find(|b| {
+                b.texture
+                    .id
+                    .iter()
+                    .map(|n| format!("{n:02x}"))
+                    .collect::<String>()
+                    == id
+            })
+        });
+        texture
+            .map(|b| b.texture.rgba.clone())
+            .ok_or_else(|| "Unknown model texture resource".into())
+    }
     pub fn effect_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self.frame()?.effects.as_ref().clone())
     }

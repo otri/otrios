@@ -447,6 +447,37 @@ pub(super) fn run() -> Result<(), String> {
                         && effect_revision != Some(f.paint.revisions.effects)
                     {
                         display.upload(2, &f.paint.effects)?;
+                        if let Some(model) = &f.paint.model_effects {
+                            let mut textures = Vec::new();
+                            let mut draws = Vec::new();
+                            for batch in &model.batches {
+                                let texture = &batch.texture;
+                                let slot = if let Some(index) =
+                                    textures.iter().position(|id| id == &texture.id)
+                                {
+                                    index
+                                } else {
+                                    textures.push(texture.id);
+                                    textures.len() - 1
+                                };
+                                display.model_texture(
+                                    slot as u32,
+                                    texture.id,
+                                    [texture.width, texture.height],
+                                    texture.repeat,
+                                    &texture.rgba,
+                                )?;
+                                draws.extend([
+                                    batch.first,
+                                    batch.count,
+                                    slot as u32,
+                                    u32::from(batch.double_sided),
+                                ]);
+                            }
+                            display.upload_model(&model.vertices, &draws, model.depth)?;
+                        } else {
+                            display.upload_model(&[], &[], [1., 0.])?;
+                        }
                         if pan.enabled() {
                             vertex_upload_bytes += vertex_bytes(&f.paint.effects, &[]);
                             upload_calls += 1;
