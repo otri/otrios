@@ -1736,15 +1736,21 @@ impl Client {
     /// Trusted shell density reserves navigation independently of fitted content.
     /// Responsive apps retain any larger signed minimum.
     pub fn viewport_policy(&self) -> otrios_interfaces::layout::ViewportPolicy {
-        if self.host_active
+        // Launch ownership changes before the destination replaces the local
+        // launcher. Keep sizing the scene still on screen during that handshake.
+        let host_visible = self.host_active
+            || self.local
+                && self
+                    .active
+                    .as_ref()
+                    .is_some_and(|m| m.state_ref == "host:spaces/state");
+        if host_visible
             || self
                 .active
                 .as_ref()
                 .is_some_and(|m| m.breadcrumbs.is_some())
         {
-            // Phone-capable surfaces reflow in device-independent browser units.
-            // Their navigation must not inherit a desktop content-canvas minimum.
-            if self.host_active
+            if host_visible
                 || self.active.as_ref().is_some_and(|m| {
                     m.chat.is_some() || matches!(m.ui.presentation, Some(Presentation::View { .. }))
                 })

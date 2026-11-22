@@ -926,6 +926,92 @@ fn unavailable_metadata_discards_the_private_host_view_and_switching_forgets_the
     );
 }
 
+#[test]
+fn launcher_launch_retains_phone_density_until_cached_app_activation() {
+    let (mut client, ui) = fixture(Role::Admin);
+    let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    let bytes = encode_ui(&ui).unwrap();
+    for cycle in 0..2 {
+        client.set_layout_viewport([390., 720.]).unwrap();
+        client.set_viewport([390., 720.]).unwrap();
+        click(&mut client, "Counter");
+        // Browser feedback runs before the destination's Mounted reply. The
+        // retained local Home must not request a 1280-wide desktop viewport.
+        let phone = otrios_interfaces::layout::ViewportPolicy::Responsive {
+            minimum: [320., 300.],
+        };
+        assert_eq!(client.viewport_policy(), phone);
+        let (epoch, writer, resume, known_ui) = loop {
+            let message = decode_client(&client.outgoing().unwrap().unwrap()).unwrap();
+            if let ClientMessage::Mount {
+                epoch,
+                writer,
+                resume,
+                known_ui,
+                ..
+            } = message
+            {
+                break (epoch, writer, resume, known_ui);
+            }
+            assert!(matches!(message, ClientMessage::Leave { .. }));
+        };
+        assert_eq!(known_ui.is_some(), cycle > 0);
+        let mut discovery = snapshot(Role::Admin, cycle + 2);
+        discovery.cursor.revision += u64::from(cycle);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(discovery),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(client.viewport_policy(), phone);
+        assert_eq!(client.scene().unwrap().root().frame.width, 390.);
+        let (mut session, _) = authority.open_session(&writer, resume).unwrap();
+        client
+            .receive(
+                &encode_server(&ServerMessage::Mounted {
+                    epoch,
+                    ui_hash: hash(&bytes),
+                    ui: if cycle == 0 { bytes.clone() } else { vec![] },
+                    code: vec![],
+                    state: authority.generate(&mut session).unwrap().unwrap(),
+                    binding: Some(MountBinding {
+                        version: 2,
+                        actor: [1; 32],
+                        collection: "d".repeat(32),
+                        editable: true,
+                        ui_editable: false,
+                        comments: false,
+                        moderate: false,
+                    }),
+                    initial_view: None,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+            ClientMessage::AcceptMount { epoch }
+        );
+        client
+            .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+            .unwrap();
+        assert!(!client.spaces_ui());
+        client.tick(100 + u64::from(cycle), 0).unwrap();
+        assert!(
+            !client.spaces_ui(),
+            "metadata cannot queue a surprise return to Home"
+        );
+        client.navigate("").unwrap();
+        assert!(client.spaces_ui());
+    }
+    assert_eq!(client.resource_usage().ui_cache_hits, 1);
+}
+
 fn launch(client: &mut Client, ui: &Ui, authority: &mut Document) -> Session {
     launch_access(client, ui, authority, true)
 }

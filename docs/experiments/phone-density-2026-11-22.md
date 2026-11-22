@@ -61,3 +61,41 @@ Broad preflight suites, physical iPhone Safari interaction/pixel acceptance and
 physical Frame acceptance were not run. The phone result above is shared-scene,
 viewport-math and protocol acceptance. Frame remains offline. No remote push or
 PR was made.
+
+## Follow-up: repeated Relay entry
+
+The iPhone report exposed a missing transition case in the initial acceptance:
+that check mounted chat directly; it did not repeat a launcher tile activation
+with browser viewport-policy feedback between every mount message.
+
+A real public WSS reproduction activated The Brass Relay from Home while applying
+the browser's responsive sizing calculation. Home remained visible during the
+mount handshake, but `host_active` had already been cleared. Its reported policy
+therefore changed from the phone minimum to the desktop minimum, expanding a
+390 × 720 scene to 1280 × 2363. The pending transcript then failed with
+`Document viewport exceeds GPU geometry budget at this scale`. The web owner
+reconnected and returned to Home, matching the reported small/normal Home loop.
+
+The policy now follows the still-visible local launcher until the destination
+actually replaces it. It retains the phone minimum throughout mounting, regardless
+of whether input ownership has transferred. App state, cache contents, transcript
+limits and wire protocols are unchanged.
+
+- Added and ran `cargo test --locked -p otrios-core --features canvas --test spaces_ui
+  launcher_launch_retains_phone_density_until_cached_app_activation`: 1 passed.
+  Checks pending launch policy, metadata arriving during mounting, a full UI mount,
+  a cached UI mount, and return to Home after activation.
+- The public WSS shared-client journey now completes three consecutive
+  Home → Relay → Home cycles with viewport feedback throughout, including two
+  cached UI hits, a steady 390 × 720 scene and no edits sent.
+- Rebuilt browser Wasm, Mac packer/checker, Linux authority/checker and ARMv7 direct
+  host using the existing pinned toolchain. No broad preflight suite was run.
+
+Follow-up signed release: `560c46f2b53253049af423f1fc86671bb12489e899fe331b366728b66d22a5cf`.
+The complete closure was verified before atomic activation. All 85 authority
+files, app contracts and catalog bytes remain unchanged. After activation, the
+three-cycle public WSS journey passed again with two cached UI hits and no scale
+change. Home/Relay HTTP returned 200; the public pointer and downloaded Wasm digest
+matched the signed release. Authority, tunnel and Monitoring timer remained active.
+The compatible prior release and authority executable remain available for rollback.
+Physical iPhone Safari acceptance remains with the reporting device.
