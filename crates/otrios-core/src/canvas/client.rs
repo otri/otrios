@@ -1620,14 +1620,10 @@ impl Client {
     }
     pub fn effect_vertices(&self) -> Result<Vec<f32>> {
         self.sync_responder_focus()?;
-        let mut vertices = self
-            .active
-            .as_ref()
-            .and_then(|m| m.chat.as_ref())
-            .map_or_else(
-                || Ok(vec![]),
-                |chat| chat.effect_vertices(self.appearance_is_dark()),
-            )?;
+        let mut vertices = self.interactive_chat().map_or_else(
+            || Ok(vec![]),
+            |chat| chat.effect_vertices(self.appearance_is_dark()),
+        )?;
         self.append_focus_vertices(&mut vertices)?;
         if let Some(m) = &self.active {
             let color = m
@@ -3147,6 +3143,12 @@ impl Client {
     pub fn scene(&self) -> Result<Arc<Scene>> {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
+    fn interactive_chat(&self) -> Option<&super::chat::Client> {
+        self.active
+            .as_ref()
+            .filter(|m| !m.local_modal_open())
+            .and_then(|m| m.chat.as_ref())
+    }
     pub fn control_ids(&self) -> Result<Vec<u32>> {
         let mut ids = self
             .scene()?
@@ -3154,16 +3156,14 @@ impl Client {
             .iter()
             .map(|c| c.node.id)
             .collect::<Vec<_>>();
-        if let Some(chat) = self.active.as_ref().and_then(|m| m.chat.as_ref()) {
+        if let Some(chat) = self.interactive_chat() {
             ids.extend(chat.replay_controls().iter().map(|c| c.id));
         }
         Ok(ids)
     }
     pub fn control_label(&self, id: u32) -> Result<String> {
         if let Some(c) = self
-            .active
-            .as_ref()
-            .and_then(|m| m.chat.as_ref())
+            .interactive_chat()
             .and_then(|chat| chat.replay_controls().iter().find(|c| c.id == id))
         {
             return Ok(c.label.clone());
@@ -3178,9 +3178,7 @@ impl Client {
     }
     pub fn control_bounds(&self, id: u32) -> Result<Option<[f32; 4]>> {
         if let Some(c) = self
-            .active
-            .as_ref()
-            .and_then(|m| m.chat.as_ref())
+            .interactive_chat()
             .and_then(|chat| chat.replay_controls().iter().find(|c| c.id == id))
         {
             return Ok(Some(c.bounds));
@@ -3628,9 +3626,7 @@ impl Client {
         if epoch == self.epoch() && self.active.is_some() && event.phase == PointerPhase::Down {
             let scene = self.scene()?;
             let replay_scene = self
-                .active
-                .as_ref()
-                .and_then(|m| m.chat.as_ref())
+                .interactive_chat()
                 .map(|chat| chat.replay_scene())
                 .transpose()?;
             let replay_id = replay_scene.as_ref().and_then(|s| {
