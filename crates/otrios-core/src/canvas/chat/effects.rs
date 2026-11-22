@@ -248,30 +248,24 @@ impl Canvas {
         self.triangle(p(a, -1.), p(b, 1.), p(b, -1.), color);
     }
     fn ellipse(&mut self, at: [f32; 2], r: [f32; 2], color: Color) {
-        for i in 0..16 {
+        self.ellipse_steps(at, r, color, 16);
+    }
+    fn ellipse_steps(&mut self, at: [f32; 2], r: [f32; 2], color: Color, steps: usize) {
+        for i in 0..steps {
             let point = |i: usize| {
-                let a = i as f32 / 16. * TAU;
+                let a = i as f32 / steps as f32 * TAU;
                 [at[0] + a.cos() * r[0], at[1] + a.sin() * r[1]]
             };
             self.triangle(at, point(i), point(i + 1), color);
-        }
-    }
-    fn ring(&mut self, at: [f32; 2], r: f32, width: f32, color: Color) {
-        for i in 0..24 {
-            let point = |i: usize| {
-                let a = i as f32 / 24. * TAU;
-                [at[0] + a.cos() * r, at[1] + a.sin() * r]
-            };
-            self.line(point(i), point(i + 1), width, color);
         }
     }
 }
 
 pub(super) fn duration(event: &MessageEvent) -> u64 {
     match event {
-        MessageEvent::Steam { .. } => 2300,
-        MessageEvent::Boop { .. } => 1400,
-        MessageEvent::Salute { .. } => 1800,
+        MessageEvent::Steam { .. } => 4800,
+        MessageEvent::Boop { .. } => 5600,
+        MessageEvent::Salute { .. } => 4000,
         MessageEvent::Dice { .. } => 4300,
     }
 }
@@ -312,127 +306,400 @@ pub(super) fn vertices(
     }
     canvas.vertices
 }
-fn steam(canvas: &mut Canvas, seed: u32, t: f32, at: [f32; 2], dark: bool, quiet: bool) {
+fn steam(canvas: &mut Canvas, seed: u32, t: f32, _at: [f32; 2], dark: bool, quiet: bool) {
+    let [w, h] = canvas.viewport;
     let mut random = Random(seed);
-    let count = if quiet { 5 } else { 13 };
-    for _ in 0..count {
-        let delay = random.range(0., 0.65);
+    for _ in 0..if quiet { 8 } else { 20 } {
+        let delay = random.range(0., 1.05);
         let age = t - delay;
-        let spread = random.range(-26., 26.);
-        let drift = random.range(-18., 18.);
+        let spread = random.range(-0.18, 1.18);
+        let drift = random.range(-0.22, 0.22);
         let phase = random.range(0., TAU);
-        if !(0. ..1.65).contains(&age) {
+        let size = random.range(0.12, 0.25);
+        if !(0. ..3.7).contains(&age) {
             continue;
         }
-        let f = age / 1.65;
-        let r = 8. + f * 24.;
+        let f = age / 3.7;
+        let radius = w * (size + f * if quiet { 0.32 } else { 0.53 });
         let p = [
-            at[0] + spread + drift * f + (f * 7. + phase).sin() * 7.,
-            at[1] - age * if quiet { 24. } else { 48. },
+            w * (spread + drift * f + (f * 5. + phase).sin() * 0.035),
+            h + radius * 0.35 - f * (h + radius * 2.5),
         ];
-        let alpha = (smooth(f / 0.18) * (1. - f).powi(2)) * 0.43;
-        let shade = if dark { 0.83 } else { 0.35 };
-        for (factor, opacity) in [(1.35, 0.18), (1., 0.35), (0.72, 0.47)] {
-            canvas.ellipse(
+        let alpha =
+            smooth(f / 0.12) * (1. - smooth((f - 0.55) / 0.45)) * if quiet { 0.55 } else { 1.15 };
+        let shade = if dark { 0.87 } else { 0.58 } + random.range(-0.035, 0.035);
+        // Wide translucent shells soften the cloud edge without textures,
+        // blur passes, screen-size render targets or unbounded particle state.
+        for (factor, opacity) in [
+            (1.45, 0.045),
+            (1.20, 0.065),
+            (1., 0.10),
+            (0.75, 0.13),
+            (0.48, 0.18),
+        ] {
+            canvas.ellipse_steps(
                 p,
-                [r * factor, r * factor * 0.82],
-                [shade, shade + 0.015, shade + 0.025, alpha * opacity],
+                [radius * factor, radius * factor * 0.84],
+                [shade, shade + 0.012, shade + 0.022, alpha * opacity],
+                32,
             );
         }
     }
+}
+
+struct SolidFace {
+    points: Vec<V3>,
+    normal: V3,
+    center: V3,
+    color: [f32; 3],
+}
+impl SolidFace {
+    fn new(mut points: Vec<V3>, color: [f32; 3], outward: V3) -> Self {
+        let mut normal = norm(cross(sub(points[1], points[0]), sub(points[2], points[0])));
+        if dot(normal, outward) < 0. {
+            points.reverse();
+            normal = mul(normal, -1.);
+        }
+        let center = mul(
+            points.iter().copied().fold([0.; 3], add),
+            1. / points.len() as f32,
+        );
+        Self {
+            points,
+            normal,
+            center,
+            color,
+        }
+    }
+}
+struct Stage {
+    center: [f32; 2],
+    scale: f32,
+    rotation: Q,
+}
+impl Stage {
+    fn project(&self, p: V3) -> [f32; 2] {
+        let p = self.rotation.rotate(p);
+        let depth = 8. / (8. - p[2]).max(2.);
+        [
+            self.center[0] + p[0] * self.scale * depth,
+            self.center[1] - p[1] * self.scale * depth,
+        ]
+    }
+}
+fn solid(canvas: &mut Canvas, mesh: &[SolidFace], stage: &Stage, alpha: f32, edge: Color) {
+    if alpha <= 0. {
+        return;
+    }
+    let light = norm([-0.5, 0.8, 1.]);
+    let half = norm(add(light, [0., 0., 1.]));
+    let mut faces = vec![];
+    for face in mesh {
+        let center = stage.rotation.rotate(face.center);
+        let normal = stage.rotation.rotate(face.normal);
+        if dot(normal, [-center[0], -center[1], 8. - center[2]]) > 0. {
+            faces.push((center[2], face, normal));
+        }
+    }
+    faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (_, face, normal) in faces {
+        let shade = 0.30 + 0.70 * dot(normal, light).max(0.);
+        let shine = dot(normal, half).max(0.).powi(24) * 0.16;
+        let color = [
+            (face.color[0] * shade + shine).min(1.),
+            (face.color[1] * shade + shine).min(1.),
+            (face.color[2] * shade + shine).min(1.),
+            alpha,
+        ];
+        let points: Vec<_> = face.points.iter().map(|p| stage.project(*p)).collect();
+        for i in 1..points.len() - 1 {
+            canvas.triangle(points[0], points[i], points[i + 1], color);
+        }
+        if edge[3] > 0. {
+            for i in 0..points.len() {
+                canvas.line(
+                    points[i],
+                    points[(i + 1) % points.len()],
+                    (stage.scale * 0.005).clamp(0.6, 1.3),
+                    [edge[0], edge[1], edge[2], edge[3] * alpha],
+                );
+            }
+        }
+    }
+}
+fn soccer_ball() -> &'static Vec<SolidFace> {
+    static BALL: OnceLock<Vec<SolidFace>> = OnceLock::new();
+    BALL.get_or_init(|| {
+        // Truncate each directed edge of an icosahedron by one third: twelve
+        // black pentagons and twenty white hexagons make the classic ball.
+        let mut vertices: Vec<V3> = vec![];
+        for face in d20() {
+            for p in &face.points {
+                if !vertices
+                    .iter()
+                    .any(|q| dot(sub(*p, *q), sub(*p, *q)) < 1e-6)
+                {
+                    vertices.push(*p);
+                }
+            }
+        }
+        let edge = |a: V3, b: V3| norm(add(mul(a, 2.), b));
+        let mut result = vec![];
+        for a in &vertices {
+            let mut neighbors: Vec<V3> = vec![];
+            for face in d20().iter().filter(|f| f.points.contains(a)) {
+                for b in &face.points {
+                    if b != a && !neighbors.contains(b) {
+                        neighbors.push(*b);
+                    }
+                }
+            }
+            let normal = norm(*a);
+            let u = norm(cross(
+                normal,
+                if normal[1].abs() < 0.9 {
+                    [0., 1., 0.]
+                } else {
+                    [1., 0., 0.]
+                },
+            ));
+            let v = cross(normal, u);
+            neighbors.sort_by(|b, c| {
+                dot(*b, v)
+                    .atan2(dot(*b, u))
+                    .total_cmp(&dot(*c, v).atan2(dot(*c, u)))
+            });
+            result.push(SolidFace::new(
+                neighbors.into_iter().map(|b| edge(*a, b)).collect(),
+                [0.055, 0.065, 0.08],
+                normal,
+            ));
+        }
+        for face in d20() {
+            let [a, b, c] = [face.points[0], face.points[1], face.points[2]];
+            result.push(SolidFace::new(
+                vec![
+                    edge(a, b),
+                    edge(b, a),
+                    edge(b, c),
+                    edge(c, b),
+                    edge(c, a),
+                    edge(a, c),
+                ],
+                [0.94, 0.945, 0.91],
+                face.normal,
+            ));
+        }
+        result
+    })
+}
+fn ripple_point(origin: [f32; 2], viewport: [f32; 2], radius: f32, angle: f32) -> [f32; 2] {
+    let x = angle.cos() * radius;
+    let z = angle.sin() * radius;
+    let depth = 8. / (8. + z).max(1.8);
+    let horizon = [
+        viewport[0] * 0.52,
+        (origin[1] - viewport[1] * 0.45).max(viewport[1] * 0.14),
+    ];
+    [
+        horizon[0] + (origin[0] - horizon[0] + x * viewport[0] * 0.13) * depth,
+        horizon[1] + (origin[1] - horizon[1]) * depth,
+    ]
 }
 fn boop(canvas: &mut Canvas, seed: u32, t: f32, at: [f32; 2], dark: bool, quiet: bool) {
-    let fade = (1. - (t - 0.85).max(0.) / 0.55).clamp(0., 1.);
-    let travel = (t / 0.45).clamp(0., 1.);
-    let side = if seed & 1 == 0 { -1. } else { 1. };
-    let height = if quiet { 10. } else { 36. };
-    let p = [
-        at[0] + side * 48. * (1. - smooth(travel)),
-        at[1] - (travel * PI).sin() * height,
-    ];
-    let spring = if t > 0.4 {
-        ((t - 0.4) * 27.).sin() * (-(t - 0.4) * 7.).exp() * 0.23
-    } else {
-        0.
-    };
-    let alpha = fade * 0.95;
-    canvas.ellipse(
-        p,
-        [8. * (1. + spring), 8. * (1. - spring)],
-        [0.85, 0.66, 0.34, alpha],
-    );
-    canvas.ellipse(
-        [p[0] - 2., p[1] - 2.],
-        [2., 2.],
-        [1., 0.92, 0.66, alpha * 0.8],
-    );
-    for i in 0..if quiet { 1 } else { 3 } {
-        let a = (t - 0.38 - i as f32 * 0.1).max(0.);
-        if a > 0. && a < 0.65 {
-            let f = a / 0.65;
-            canvas.ring(
-                at,
-                10. + f * 38.,
-                2. * (1. - f) + 0.5,
-                [0.72, 0.48, 0.3, (1. - f) * fade * 0.8],
-            );
+    let [w, h] = canvas.viewport;
+    let impact = 1.55;
+    if t < 2.45 {
+        let travel = smooth(t / impact);
+        let bounce = ((t - impact) / 0.9).clamp(0., 1.);
+        let radius = if t <= impact {
+            mix(w * if quiet { 0.34 } else { 0.56 }, 18., travel)
+        } else {
+            mix(18., 8., bounce)
+        };
+        let center = if t <= impact {
+            [
+                mix(w + w * 0.24, at[0], travel),
+                mix(h * 0.53, at[1], travel)
+                    - (t / impact * PI).sin() * h * if quiet { 0.025 } else { 0.10 },
+            ]
+        } else {
+            [
+                at[0] + bounce * if quiet { 42. } else { 100. },
+                at[1] - (bounce * PI).sin() * if quiet { 20. } else { 56. },
+            ]
+        };
+        let rotation = Q::axis([0., 0., 1.], t * if quiet { 3.5 } else { 7.5 })
+            .product(Q::axis(
+                [0., 1., 0.],
+                t * 1.2 + (seed % 4096) as f32 / 4096. * TAU,
+            ))
+            .product(Q::axis([1., 0., 0.], 0.25));
+        let alpha = 1. - smooth(bounce);
+        canvas.ellipse(
+            [center[0], center[1] + radius * 0.95],
+            [radius * 0.85, radius * 0.16],
+            [0., 0., 0., alpha * 0.17],
+        );
+        solid(
+            canvas,
+            soccer_ball(),
+            &Stage {
+                center,
+                scale: radius,
+                rotation,
+            },
+            alpha,
+            [0.08, 0.10, 0.11, 0.75],
+        );
+    }
+    for i in 0..if quiet { 2 } else { 4 } {
+        let age = t - impact - i as f32 * 0.25;
+        if !(0. ..3.1).contains(&age) {
+            continue;
+        }
+        let radius = 0.12 + age * if quiet { 3.4 } else { 5.2 };
+        let width = 0.055 + age * 0.018;
+        let alpha = smooth(age / 0.12) * (1. - age / 3.1).powf(1.2);
+        let color = if dark {
+            [0.85, 0.65, 0.37, alpha * 0.85]
+        } else {
+            [0.48, 0.29, 0.16, alpha * 0.8]
+        };
+        for j in 0..72 {
+            let a = j as f32 / 72. * TAU;
+            let b = (j + 1) as f32 / 72. * TAU;
+            let p = |r, a| ripple_point(at, canvas.viewport, r, a);
+            let [p0, p1, p2, p3] = [
+                p(radius - width, a),
+                p(radius - width, b),
+                p(radius + width, a),
+                p(radius + width, b),
+            ];
+            canvas.triangle(p0, p1, p2, color);
+            canvas.triangle(p2, p1, p3, color);
         }
     }
-    if dark {
-        canvas.ring(at, 11. + spring * 8., 0.8, [0.9, 0.78, 0.55, alpha * 0.25]);
-    }
 }
-fn salute(canvas: &mut Canvas, seed: u32, t: f32, at: [f32; 2], dark: bool, quiet: bool) {
-    let fade = (1. - (t - 1.15).max(0.) / 0.65).clamp(0., 1.);
-    let a = (t / 1.4 * PI).sin().max(0.);
-    let angle = if quiet { -0.12 * a } else { -0.5 * a };
-    let lift = a * if quiet { 8. } else { 23. };
-    let point = |x: f32, y: f32| {
-        [
-            at[0] + x * angle.cos() - y * angle.sin(),
-            at[1] - lift + x * angle.sin() + y * angle.cos(),
-        ]
-    };
-    let fill = if dark {
-        [0.82, 0.65, 0.36, fade]
-    } else {
-        [0.34, 0.28, 0.18, fade]
-    };
-    let corners = [
-        point(-14., -4.),
-        point(-11., -26.),
-        point(11., -26.),
-        point(14., -4.),
+fn top_hat() -> &'static Vec<SolidFace> {
+    static HAT: OnceLock<Vec<SolidFace>> = OnceLock::new();
+    HAT.get_or_init(|| {
+        let mut faces = vec![];
+        let point = |radius: [f32; 2], y: f32, angle: f32| {
+            [angle.cos() * radius[0], y, angle.sin() * radius[1]]
+        };
+        let mut cylinder = |bottom: [f32; 2], top: [f32; 2], y0: f32, y1: f32, color: [f32; 3]| {
+            for i in 0..40 {
+                let a = i as f32 / 40. * TAU;
+                let b = (i + 1) as f32 / 40. * TAU;
+                faces.push(SolidFace::new(
+                    vec![
+                        point(bottom, y0, a),
+                        point(bottom, y0, b),
+                        point(top, y1, b),
+                        point(top, y1, a),
+                    ],
+                    color,
+                    [((a + b) * 0.5).cos(), 0., ((a + b) * 0.5).sin()],
+                ));
+            }
+        };
+        cylinder([1.66, 1.35], [1.66, 1.35], -1.15, -0.99, [0.27, 0.24, 0.18]);
+        // Split the crown at the band boundaries. Separate overlapping
+        // full-height cylinders would defeat painter-order occlusion while tipped.
+        cylinder(
+            [0.78, 0.78],
+            [0.7833, 0.7833],
+            -0.99,
+            -0.94,
+            [0.19, 0.21, 0.245],
+        );
+        cylinder(
+            [0.7833, 0.7833],
+            [0.8188, 0.8188],
+            -0.94,
+            -0.41,
+            [0.74, 0.46, 0.24],
+        );
+        cylinder(
+            [0.8188, 0.8188],
+            [0.95, 0.95],
+            -0.41,
+            1.55,
+            [0.19, 0.21, 0.245],
+        );
+        for i in 0..40 {
+            let a = i as f32 / 40. * TAU;
+            let b = (i + 1) as f32 / 40. * TAU;
+            faces.push(SolidFace::new(
+                vec![
+                    [0., 1.55, 0.],
+                    point([0.95, 0.95], 1.55, a),
+                    point([0.95, 0.95], 1.55, b),
+                ],
+                [0.24, 0.265, 0.30],
+                [0., 1., 0.],
+            ));
+            faces.push(SolidFace::new(
+                vec![
+                    point([0.78, 0.78], -0.99, a),
+                    point([1.66, 1.35], -0.99, a),
+                    point([1.66, 1.35], -0.99, b),
+                    point([0.78, 0.78], -0.99, b),
+                ],
+                [0.22, 0.24, 0.27],
+                [0., 1., 0.],
+            ));
+            faces.push(SolidFace::new(
+                vec![
+                    [0., -1.15, 0.],
+                    point([1.66, 1.35], -1.15, a),
+                    point([1.66, 1.35], -1.15, b),
+                ],
+                [0.11, 0.12, 0.14],
+                [0., -1., 0.],
+            ));
+        }
+        faces
+    })
+}
+fn salute(canvas: &mut Canvas, seed: u32, t: f32, _at: [f32; 2], _dark: bool, quiet: bool) {
+    let [w, h] = canvas.viewport;
+    let enter = smooth(t / 0.55);
+    let leave = smooth((t - 2.7) / 1.25);
+    let tip = ((t - 0.45) / 2.3 * PI).sin().max(0.);
+    let scale = w.min(h * 0.85) / 3.25
+        * (1.08 + tip * if quiet { 0.03 } else { 0.13 })
+        * (1. - leave * 0.25);
+    let center = [
+        w * 0.5 + (t * 2.).sin() * w * if quiet { 0.005 } else { 0.025 },
+        if quiet {
+            h * 0.53 - leave * h * 0.4
+        } else {
+            mix(h + scale * 1.7, h * 0.53, enter) - leave * h * 0.5
+        },
     ];
-    canvas.triangle(corners[0], corners[1], corners[2], fill);
-    canvas.triangle(corners[0], corners[2], corners[3], fill);
-    canvas.line(point(-21., -3.), point(21., -3.), 5., fill);
-    canvas.line(
-        point(-12., -9.),
-        point(12., -9.),
-        4.,
-        [0.72, 0.43, 0.26, fade],
+    let rotation = Q::axis([0., 0., 1.], -tip * if quiet { 0.10 } else { 0.32 })
+        .product(Q::axis(
+            [1., 0., 0.],
+            0.30 + tip * if quiet { 0.12 } else { 0.55 },
+        ))
+        .product(Q::axis(
+            [0., 1., 0.],
+            (t * 1.8 + (seed % 4096) as f32 / 4096. * TAU).sin() * if quiet { 0.08 } else { 0.35 },
+        ));
+    let alpha = smooth(t / 0.2) * (1. - leave);
+    solid(
+        canvas,
+        top_hat(),
+        &Stage {
+            center,
+            scale,
+            rotation,
+        },
+        alpha,
+        [0.66, 0.53, 0.34, 0.],
     );
-    for i in 0..if quiet { 2 } else { 5 } {
-        let angle = i as f32 / 5. * TAU + seed as f32 * 0.001;
-        let distance = 25. + a * 13.;
-        let p = [
-            at[0] + angle.cos() * distance,
-            at[1] - lift - 15. + angle.sin() * distance,
-        ];
-        canvas.line(
-            [p[0] - 2., p[1]],
-            [p[0] + 2., p[1]],
-            1.5,
-            [0.85, 0.67, 0.36, fade * a],
-        );
-        canvas.line(
-            [p[0], p[1] - 2.],
-            [p[0], p[1] + 2.],
-            1.5,
-            [0.85, 0.67, 0.36, fade * a],
-        );
-    }
 }
 
 struct Body {
@@ -465,13 +732,14 @@ fn body(
         (viewport[1] - 58.).max(100.),
     ) - (rows - 1 - row) as f32 * scale * 2.25;
     let bound = (viewport[0] / (2. * scale) - 1.1).max(0.1);
+    let launch_x = -viewport[0] / (2. * scale) - 1.6 - index as f32 * 0.18;
     let mut p = [
-        random.range(-bound, bound),
-        random.range(2.4, 3.9),
+        launch_x,
+        random.range(if quiet { 1.6 } else { 2.4 }, if quiet { 2.2 } else { 3.9 }),
         random.range(-0.7, 0.7),
     ];
     let mut v = [
-        random.range(2.8, 5.4) * if index & 1 == 0 { 1. } else { -1. },
+        random.range(if quiet { 3.8 } else { 4.8 }, if quiet { 4.6 } else { 6.2 }),
         random.range(2., 4.6),
         random.range(-1.3, 1.3),
     ];
@@ -489,7 +757,9 @@ fn body(
             v[0] *= 0.78;
             v[2] *= 0.78;
         }
-        if p[0].abs() > bound {
+        // A die may begin outside the left edge while entering. The left
+        // wall applies only once it is travelling back toward that edge.
+        if p[0] > bound || (p[0] < -bound && v[0] < 0.) {
             p[0] = p[0].clamp(-bound, bound);
             v[0] *= -0.72;
         }
@@ -510,12 +780,11 @@ fn body(
         ]),
         random.range(0., TAU),
     );
-    let axis = norm([
-        random.range(-1., 1.),
-        random.range(-1., 1.),
-        random.range(-1., 1.),
-    ]);
-    let spin = Q::axis(axis, time * if quiet { 4. } else { 11. }).product(initial);
+    // World +Y projects upward. A negative Z roll therefore moves a top
+    // marking toward screen-right: clockwise, matching left-to-right travel.
+    // The small oblique components give it a genuine three-dimensional tumble.
+    let travel = p[0] - launch_x;
+    let spin = Q::axis(norm([0.12, 0.17, -1.]), travel / 0.72).product(initial);
     let final_rotation = resting(mesh, value);
     let settle = smooth((t - 1.85) / 0.95);
     let rest_height = mesh
@@ -767,6 +1036,38 @@ mod tests {
                 assert_eq!(front.value, value);
                 assert!(q.rotate(front.normal)[2] > 0.95);
             }
+        }
+    }
+    #[test]
+    fn left_entering_dice_roll_clockwise_with_their_forward_travel() {
+        for seed in [1, 19, 77, 4_294_967_295] {
+            let a = body(seed, 0, 1, cube(), 6, 0., [390., 720.], [195., 550.], false);
+            let b = body(
+                seed,
+                0,
+                1,
+                cube(),
+                6,
+                0.12,
+                [390., 720.],
+                [195., 550.],
+                false,
+            );
+            assert!(
+                project(&a, [0.; 3], 390.)[0] < 0.,
+                "die starts off the left edge"
+            );
+            assert!(
+                b.center[0] > a.center[0],
+                "entry travels toward screen-right"
+            );
+            let [x, y, z, w] = a.rotation.0;
+            let local_top = Q([-x, -y, -z, w]).rotate([0., 1., 0.]);
+            let next_top = b.rotation.rotate(local_top);
+            assert!(
+                next_top[0] > 0. && next_top[1] > 0.,
+                "a top marking advances rightward, clockwise on screen"
+            );
         }
     }
     #[test]

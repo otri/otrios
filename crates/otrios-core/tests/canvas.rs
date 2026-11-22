@@ -4460,7 +4460,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     );
     assert_ne!(first, client.effect_vertices().unwrap());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
-    client.tick(3500, 1_700_000_000).unwrap();
+    client.tick(10_000, 1_700_000_000).unwrap();
     let ended = composer.compose(&mut client, &font).unwrap().clone();
     assert!(!ended.order.contains(&Layer::Effects));
     assert_ne!(ended.revisions.effects, moving.revisions.effects);

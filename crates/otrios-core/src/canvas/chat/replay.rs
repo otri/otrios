@@ -211,7 +211,14 @@ impl Replay {
                 },
             )
     }
-    pub fn vertices(&self, now: u64, dark: bool, quiet: bool, enabled: bool) -> Vec<f32> {
+    pub fn vertices(
+        &self,
+        now: u64,
+        viewport: [f32; 2],
+        dark: bool,
+        quiet: bool,
+        enabled: bool,
+    ) -> Vec<f32> {
         let mut out = vec![];
         let color = if dark {
             [0.85, 0.72, 0.46, 0.9]
@@ -232,27 +239,19 @@ impl Replay {
         if !enabled || option_env!("OTRIOS_RELAY_EFFECTS_DISABLED") == Some("1") {
             return out;
         }
-        let viewport = [
-            (self.clip[2] - self.clip[0]).max(1.),
-            (self.clip[3] - self.clip[1]).max(1.),
-        ];
         if self.clip[2] <= self.clip[0] || self.clip[3] <= self.clip[1] {
             return out;
         }
         for playing in &self.playing {
             let origin = self.origin(playing);
-            let mut vertices = super::effects::vertices(
+            let vertices = super::effects::vertices(
                 &playing.event,
                 now.saturating_sub(playing.at),
                 viewport,
-                [origin[0] - self.clip[0], origin[1] - self.clip[1]],
+                origin,
                 dark,
                 quiet,
             );
-            for vertex in vertices.chunks_exact_mut(6) {
-                vertex[0] += self.clip[0];
-                vertex[1] += self.clip[1];
-            }
             out.extend(vertices);
         }
         // Leave headroom for shared focus and short-lived typing sparks.

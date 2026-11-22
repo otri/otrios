@@ -269,10 +269,13 @@ impl Client {
         }
         let scene = Scene::new(canvas(8_000_000, Rect::new(0., 0., w, h), p.nodes))?;
         let mut vertices = crate::dashboard::render_scene(&scene).vertices;
-        vertices.extend(
-            self.replay
-                .vertices(self.now, dark, self.effects == 1, self.effects != 0),
-        );
+        vertices.extend(self.replay.vertices(
+            self.now,
+            self.viewport,
+            dark,
+            self.effects == 1,
+            self.effects != 0,
+        ));
         Ok(vertices)
     }
     fn wrapped_label(&self, value: &str, width: f32, scale: u32) -> Vec<String> {

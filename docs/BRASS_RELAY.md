@@ -53,8 +53,8 @@ emit sparks.
 | `/roll 2d6`, `/dice 1d20` | Recorded dice results; procedural 3D d6/d20 throws |
 | `/shrug` | Send a shrug |
 | `/salute Full Name` | Tip a brass hat to a member |
-| `/boop Full Name` | A springy brass greeting and copper rings |
-| `/steam` | Vent a little steam |
+| `/boop Full Name` | Roll a soccer ball toward a member with perspective ripples |
+| `/steam` | Fill the screen with rising steam |
 | `/topic text` | Administrator room announcement |
 | `/kick Full Name` | Select a member and confirm removal |
 | `//text` | Send a literal leading slash |
@@ -68,9 +68,12 @@ use the same shared responder focus. Replays create no message or room command.
 
 Procedural shaded d6 cubes and d20 meshes tumble with seeded bounce/spin, then
 settle onto the recorded face. Other admitted side counts retain their exact
-results in numbered result blocks. Steam drifts upward; Boop and Salute use the
-target's visible avatar position when available, otherwise the event message.
-Animations are clipped to the transcript and run in the shared effects layer,
+results in numbered result blocks. Dice enter from the left with clockwise
+forward roll. Steam fills the viewport with rising clouds; Salute tips a large
+shaded 3D top hat. Boop rolls a shrinking 3D soccer ball in from the right,
+bounces it off the target avatar (or event message), and sends perspective
+ripples toward the horizon. Animations span the app viewport in the shared
+effects layer, remain input pass-through, and hide behind open dialogs,
 without rebuilding retained text/chrome. One throw and at most two other effects
 can coexist, with a bounded geometry budget. Off/reduced-motion suppress playback;
 Quiet reduces movement and particles. Dice outcomes are never rolled again by a
