@@ -8,6 +8,34 @@ use std::{
     time::{Duration, Instant},
 };
 use tungstenite::{Message, WebSocket};
+/// Native remote sessions use the same explicit Origin contract as browser
+/// sessions. Authentication remains a separate header supplied by the caller.
+pub fn request(url: &str) -> Result<tungstenite::http::Request<()>, String> {
+    use tungstenite::client::IntoClientRequest;
+    let mut request = url
+        .into_client_request()
+        .map_err(|_| "Invalid session URL")?;
+    let uri = request.uri();
+    let scheme = match uri.scheme_str() {
+        Some("wss") => "https",
+        Some("ws") => "http",
+        _ => return Err("Expected WebSocket URL".into()),
+    };
+    let authority = uri.authority().ok_or("Missing session host")?.as_str();
+    if authority.contains('@') {
+        return Err("Session URL must not contain credentials".into());
+    }
+    let authority = match scheme {
+        "https" => authority.strip_suffix(":443").unwrap_or(authority),
+        _ => authority.strip_suffix(":80").unwrap_or(authority),
+    };
+    let origin = format!("{scheme}://{authority}");
+    request.headers_mut().insert(
+        tungstenite::http::header::ORIGIN,
+        origin.parse().map_err(|_| "Invalid session origin")?,
+    );
+    Ok(request)
+}
 pub fn hello(release: Option<String>, state: bool) -> Message {
     Message::Text(
         serde_json::to_string(&ClientControl::Hello {
@@ -72,5 +100,27 @@ pub fn negotiate<S: Read + Write>(socket: &mut WebSocket<S>) -> Result<(), Strin
                 ) => {}
             other => return Err(format!("Unexpected session negotiation {other:?}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn native_session_origin_matches_remote_and_loopback_endpoints() {
+        for (url, origin) in [
+            (
+                "wss://otrios.otri.ca/session?space=abc",
+                "https://otrios.otri.ca",
+            ),
+            ("wss://otrios.otri.ca:443/session", "https://otrios.otri.ca"),
+            ("ws://127.0.0.1:8876/session", "http://127.0.0.1:8876"),
+            ("ws://[::1]:80/session", "http://[::1]"),
+        ] {
+            let request = super::request(url).unwrap();
+            assert_eq!(request.uri().to_string(), url);
+            assert_eq!(request.headers()["Origin"], origin);
+            assert!(!request.headers().contains_key("Authorization"));
+        }
+        assert!(super::request("wss://user:password@otrios.otri.ca/session").is_err());
     }
 }

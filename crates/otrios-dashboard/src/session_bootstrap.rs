@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (mut socket, _) = tungstenite::client::connect_with_config(
-        args[1].as_str(),
+        session_client::request(&args[1])?,
         Some(
             tungstenite::protocol::WebSocketConfig::default()
                 .max_message_size(Some(MAX_CONTROL_BYTES))

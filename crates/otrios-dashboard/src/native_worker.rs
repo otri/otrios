@@ -310,10 +310,7 @@ fn authenticated_request(
     url: &str,
     identity: Option<&std::path::Path>,
 ) -> Result<tungstenite::http::Request<()>, String> {
-    use tungstenite::client::IntoClientRequest;
-    let mut request = url
-        .into_client_request()
-        .map_err(|_| "Invalid session URL")?;
+    let mut request = session_client::request(url)?;
     if let Some(path) = identity {
         use std::io::Read;
         let mut options = fs::OpenOptions::new();
