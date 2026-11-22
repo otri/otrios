@@ -234,3 +234,8 @@ pub(super) fn render(
 pub(in crate::canvas) fn map_top(width: f32, nested: bool) -> f32 {
     map::top(width, nested)
 }
+
+/// One outer gutter also sets the space between cards and scroll-fade depth.
+pub(in crate::canvas) fn map_spacing(width: f32) -> f32 {
+    if width < 500. { 12. } else { 24. }
+}

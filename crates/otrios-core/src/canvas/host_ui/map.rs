@@ -21,7 +21,6 @@ pub(super) fn top(width: f32, nested: bool) -> f32 {
         0.
     }
 }
-pub(super) const FOOT: f32 = 80.;
 #[derive(Clone, Debug)]
 pub(in crate::canvas) enum DragKind {
     Space(String),
@@ -1158,8 +1157,8 @@ fn map_body<'a>(
                     || s.role == Some(Role::Admin) && snapshot.identity.is_some())
         })
         .collect::<Vec<_>>();
-    let margin = if w < 500. { 12. } else { 24. };
-    let gap = 20.;
+    let margin = super::map_spacing(w);
+    let gap = margin;
     let available = (w - margin * 2.).max(1.);
     let cols = ((available + gap) / 160.).floor().clamp(1., 6.) as usize;
     // Six Spaces plus the existing 16-tile budget keep worst-case tall
@@ -1186,11 +1185,17 @@ fn map_body<'a>(
         pages.last_mut().unwrap().push(*space);
         tiles += count;
     }
-    let foot = if pages.len() > 1 { 136. } else { FOOT };
+    let foot = if pages.len() > 1 {
+        136.
+    } else if !model.message.is_empty() {
+        80.
+    } else {
+        0.
+    };
     model.page = model.page.min(pages.len() - 1);
     let cell = (available - gap * (cols - 1) as f32) / cols as f32;
     let mut positions = vec![];
-    let mut skyline = vec![0.; cols];
+    let mut skyline = vec![margin; cols];
     for space in &pages[model.page] {
         let width = usize::from(space.layout.width).min(cols);
         let count = (space.apps.len()
@@ -1237,8 +1242,8 @@ fn map_body<'a>(
         ));
     }
     let total = skyline.into_iter().fold(0., f32::max);
-    // The fixed controls float over the map. Padding belongs to the scrolling
-    // content, so its final item can clear the controls at the end of a scroll.
+    // The skyline includes the same outer gutter above, between and below cards.
+    // Reserve additional space only for visible fixed paging/status controls.
     model.scroll_limit = (total + foot - (h - top)).max(0.);
     model.scroll = model.scroll.clamp(0., model.scroll_limit);
     for (space, frame, columns) in positions {

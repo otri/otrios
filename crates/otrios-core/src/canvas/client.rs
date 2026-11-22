@@ -5931,7 +5931,12 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     }
     if let Some(scroll) = &m.map_scroll {
         scroll.present(&mut root);
-        host_map::present_map(&mut root, scroll.node(), scroll.info());
+        host_map::present_map(
+            &mut root,
+            scroll.node(),
+            scroll.info(),
+            super::host_ui::map_spacing(m.viewport[0]),
+        );
     }
     if let Some(scroll) = &m.preview_scroll {
         scroll.present(&mut root);

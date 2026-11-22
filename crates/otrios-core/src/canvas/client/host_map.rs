@@ -632,7 +632,12 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
 
 /// Clip semantic controls on the presented clone, never the canonical layout.
 /// Thin edge fades indicate hidden content above and below without blocking input.
-pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::text_scroll::Info) {
+pub(super) fn present_map(
+    root: &mut SceneNode,
+    node: u32,
+    info: super::super::text_scroll::Info,
+    spacing: f32,
+) {
     use crate::dashboard::components::background;
     use otrios_interfaces::scene::Rect;
     if root.id == node {
@@ -641,7 +646,7 @@ pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::t
         for child in &mut root.children {
             crate::dashboard::scene::clip_controls(child, [0., 0.], bounds);
         }
-        let fade_height = 24_f32.min(bounds[1] / 2.);
+        let fade_height = spacing.min(bounds[1] / 2.);
         let step_height = fade_height / 16.;
         for (top, visible) in [
             (true, info.offset[1] > 0.5),
@@ -671,7 +676,7 @@ pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::t
         }
     } else {
         for child in &mut root.children {
-            present_map(child, node, info.clone());
+            present_map(child, node, info.clone(), spacing);
         }
     }
 }

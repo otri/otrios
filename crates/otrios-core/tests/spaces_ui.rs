@@ -2775,7 +2775,35 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
         }),
         "the map flows directly beneath the divider"
     );
-    assert!(client.scroll_map(epoch, 20.).unwrap());
+    let card = scene.path(icon_id).unwrap();
+    let card = card.iter().rev().nth(1).unwrap();
+    let card_top = card.origin[1];
+    assert_eq!(
+        card_top - map_top,
+        card.origin[0],
+        "first Space has the same top and side gutter"
+    );
+    assert!(client.scroll_map(epoch, 1.).unwrap());
+    let scene = client.scene().unwrap();
+    let fade_end = scene.path(4_200_000_031).unwrap();
+    let fade_end = fade_end.last().unwrap();
+    assert_eq!(
+        fade_end.origin[1] + fade_end.node.frame.height,
+        card_top,
+        "the fade occupies the initial empty gutter, so enabling it cannot darken a full card edge"
+    );
+    assert_eq!(
+        scene
+            .path(icon_id)
+            .unwrap()
+            .iter()
+            .rev()
+            .nth(1)
+            .unwrap()
+            .origin[1],
+        card_top - 1.
+    );
+    assert!(client.scroll_map(epoch, 19.).unwrap());
     let (_, clipped_paint_y) = icon(&client);
     assert_eq!(
         paint_y - clipped_paint_y,
