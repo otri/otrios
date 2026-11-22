@@ -348,8 +348,12 @@ impl Builder<'_> {
     fn entry(&mut self, label: &str, frame: [f32; 4]) {
         self.nodes.push(
             a::canvas(vec![
-                a::surface([221, 223, 212, 255], 12.).pin_edges(0.),
-                a::surface(PAPER, 11.).pin_edges(1.),
+                a::rounded_rect([221, 223, 212, 255])
+                    .corner_radius(12.0.into())
+                    .pin_edges(0.),
+                a::rounded_rect(PAPER)
+                    .corner_radius(10.5.into())
+                    .pin_edges(1.5),
                 a::text(FIELD.value())
                     .frame([14., 15., frame[2] - 28., 40.])
                     .font_scale(2.)

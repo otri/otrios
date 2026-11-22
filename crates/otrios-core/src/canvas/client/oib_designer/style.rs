@@ -108,14 +108,15 @@ fn validate(node: &SceneNode) -> Result<(), String> {
     }
     let Primitive::Superellipse {
         radius: outer_radius,
-        exponent: 4.,
+        exponent,
         color: _,
     } = outer.primitive
     else {
         return Err("Unexpected decorative surface outline".into());
     };
-    if !matches!(inner.primitive, Primitive::Superellipse { radius: r, exponent: 4., .. }
-        if r == radius(outer_radius - expected_inner.x, expected_inner.width, expected_inner.height))
+    if !matches!(exponent, 2. | 4.)
+        || !matches!(inner.primitive, Primitive::Superellipse { radius: r, exponent: e, .. }
+        if e == exponent && r == radius(outer_radius - expected_inner.x, expected_inner.width, expected_inner.height))
     {
         return Err("Unexpected decorative surface inset".into());
     }
@@ -146,6 +147,27 @@ pub(super) fn resize_surface(node: &mut SceneNode, width: f32, height: f32) -> R
             unreachable!("validated fill")
         };
         *r = radius(outer_radius - edge, inner.frame.width, inner.frame.height);
+    }
+    Ok(())
+}
+
+/// Align chrome inputs with the opaque browser editor's 12-unit circular edge.
+pub(super) fn text_field_corners(node: &mut SceneNode) -> Result<(), String> {
+    validate(node)?;
+    for (index, layer) in node.children.iter_mut().enumerate() {
+        if let Primitive::Superellipse {
+            radius: r,
+            exponent,
+            ..
+        } = &mut layer.primitive
+        {
+            *r = radius(
+                12. - index as f32 * OUTLINE,
+                layer.frame.width,
+                layer.frame.height,
+            );
+            *exponent = 2.;
+        }
     }
     Ok(())
 }

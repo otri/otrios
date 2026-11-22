@@ -6486,6 +6486,20 @@ fn update_text_views(m: &mut Mount, follow: Option<u16>) -> Result<()> {
     Ok(())
 }
 fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
+    // Native HTML editors cover these shared fields with circular corners.
+    // Match the underlying paint so its squircle cannot protrude at the edge.
+    fn circular_field(node: &mut SceneNode, responder: u32, inside: bool) {
+        let inside = inside || node.id == responder;
+        if inside
+            && let otrios_interfaces::scene::Primitive::Superellipse { exponent, .. } =
+                &mut node.primitive
+        {
+            *exponent = 2.;
+        }
+        for child in &mut node.children {
+            circular_field(child, responder, inside);
+        }
+    }
     fn wrap(n: &mut SceneNode, frame: &EditorFrame, m: &Mount) {
         if n.id == frame.node {
             let editor = &m.editors[&frame.field];
@@ -6510,6 +6524,7 @@ fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
         }
     }
     for frame in editor_frames(m, scene) {
+        circular_field(root, frame.responder, false);
         wrap(root, &frame, m);
     }
 }

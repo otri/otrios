@@ -1164,9 +1164,13 @@ impl Builder {
         action: LocalAction,
         outlined: bool,
     ) -> Result<SceneNode> {
+        let text_field = matches!(&action, LocalAction::FocusField(_));
         let mut row = self.button_style(x, y, width, label, action, outlined)?;
         row.frame.height = 52.;
         style::resize_surface(&mut row.children[0], width, 52.)?;
+        if text_field {
+            style::text_field_corners(&mut row.children[0])?;
+        }
         let title = &mut row.children[1];
         title.frame = Rect::new(8., 16., (width - 16.).max(1.), 28.);
         if let Primitive::Text { scale, .. } = &mut title.primitive {
