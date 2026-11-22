@@ -4127,8 +4127,49 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
                 .unwrap();
             (n.origin, n.node.frame)
         };
+        let back = c
+            .scene()
+            .unwrap()
+            .controls()
+            .into_iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Back to OTriOS")
+            })
+            .unwrap()
+            .node
+            .id;
         edit(&mut c, "Chat identity", 0, 0);
         let scene = c.scene().unwrap();
+        assert!(c.resource_usage().chat.as_ref().unwrap().modal);
+        for background in [
+            "Back to OTriOS",
+            "Sign in",
+            "Participants",
+            "Chat identity",
+            "Commands",
+            "Message composer",
+            "Send message",
+        ] {
+            assert!(
+                !scene.controls().iter().any(|n| n
+                    .node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == background)),
+                "background control cannot receive focus: {background}"
+            );
+        }
+        assert!(
+            !c.activate(c.epoch(), back).unwrap(),
+            "stale background activation is blocked"
+        );
+        assert!(
+            !c.accessibility_text().unwrap().contains("The Brass Relay"),
+            "background text is not announced through the modal"
+        );
         let dim = scene
             .root()
             .children
@@ -4210,6 +4251,14 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
         edit(&mut c, "Cancel profile", 0, 0);
         while c.chat_outgoing().unwrap().is_some() {}
         edit(&mut c, "Commands", 0, 0);
+        assert!(c.resource_usage().chat.as_ref().unwrap().modal);
+        assert!(
+            !c.scene()
+                .unwrap()
+                .controls()
+                .iter()
+                .any(|n| n.node.id == back)
+        );
         let epoch = c.epoch();
         let scene = c.scene().unwrap();
         let body = scene.path(60001).unwrap();
@@ -4276,6 +4325,15 @@ fn brass_relay_phone_dialogs_keep_actions_inside_and_wrap_and_scroll_the_handboo
         assert_eq!(c.epoch(), epoch);
         edit(&mut c, "Close dialog", 0, 0);
         assert!(c.resource_usage().panel_scroll.is_none());
+        assert!(!c.resource_usage().chat.as_ref().unwrap().modal);
+        assert!(
+            c.scene().unwrap().controls().iter().any(|n| n
+                .node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Back to OTriOS")),
+            "background navigation returns after closing"
+        );
     }
 }
 

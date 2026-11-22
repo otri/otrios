@@ -20,6 +20,7 @@ pub(crate) use client::{Action as UiAction, VIEWPORT};
 pub use client::{Client, Info};
 pub use history::{message_schema, message_selection, read_message};
 pub use otrios_interfaces::chat::*;
+pub(crate) use view::MODAL_BARRIER;
 
 fn check(bytes: &[u8], limit: usize) -> Result<()> {
     if bytes.is_empty() || bytes.len() > limit {

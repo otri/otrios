@@ -8,6 +8,7 @@ use crate::dashboard::{
 };
 use otrios_interfaces::scene::*;
 use unicode_segmentation::UnicodeSegmentation;
+pub(crate) const MODAL_BARRIER: u32 = 900_001;
 struct Paint {
     nodes: Vec<SceneNode>,
     next: u32,
@@ -780,6 +781,25 @@ impl Client {
         }
     }
 
+    /// Paint the backdrop, but do not expose its controls through the modal.
+    pub(crate) fn scope_modal_controls(&self, root: &mut SceneNode) {
+        fn disable(node: &mut SceneNode) {
+            node.responder = None;
+            node.semantics = None;
+            for child in &mut node.children {
+                disable(child);
+            }
+        }
+        if let Some(barrier) = root
+            .children
+            .iter()
+            .position(|node| node.id == MODAL_BARRIER)
+        {
+            for background in &mut root.children[..barrier] {
+                disable(background);
+            }
+        }
+    }
     pub(crate) fn scene(&self, base: &Scene, size: [f32; 2], keyboard: bool) -> Result<Scene> {
         let [w, full_h] = size;
         let h = room_height(size, keyboard);
@@ -1147,7 +1167,7 @@ impl Client {
             );
         }
         if self.panel != Panel::None {
-            let id = p.id();
+            let id = MODAL_BARRIER;
             let mut dim = node(
                 id,
                 Rect::new(0., 0., w, full_h),

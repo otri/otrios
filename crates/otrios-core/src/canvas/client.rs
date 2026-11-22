@@ -641,7 +641,12 @@ impl Client {
             if let otrios_interfaces::scene::Primitive::Text { value, .. } = &node.primitive {
                 text.push(value.clone());
             }
-            for child in &node.children {
+            let start = node
+                .children
+                .iter()
+                .position(|child| child.id == super::chat::MODAL_BARRIER)
+                .map_or(0, |barrier| barrier + 1);
+            for child in &node.children[start..] {
                 visit(child, backdrop, text);
             }
         }
@@ -6113,6 +6118,9 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     }
     shell_style::present(&mut root, m);
     breadcrumbs::present(&mut root, m);
+    if let Some(chat) = &m.chat {
+        chat.scope_modal_controls(&mut root);
+    }
     breadcrumbs::present_account(&mut root, m);
     if m.designer.is_some() {
         let chrome = m.editor_chrome();

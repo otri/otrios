@@ -146,6 +146,7 @@ pub struct Info {
     pub replica_bytes: usize,
     pub lease_generation: u64,
     pub kicked: bool,
+    pub modal: bool,
 }
 impl Default for Client {
     fn default() -> Self {
@@ -382,6 +383,7 @@ impl Client {
                 .map_or(0, |window| window.snapshot().canonical_bytes()),
             lease_generation: self.collection.generation(),
             kicked: self.kicked.is_some(),
+            modal: self.panel != Panel::None,
         }
     }
     pub fn recent_messages(&self) -> Vec<Message> {
