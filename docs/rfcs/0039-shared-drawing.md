@@ -64,7 +64,10 @@ Appending a point rebuilds only the changing tail chunk. Camera changes reuse
 resource identities and change scale/origin uniforms. Chunk bounds reject
 invisible draws before transfer, upload and GPU submission, while hidden retained
 buffers remain available for a later pan. Clear and ring eviction retire their
-resource identities. At most 256 chunks are retained for the 64 × 192 point
+resource identities. The immutable drawing subtree hash also keys a bounded
+decoded-state cache, so input, presence and presentation do not repeatedly decode
+all completed strokes during camera movement. Optimistic commands still overlay
+that immutable snapshot, and cloned snapshots select their own hash. At most 256 chunks are retained for the 64 × 192 point
 app-data bound. A full chunk has 2,268 float components (9,072 bytes).
 
 The common GLES2/WebGL1 shader expands endpoint pairs into anti-aliased line

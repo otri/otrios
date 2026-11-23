@@ -245,6 +245,9 @@ impl View {
             if let Some(old) = board.strokes.iter_mut().find(|s| s.id == active.id) {
                 *old = active.clone();
             } else {
+                if board.strokes.len() == otrios_interfaces::drawing::MAX_SEGMENTS {
+                    board.strokes.remove(0);
+                }
                 board.strokes.push(active.clone());
             }
         }

@@ -54,6 +54,7 @@ pub struct Document {
     /// Authority policy from admitted UI dependencies; not replicated state.
     signal_fields: u64,
     drawing_enabled: bool,
+    drawing_cache: std::sync::Arc<std::sync::Mutex<Option<(merkle::Hash, Drawing)>>>,
     workspace: std::sync::Arc<std::sync::Mutex<merkle::Workspace>>,
 }
 #[derive(Clone, Default)]
@@ -164,6 +165,7 @@ impl Document {
             wall: 0,
             signal_fields: 0,
             drawing_enabled: false,
+            drawing_cache: Default::default(),
             workspace: Default::default(),
         })
     }
@@ -232,6 +234,7 @@ impl Document {
             wall: 0,
             signal_fields: 0,
             drawing_enabled: false,
+            drawing_cache: Default::default(),
             workspace: Default::default(),
         };
         result.validate_tree()?;

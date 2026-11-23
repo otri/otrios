@@ -4244,12 +4244,17 @@ impl Client {
         self.active.as_mut()?.text_document.as_mut()?.frame()
     }
     pub fn document_scene_parts(&self, scene: &Scene) -> Result<Option<(Scene, Scene)>> {
-        if self.active.as_ref().is_some_and(|m| m.drawing.is_some()) {
-            let mut base = scene.root().clone();
-            let mut overlay = base.clone();
-            base.children.truncate(1);
-            overlay.children = overlay.children.into_iter().skip(1).collect();
-            return Ok(Some((Scene::new(base)?, Scene::new(overlay)?)));
+        if let Some(m) = self.active.as_ref().filter(|m| m.drawing.is_some())
+            && let Some(Presentation::TouchPad { control, .. }) = m.ui.presentation
+        {
+            let pad = scene
+                .controls()
+                .into_iter()
+                .find(|c| c.node.responder == Some(TouchResponder::Drag(Action::AppEvent(control))))
+                .ok_or("Missing retained drawing surface")?
+                .node
+                .id;
+            return Ok(Some(super::document::scene::split_surface(scene, pad)?));
         }
         match self.presentation() {
             Some(Presentation::TextDocument { viewport, .. }) => {

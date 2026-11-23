@@ -6079,6 +6079,25 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
         a.resource_usage().drawing.unwrap().zoom,
         b.resource_usage().drawing.unwrap().zoom
     );
+    // Cloned snapshots can share the decoded cache, but never its selected hash.
+    let (_, overlay) = a
+        .document_scene_parts(&a.scene().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(
+        overlay.controls().iter().any(|c| c
+            .node
+            .semantics
+            .as_ref()
+            .is_some_and(|s| s.label == "Drawing surface")
+            && matches!(
+                c.node.primitive,
+                otrios_interfaces::scene::Primitive::Canvas { .. }
+            )),
+        "The pad background must stay below the retained stroke layer"
+    );
+    let retained_snapshot = doc.clone();
+    let retained_drawing = doc.drawing().unwrap();
     let clear = a
         .control_ids()
         .unwrap()
@@ -6089,6 +6108,12 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
     pump(&mut a, &mut doc, &mut sa);
     pump(&mut b, &mut doc, &mut sb);
     assert_eq!(b.resource_usage().ink.unwrap().points, 0);
+    assert!(doc.drawing().unwrap().strokes.is_empty());
+    assert_eq!(
+        retained_snapshot.drawing().unwrap().strokes[0].points,
+        retained_drawing.strokes[0].points
+    );
+    assert!(doc.drawing().unwrap().strokes.is_empty());
     assert!(
         b.drawing_frame().unwrap().unwrap().draws.is_empty(),
         "Clear retires drawing resources"

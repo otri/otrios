@@ -89,6 +89,17 @@ impl Document {
         )
     }
     pub fn drawing(&self) -> Result<Drawing> {
+        let hash = self.tree.subtree(&[5]).map_err(|e| e.to_string())?.hash();
+        if let Some((_, drawing)) = self
+            .drawing_cache
+            .lock()
+            .map_err(|_| "Drawing cache poisoned")?
+            .as_ref()
+            .filter(|(key, _)| *key == hash)
+        {
+            return Ok(drawing.clone());
+        }
+        let _profile = super::super::profiling::span("state.drawing.decode");
         let head: Head = decode(&payload(&self.tree, &path(5, 0))?)?;
         let mut strokes = vec![];
         // Ring order keeps the oldest retained segment first.
@@ -101,10 +112,15 @@ impl Document {
                 }
             }
         }
-        Ok(Drawing {
+        let drawing = Drawing {
             epoch: head.epoch,
             strokes,
-        })
+        };
+        *self
+            .drawing_cache
+            .lock()
+            .map_err(|_| "Drawing cache poisoned")? = Some((hash, drawing.clone()));
+        Ok(drawing)
     }
     pub(super) fn validate_drawing(&self, tree: &Snapshot) -> Result<()> {
         let head: Head = decode(&payload(tree, &path(5, 0))?)?;
