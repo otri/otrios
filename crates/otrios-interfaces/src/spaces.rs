@@ -56,6 +56,32 @@ pub struct MembershipEdit {
 pub struct UserProfile {
     pub name: String,
     pub revision: u64,
+    #[serde(default)]
+    pub preferences: UserPreferences,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppearancePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+impl AppearancePreference {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserPreferences {
+    pub developer_mode: bool,
+    pub hit_zones_on_touch: bool,
+    pub appearance: AppearancePreference,
 }
 
 /// Admitted installed-app policy, supplied by the host after bundle verification.
@@ -225,6 +251,10 @@ pub enum MoveMode {
 pub enum Change {
     Profile {
         name: String,
+        expected_revision: u64,
+    },
+    Preferences {
+        preferences: UserPreferences,
         expected_revision: u64,
     },
     Access {

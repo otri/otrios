@@ -179,7 +179,7 @@ pub fn app_icon(app: &str) -> Element {
         "component-playground" => LaunchIcon::Components,
         "layout-lab" => LaunchIcon::Layouts,
         "layout-document" => LaunchIcon::Document,
-        "layout-text-scroll" => LaunchIcon::Panning,
+        "layout-text-scroll" | "touch-trace" => LaunchIcon::Panning,
         "input-lab" => LaunchIcon::Input,
         "animation-lab" => LaunchIcon::Animation2d,
         "three-d-lab" => LaunchIcon::Animation3d,

@@ -13,9 +13,19 @@ struct Stroke {
     last: i64,
     points: Vec<[u16; 2]>,
 }
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Stats {
+    pub persistent: bool,
+    pub segments: usize,
+    pub points: usize,
+}
 #[derive(Clone, Default)]
 pub struct Ink {
     strokes: VecDeque<Stroke>,
+    persistent: bool,
+    local: bool,
+    lifetime_ms: u64,
+    max_segments: usize,
     active: BTreeMap<u32, u32>,
     next: u32,
     own: VecDeque<u32>,
@@ -25,6 +35,44 @@ pub struct Ink {
     sent: Option<u64>,
 }
 impl Ink {
+    pub fn stats(&self) -> Stats {
+        Stats {
+            persistent: self.persistent,
+            segments: self.strokes.len(),
+            points: self.strokes.iter().map(|s| s.points.len()).sum(),
+        }
+    }
+
+    pub fn configured(options: Option<otrios_interfaces::canvas::InkOptions>) -> Self {
+        Self {
+            persistent: options.is_some_and(|o| o.lifetime_ms.is_none()),
+            local: options.is_some(),
+            lifetime_ms: options
+                .and_then(|o| o.lifetime_ms)
+                .map_or(ink::LIFETIME_MS, u64::from),
+            max_segments: options.map_or(24, |o| usize::from(o.max_segments)),
+            ..Self::default()
+        }
+    }
+    fn lifetime(&self) -> u64 {
+        if self.lifetime_ms == 0 {
+            ink::LIFETIME_MS
+        } else {
+            self.lifetime_ms
+        }
+    }
+    fn limit(&self) -> usize {
+        if self.max_segments == 0 {
+            24
+        } else {
+            self.max_segments
+        }
+    }
+    pub fn clear(&mut self) {
+        self.strokes.clear();
+        self.active.clear();
+        self.outgoing.clear();
+    }
     pub fn step(&mut self, from: [u16; 2], to: [u16; 2]) {
         if from == to {
             return;
@@ -121,6 +169,10 @@ impl Ink {
         }
     }
     pub fn outgoing(&mut self, now: u64) -> Vec<u8> {
+        if self.local {
+            self.outgoing.clear();
+            return vec![];
+        }
         if self.outgoing.is_empty() || self.sent.is_some_and(|sent| now.saturating_sub(sent) < 33) {
             return vec![];
         }
@@ -131,6 +183,9 @@ impl Ink {
             .collect()
     }
     pub fn receive(&mut self, b: &[u8], now: u64) -> Result<bool> {
+        if self.local {
+            return Ok(false);
+        }
         let (peer, age, point) = ink::decode_server(b)?;
         let Some(point) = point else {
             self.own.push_back(peer);
@@ -146,9 +201,31 @@ impl Ink {
         Ok(true)
     }
     fn add(&mut self, peer: u32, p: Point, now: i64) {
+        if self.persistent
+            && let Some(last) = self
+                .strokes
+                .iter()
+                .rev()
+                .find(|s| s.peer == peer && s.id == p.stroke)
+            && last.points.len() >= 192
+            && last.points.last() != Some(&p.position)
+        {
+            let previous = *last.points.last().unwrap();
+            if self.strokes.len() >= self.limit() {
+                self.strokes.pop_front();
+            }
+            self.strokes.push_back(Stroke {
+                peer,
+                id: p.stroke,
+                last: now,
+                points: vec![previous, p.position],
+            });
+            return;
+        }
         if let Some(s) = self
             .strokes
             .iter_mut()
+            .rev()
             .find(|s| s.peer == peer && s.id == p.stroke)
         {
             s.last = s.last.max(now);
@@ -159,7 +236,7 @@ impl Ink {
                 }
             }
         } else {
-            if self.strokes.len() >= 24 {
+            if self.strokes.len() >= self.limit() {
                 self.strokes.pop_front();
             }
             self.strokes.push_back(Stroke {
@@ -173,8 +250,12 @@ impl Ink {
     pub fn tick(&mut self, now: u64) -> bool {
         self.now = now;
         let before = self.strokes.len();
+        if self.persistent {
+            return false;
+        }
+        let lifetime = self.lifetime();
         self.strokes
-            .retain(|s| now as i64 - s.last < ink::LIFETIME_MS as i64);
+            .retain(|s| now as i64 - s.last < lifetime as i64);
         let changed =
             before != self.strokes.len() || (!self.strokes.is_empty() && self.bucket != now / 100);
         self.bucket = now / 100;
@@ -200,7 +281,7 @@ impl Ink {
         };
         for (index, s) in self.strokes.iter().enumerate() {
             let age = (self.now as i64 - s.last).max(0) as u64;
-            if age >= ink::LIFETIME_MS {
+            if !self.persistent && age >= self.lifetime() {
                 continue;
             }
             let peer = if s.peer == 0 {
@@ -209,7 +290,11 @@ impl Ink {
                 s.peer
             };
             let rgb = palette[peer as usize % palette.len()];
-            let alpha = ((ink::LIFETIME_MS - age) * 255 / ink::LIFETIME_MS) as u8;
+            let alpha = if self.persistent {
+                255
+            } else {
+                ((self.lifetime() - age) * 255 / self.lifetime()) as u8
+            };
             let color = [rgb[0], rgb[1], rgb[2], alpha];
             out.push(node(
                 base + index as u32 * 3,
@@ -253,6 +338,9 @@ impl Ink {
                 },
             ));
         }
+        for node in &mut out {
+            node.responder = Some(otrios_interfaces::scene::TouchResponder::PassThrough);
+        }
         out
     }
 }
@@ -265,6 +353,28 @@ mod tests {
             stroke,
             position: [x, 500],
         }
+    }
+    #[test]
+    fn persistent_ink_retains_segment_boundaries_until_clear_without_network_output() {
+        let mut ink = Ink::configured(Some(otrios_interfaces::canvas::InkOptions {
+            lifetime_ms: None,
+            max_segments: 64,
+            fullscreen: true,
+        }));
+        for x in 0..1000 {
+            ink.add(0, point(1, if x == 0 { 0 } else { 1 }, x), 100);
+        }
+        ink.tick(60_000);
+        assert_eq!(ink.strokes.front().unwrap().points[0], [0, 500]);
+        assert!(ink.strokes.len() > 1);
+        assert!(ink.strokes.iter().all(|s| s.points.len() <= 192));
+        for (a, b) in ink.strokes.iter().zip(ink.strokes.iter().skip(1)) {
+            assert_eq!(a.points.last(), b.points.first());
+        }
+        assert!(ink.outgoing(60_000).is_empty());
+        ink.clear();
+        assert!(ink.strokes.is_empty());
+        assert!(ink.persistent);
     }
     #[test]
     fn remote_letters_stay_separate_and_fade_five_seconds_after_the_last_point() {

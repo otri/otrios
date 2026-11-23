@@ -407,6 +407,7 @@ impl CanvasApp {
             Some(Presentation::TextDocument { .. }) => "text-document",
             Some(Presentation::Chat) => "chat",
             Some(Presentation::Editor { .. }) => "input",
+            Some(Presentation::TouchPad { ink: Some(_), .. }) => "local-ink",
             Some(Presentation::TouchPad { .. }) => "touch-pad",
             _ => "none",
         }

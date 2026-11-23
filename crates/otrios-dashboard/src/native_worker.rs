@@ -874,7 +874,7 @@ pub(super) fn state_worker(
         ink_active.store(
             matches!(
                 client.presentation(),
-                Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
+                Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: None, .. })
             ),
             Ordering::Release,
         );

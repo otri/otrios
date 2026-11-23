@@ -94,6 +94,7 @@ fn command_shape(command: &Command) -> Result<()> {
             }
             let valid = match &request.change {
                 Change::Profile { name, .. } => valid_name(name),
+                Change::Preferences { .. } => true,
                 Change::Access { space, changes, .. } => {
                     valid_id(space)
                         && changes.len() <= 16

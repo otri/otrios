@@ -17,6 +17,8 @@ pub mod panning;
 mod state;
 #[path = "../three-d-lab/app.rs"]
 pub mod three_d;
+#[path = "../touch-trace/app.rs"]
+pub mod touch_trace;
 mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
@@ -41,6 +43,10 @@ pub fn screens() -> Vec<crate::authoring::AppScreen> {
         screens.extend(factory());
     }
     screens.extend([
+        (
+            touch_trace::manifest(),
+            touch_trace::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,
+        ),
         (
             oib_designer::manifest(),
             oib_designer::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,

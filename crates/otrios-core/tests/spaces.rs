@@ -1872,6 +1872,7 @@ fn self_profiles_persist_with_revision_conflicts_without_renaming_principals_or_
     assert_eq!(
         store.profile("aaron@spaces.test").unwrap(),
         Some(UserProfile {
+            preferences: Default::default(),
             name: "Aaron Hilton".into(),
             revision: 1
         })
@@ -1907,6 +1908,44 @@ fn self_profiles_persist_with_revision_conflicts_without_renaming_principals_or_
             .unwrap()
             .revision,
         2
+    );
+    let preferences = UserPreferences {
+        developer_mode: true,
+        hit_zones_on_touch: true,
+        appearance: AppearancePreference::Light,
+    };
+    let settings = Request {
+        version: 1,
+        expected_generation: generation,
+        change: Change::Preferences {
+            preferences,
+            expected_revision: 2,
+        },
+    };
+    recovered
+        .commit("aaron@spaces.test", &settings, None)
+        .unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .preferences,
+        preferences
+    );
+    assert_eq!(
+        recovered.commit("aaron@spaces.test", &settings, None),
+        Err(Error::Conflict)
+    );
+    drop(recovered);
+    let mut recovered = Store::open(file.clone()).unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .preferences,
+        preferences
     );
     assert_eq!(recovered.registry().unwrap().generation, generation);
     let data = std::fs::read_dir(path.join("registry.flex.profiles"))

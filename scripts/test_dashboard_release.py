@@ -517,6 +517,21 @@ class CompatibleAppClassification(unittest.TestCase):
         self.assertTrue(agent.app_only_change(a,b));b['authority']['authority/policy.flex']=2
         self.assertFalse(agent.app_only_change(a,b));b['authority'].pop('authority/policy.flex')
         self.assertFalse(agent.app_only_change(a,b))
+    def test_pure_app_additions_are_hot_but_cannot_change_existing_bytes(self):
+        import copy
+        before=self.pair()['previous'];added=copy.deepcopy(before)
+        added['assets']['apps/catalog.flex']={'bytes':1,'sha256':'e'*64}
+        added['app_contracts']['trace.otapp']='e'*64
+        for path in ('Info.flex','UI/main.flex','Schemas/state.flex','Integrity/files.flex','Integrity/publisher.flex'):
+            added['authority']['authority/bundles/trace.otapp/'+path]={'bytes':1,'sha256':'e'*64}
+        self.assertTrue(agent.app_addition_change(before,added));self.assertTrue(agent.app_only_change(before,added))
+        self.assertFalse(agent.app_only_change(added,before))
+        bad=copy.deepcopy(added);bad['assets']['native/armv7/dashboard-native']={'bytes':2,'sha256':'f'*64}
+        self.assertFalse(agent.app_only_change(before,bad))
+        bad=copy.deepcopy(added);bad['app_contracts'][next(iter(before['app_contracts']))]='f'*64
+        self.assertFalse(agent.app_only_change(before,bad))
+        bad=copy.deepcopy(added);bad['authority']['authority/bundles/trace.otapp/Code/native.so']={'bytes':1,'sha256':'e'*64}
+        self.assertFalse(agent.app_only_change(before,bad))
     def test_registry_install_and_removal_still_take_the_separate_safe_path(self):
         import copy
         pair=self.pair();before,after=pair['previous'],pair['next']

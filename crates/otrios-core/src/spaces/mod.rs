@@ -312,7 +312,10 @@ pub fn apply(
     if request.expected_generation != registry.generation {
         return Err(Error::Conflict);
     }
-    if matches!(request.change, Change::Profile { .. }) {
+    if matches!(
+        request.change,
+        Change::Profile { .. } | Change::Preferences { .. }
+    ) {
         return Err(Error::Unavailable);
     }
     let mut next = registry.clone();
@@ -379,6 +382,7 @@ pub fn apply(
             | Change::LabelApp { space, .. }
             | Change::PlaceApp { space, .. } => space,
             Change::Profile { .. }
+            | Change::Preferences { .. }
             | Change::Access { .. }
             | Change::Create { .. }
             | Change::PlaceSpace { .. }
@@ -561,6 +565,7 @@ pub fn apply(
                 }
             }
             Change::Profile { .. }
+            | Change::Preferences { .. }
             | Change::Access { .. }
             | Change::Create { .. }
             | Change::PlaceSpace { .. }

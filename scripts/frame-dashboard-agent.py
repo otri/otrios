@@ -151,10 +151,35 @@ def catalog_change(previous,next,behavior=False,component=False):
 def ui_only_change(previous,next,behavior=False):
     return catalog_change(previous,next,behavior=behavior)
 
+def app_addition_change(previous,next):
+    """Add signed bundles without changing any existing app or executable bytes."""
+    if previous.get('ui_abi')!='otrios-app-ui-v1' or previous.get('bundle_abi')!='otrios-app-bundle-v1' or next.get('bundle_abi')!=previous['bundle_abi']:return False
+    if {k:v for k,v in previous.items() if k not in ('assets','authority','app_contracts')}!={k:v for k,v in next.items() if k not in ('assets','authority','app_contracts')}:return False
+    a,b=previous.get('assets',{}),next.get('assets',{})
+    if not isinstance(a,dict) or not isinstance(b,dict) or not a or a.keys()!=b.keys() or any(a[k]!=b[k]for k in a if k!='apps/catalog.flex'):return False
+    old,current=previous.get('authority',{}),next.get('authority',{})
+    if not isinstance(old,dict) or not isinstance(current,dict):return False
+    roots=lambda m:{v[1]for name in m if(v:=re.match(r'^authority/bundles/([a-z-]+\.otapp)/',name))}
+    before,after=roots(old),roots(current);added=after-before
+    contracts,new=previous.get('app_contracts'),next.get('app_contracts')
+    if not before or not added or not before<=after or len(after)>16 or not isinstance(contracts,dict) or not isinstance(new,dict) or contracts.keys()!=before or new.keys()!=after:return False
+    if any(new.get(k)!=v for k,v in contracts.items()) or any(not isinstance(v,str) or not re.fullmatch(r'[a-f0-9]{64}',v) for v in new.values()):return False
+    if not old or any(current.get(k)!=v for k,v in old.items()):return False
+    for root in added:
+        if any(f'authority/bundles/{root}/'+name not in current for name in ('Info.flex','UI/main.flex','Schemas/state.flex','Integrity/files.flex','Integrity/publisher.flex')):return False
+    for name in current.keys()-old.keys():
+        match=re.match(r'^authority/bundles/([a-z-]+\.otapp)/(.+)$',name)
+        if not match or match[1]not in added:return False
+        relative=match[2]
+        if any(not re.fullmatch(r'[A-Za-z0-9_.-]+',p) or p in ('.','..') for p in relative.split('/')):return False
+        if relative=='Schemas/state.flex' or relative.startswith('Resources/'):continue
+        if not package_change(name,previous.get('behavior_abi')=='otrios-app-behavior-v1',previous.get('component_behavior_abi')=='otrios-component-behavior-v1'):return False
+    return True
+
 def app_only_change(previous,next):
     behavior=previous.get('behavior_abi')=='otrios-app-behavior-v1' and next.get('behavior_abi')==previous['behavior_abi']
     component=previous.get('component_behavior_abi')=='otrios-component-behavior-v1' and next.get('component_behavior_abi')==previous['component_behavior_abi']
-    return catalog_change(previous,next,behavior=behavior,component=component)
+    return catalog_change(previous,next,behavior=behavior,component=component) or app_addition_change(previous,next)
 
 def app_install_change(previous,next):
     """Registry installation reuses host bytes but may require a safe full reload."""

@@ -90,3 +90,13 @@ test('preparation admits a compatible package catalog without choosing a full re
  try{const prepared=await prepareUiUpdate('https://demo.example','a'.repeat(64),id,{id:'a'.repeat(64),manifest:a});assert.deepEqual(prepared.bytes,bytes);assert.equal(prepared.manifest.id,id);}
  finally{globalThis.fetch=fetch;}
 });
+
+test('additive signed apps can adopt a catalog without changing host or existing app bytes',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {appOnlyChange,appAdditionChange}=await import('../web/shared/ui-update.mjs');
+ const before=JSON.parse(await readFile(new URL('./fixtures/app-update-classification.json',import.meta.url))).previous;
+ const added=structuredClone(before);added.assets['apps/catalog.flex']={bytes:1,sha256:'e'.repeat(64)};added.app_contracts['trace.otapp']='e'.repeat(64);
+ for(const path of ['Info.flex','UI/main.flex','Schemas/state.flex','Integrity/files.flex','Integrity/publisher.flex'])added.authority['authority/bundles/trace.otapp/'+path]={bytes:1,sha256:'e'.repeat(64)};
+ assert(appAdditionChange(before,added));assert(appOnlyChange(before,added));assert(!uiOnlyChange(before,added));assert(!appOnlyChange(added,before));
+ for(const mutate of [m=>m.assets['native/armv7/dashboard-native']={bytes:2,sha256:'f'.repeat(64)},m=>m.app_contracts[Object.keys(before.app_contracts)[0]]='f'.repeat(64),m=>delete m.authority[Object.keys(before.authority)[0]],m=>m.authority['authority/bundles/trace.otapp/Code/native.so']={bytes:1,sha256:'e'.repeat(64)}]){const bad=structuredClone(added);mutate(bad);assert(!appOnlyChange(before,bad));}
+});

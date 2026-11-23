@@ -57,8 +57,10 @@ def install(a):
             if not target.is_dir():raise ValueError('App is not installed')
             shutil.rmtree(target)
         installed=stage/'installed'
-        print(run(a.checker,'compose',base/'apps/catalog.flex',source,installed,'--key',key,'--sign-key',private,'--openssl',a.openssl),flush=True)
-        result=publisher.publish(base/'web',base/'native/armv7/dashboard-native',a.runtime/'releases',private,a.openssl,activate=False,catalog=installed/'catalog.flex',bundles=installed,bundle_checker=a.checker)
+        args=['refresh',base/'apps/catalog.flex',source,installed,'--key',key,'--sign-key',private,'--openssl',a.openssl]
+        if getattr(a,'routes',None):args+=['--routes',a.routes]
+        print(run(a.checker,*args),flush=True)
+        result=publisher.publish(base/'web',base/'native/armv7/dashboard-native',a.runtime/'releases',private,a.openssl,activate=False,catalog=installed/'catalog.flex',bundles=installed,bundle_checker=a.checker,monitoring=(base/'native/armv7/dashboard-monitoring' if 'native/armv7/dashboard-monitoring' in before.get('assets',{}) else None))
         after=json.loads((a.runtime/'releases'/result['id']/'manifest.json').read_bytes())
         if not activation.agent.app_install_change(before,after):raise ValueError('Installation changed qualified host bytes or protocol/policy metadata')
         pointer=a.runtime/'build/app-install.json';publisher.atomic(pointer,json.dumps(result,sort_keys=True).encode())
@@ -81,7 +83,7 @@ def main():
     p.add_argument('--expected-release');p.add_argument('--expected-bundle')
     p.add_argument('--expected-candidate');p.add_argument('--expected-app')
     p.add_argument('--checker',type=pathlib.Path,required=True);p.add_argument('--openssl',default='openssl')
-    p.add_argument('--deploy-config',type=pathlib.Path)
+    p.add_argument('--deploy-config',type=pathlib.Path);p.add_argument('--routes',type=pathlib.Path)
     a=p.parse_args()
     if a.expected_release and not re.fullmatch(r'[a-f0-9]{64}',a.expected_release):p.error('Invalid reviewed release')
     if a.expected_candidate and not re.fullmatch(r'[a-f0-9]{64}',a.expected_candidate):p.error('Invalid reviewed candidate')

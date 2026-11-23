@@ -380,9 +380,16 @@ fn activate_snapshot(
 ) {
     // D1 defers local reflow while OIB state is unconfirmed. Model the live
     // mount's authoritative seed instead of leaving that fixture half-open.
-    let mut authority = if state_bytes.is_empty() && oib::seed(&ui).is_some() {
+    let mut authority = if state_bytes.is_empty()
+        && (oib::seed(&ui).is_some()
+            || matches!(
+                ui.presentation,
+                Some(Presentation::TouchPad { ink: Some(_), .. })
+            )) {
         let mut document = Document::new(ui.state_schema.clone(), state).unwrap();
-        document.configure_oib(&ui).unwrap();
+        if oib::seed(&ui).is_some() {
+            document.configure_oib(&ui).unwrap();
+        }
         Some(document)
     } else {
         None
@@ -5888,4 +5895,70 @@ fn modal_return_restores_text_editing_without_replaying_activation_or_submission
             .iter()
             .any(|input| input.focused)
     );
+}
+
+#[test]
+fn touch_tracing_is_fullscreen_local_persistent_and_clearable() {
+    #[path = "../../../apps/touch-trace/app.rs"]
+    mod trace;
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let mut c = Client::default();
+    activate(&mut c, trace::ui(&[]), &trace::manifest().state_ref, vec![]);
+    let epoch = c.epoch();
+    for (phase, position) in [
+        (PointerPhase::Down, [8., 8.]),
+        (PointerPhase::Move, [640., 400.]),
+        (PointerPhase::Up, [1270., 790.]),
+    ] {
+        c.pointer_at(
+            epoch,
+            PointerEvent {
+                id: 1,
+                phase,
+                position,
+            },
+            100,
+        )
+        .unwrap();
+    }
+    assert!(c.typed_value(1).is_err());
+    assert_eq!(c.pending_count(), 0);
+    assert!(c.ink_outgoing(200).is_empty());
+    c.tick(60_000, 60).unwrap();
+    assert!(c.resource_usage().ink.unwrap().points >= 3);
+    let ui = trace::ui(&[]);
+    let existing = CatalogEntry {
+        path: "touch-trace".into(),
+        private: false,
+        ui_hash: hash(&encode_ui(&ui).unwrap()),
+        app: App {
+            id: "touch-trace".into(),
+            title: ui.title.clone(),
+            ui_ref: ui.ui_ref.clone(),
+            state_ref: "app:touch-trace/state".into(),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        },
+    };
+    let mut addition = existing.clone();
+    addition.app.id = "trace-extra".into();
+    addition.app.ui_ref = "app:trace-extra/ui".into();
+    addition.app.state_ref = "app:trace-extra/state".into();
+    addition.path = "trace-extra".into();
+    let next = Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![existing, addition],
+    };
+    assert!(!c.update_catalog(&encode_catalog(&next).unwrap()).unwrap());
+    assert_eq!(c.epoch(), epoch);
+    assert!(c.resource_usage().ink.unwrap().points >= 3);
+
+    let clear = c
+        .control_ids()
+        .unwrap()
+        .into_iter()
+        .find(|id| c.control_label(*id).unwrap() == "Clear")
+        .unwrap();
+    c.activate(epoch, clear).unwrap();
+    assert_eq!(c.resource_usage().ink.unwrap().points, 0);
 }

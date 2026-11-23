@@ -116,6 +116,10 @@ pub enum Operation {
     SignOut,
     /// Toggle this mount's reorder interaction; never writes state.
     EditOrder,
+    /// Clear mount-local ink; never mutates the replicated app document.
+    ClearInk,
+    /// A local ink gesture; has no replicated fields.
+    Ink,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,7 +208,28 @@ pub enum Presentation {
     },
     TouchPad {
         control: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ink: Option<InkOptions>,
     },
+}
+/// Bounded local ink policy; absent options preserve the shared fading pad.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InkOptions {
+    /// None retains local strokes until Clear or leaving the mount.
+    pub lifetime_ms: Option<u32>,
+    /// Admitted retention budget; runtime requires 1..=64 path segments.
+    pub max_segments: u16,
+    pub fullscreen: bool,
+}
+impl Default for InkOptions {
+    fn default() -> Self {
+        Self {
+            lifetime_ms: Some(5000),
+            max_segments: 24,
+            fullscreen: false,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

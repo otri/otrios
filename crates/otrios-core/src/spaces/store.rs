@@ -424,7 +424,10 @@ impl Store {
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
         self.check_install_fence()?;
-        if matches!(request.change, Change::Profile { .. }) {
+        if matches!(
+            request.change,
+            Change::Profile { .. } | Change::Preferences { .. }
+        ) {
             self.commit_profile(actor, request)?;
             return self.registry();
         }
@@ -441,7 +444,10 @@ impl Store {
         installed: &[AppPolicy],
     ) -> Result<&Registry> {
         self.check_install_fence()?;
-        if matches!(request.change, Change::Profile { .. }) {
+        if matches!(
+            request.change,
+            Change::Profile { .. } | Change::Preferences { .. }
+        ) {
             self.commit_profile(actor, request)?;
             return self.registry();
         }

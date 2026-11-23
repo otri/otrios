@@ -246,7 +246,7 @@ class SignedBundleInstallation(unittest.TestCase):
         old=(self.fixture.out/'current.json').read_bytes();first=self.stage(v1)
         self.assertEqual((self.fixture.out/'current.json').read_bytes(),old)
         before=json.loads((self.fixture.out/self.base['id']/'manifest.json').read_bytes());after=json.loads((self.fixture.out/first['id']/'manifest.json').read_bytes())
-        self.assertTrue(activation.agent.app_install_change(before,after));self.assertFalse(activation.agent.app_only_change(before,after))
+        self.assertTrue(activation.agent.app_install_change(before,after));self.assertTrue(activation.agent.app_only_change(before,after))
         self.assertEqual({k:v for k,v in before['assets'].items()if k!='apps/catalog.flex'},{k:v for k,v in after['assets'].items()if k!='apps/catalog.flex'})
         with mock.patch.object(activation,'durable_release',side_effect=OSError('injected flush failure')):
             with self.assertRaisesRegex(OSError,'injected flush failure'):self.activate(first)

@@ -14,7 +14,6 @@ pub(super) enum Command {
     AddSpace,
     ReviewDeleted,
     Close,
-    Preference(shell_style::Preference),
     Profile,
     SignIn,
     SignOut,
@@ -105,9 +104,6 @@ impl Trail {
             Command::Profile,
             Command::SignIn,
             Command::SignOut,
-            Command::Preference(shell_style::Preference::System),
-            Command::Preference(shell_style::Preference::Light),
-            Command::Preference(shell_style::Preference::Dark),
         ] {
             commands.insert(
                 actions.next().ok_or("Shell control budget exceeded")?,
@@ -212,6 +208,18 @@ pub(super) fn present_host_icons(root: &mut SceneNode, mount: &Mount) {
     }
 }
 pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
+    if matches!(
+        mount.ui.presentation,
+        Some(Presentation::TouchPad {
+            ink: Some(otrios_interfaces::canvas::InkOptions {
+                fullscreen: true,
+                ..
+            }),
+            ..
+        })
+    ) {
+        return;
+    }
     let Some(trail) = &mount.breadcrumbs else {
         return;
     };
@@ -536,7 +544,7 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
     let p = mount.shell_appearance.palette();
     let width = 360_f32.min(root.frame.width - 32.).max(240.);
     let x = (root.frame.width - width - 24.).max(8.);
-    let top = (root.frame.height - 348.).clamp(8., 100.);
+    let top = (root.frame.height - 196.).clamp(8., 100.);
     let mut dismiss = canvas(
         BASE + 300,
         Rect::new(0., 0., root.frame.width, root.frame.height),
@@ -550,8 +558,8 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
         checked: false,
     });
     let mut background =
-        crate::dashboard::components::background(BASE + 301, width, 340., p.surface, 12.);
-    background.frame = Rect::new(x, top, width, 340.);
+        crate::dashboard::components::background(BASE + 301, width, 188., p.surface, 12.);
+    background.frame = Rect::new(x, top, width, 188.);
     background.responder = Some(TouchResponder::Consume);
     let mut children = vec![
         text(
@@ -579,42 +587,16 @@ pub(super) fn present_account(root: &mut SceneNode, mount: &Mount) {
             false,
             p,
         ),
-        text(
-            BASE + 303,
-            Rect::new(16., 188., width - 32., 28.),
-            "Appearance",
-            2,
-            p.muted,
-        ),
     ];
-    let segment = (width - 32.) / 3.;
-    for (index, (label, preference)) in [
-        ("System", shell_style::Preference::System),
-        ("Light", shell_style::Preference::Light),
-        ("Dark", shell_style::Preference::Dark),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        children.push(menu_button(
-            trail,
-            BASE + 310 + index as u32 * 4,
-            Rect::new(16. + index as f32 * segment, 228., segment - 4., 52.),
-            label,
-            Command::Preference(preference),
-            trail.preference == preference,
-            p,
-        ));
-    }
     let mut fill =
-        crate::dashboard::components::background(BASE + 304, width - 2., 338., p.surface, 11.);
-    fill.frame = Rect::new(1., 1., width - 2., 338.);
+        crate::dashboard::components::background(BASE + 304, width - 2., 186., p.surface, 11.);
+    fill.frame = Rect::new(1., 1., width - 2., 186.);
     fill.responder = Some(TouchResponder::PassThrough);
     children.insert(0, fill);
-    background.frame = Rect::new(0., 0., width, 340.);
+    background.frame = Rect::new(0., 0., width, 188.);
     background.responder = Some(TouchResponder::PassThrough);
     children.insert(0, background);
-    let mut panel = canvas(BASE + 305, Rect::new(x, top, width, 340.), children);
+    let mut panel = canvas(BASE + 305, Rect::new(x, top, width, 188.), children);
     panel.responder = Some(TouchResponder::Consume);
     dismiss.children.push(panel);
     fn count(node: &SceneNode) -> usize {
@@ -660,20 +642,6 @@ impl Client {
                     trail.account_open = matches!(command, Command::Menu) && !trail.account_open;
                 }
                 m.invalidate();
-            }
-            Command::Preference(preference) => {
-                if !self
-                    .active
-                    .as_ref()
-                    .and_then(|m| m.breadcrumbs.as_ref())
-                    .is_some_and(|t| t.admin && t.account_open)
-                {
-                    return Ok(false);
-                }
-                self.set_appearance(
-                    preference.name(),
-                    self.system_appearance == oib_workspace::Appearance::Dark,
-                )?;
             }
             Command::AddSpace | Command::ReviewDeleted => {
                 if !self

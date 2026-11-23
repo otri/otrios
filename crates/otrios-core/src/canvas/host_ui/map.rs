@@ -759,11 +759,75 @@ pub(super) fn render(
                     HostAction::Pane(Pane::ProfileEdit),
                 );
             }
+            let preferences = snapshot
+                .profile
+                .as_ref()
+                .map_or_else(Default::default, |p| p.preferences);
+            if snapshot.identity.is_some() {
+                b.choice(
+                    "Developer Mode",
+                    preferences.developer_mode,
+                    [left, top + 176., width, 56.],
+                    HostAction::DeveloperMode,
+                );
+                if preferences.developer_mode {
+                    b.choice(
+                        "Hit Zone on Touch",
+                        preferences.hit_zones_on_touch,
+                        [left, top + 240., width, 56.],
+                        HostAction::HitZones,
+                    );
+                    b.nodes.push(
+                        text(
+                            &format!("Theme: {}", preferences.appearance.name()),
+                            [left, top + 312., width, 32.],
+                            1.5,
+                        )
+                        .color(SOFT),
+                    );
+                    use otrios_interfaces::spaces::AppearancePreference;
+                    let segment = (width - 16.) / 3.;
+                    for (index, theme) in [
+                        AppearancePreference::System,
+                        AppearancePreference::Light,
+                        AppearancePreference::Dark,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let label = match theme {
+                            AppearancePreference::System => "System",
+                            AppearancePreference::Light => "Light",
+                            AppearancePreference::Dark => "Dark",
+                        };
+                        b.flat(
+                            label,
+                            label,
+                            [
+                                left + index as f32 * (segment + 8.),
+                                top + 352.,
+                                segment,
+                                56.,
+                            ],
+                            HostAction::Theme(theme),
+                        );
+                    }
+                }
+            }
             if sign_out && snapshot.identity.is_some() {
                 b.flat(
                     "Sign out",
                     "Sign out",
-                    [left, top + 232., width, 56.],
+                    [
+                        left,
+                        top + if preferences.developer_mode {
+                            424.
+                        } else {
+                            256.
+                        },
+                        width,
+                        56.,
+                    ],
                     HostAction::SignOut,
                 );
             }

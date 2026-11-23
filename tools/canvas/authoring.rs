@@ -275,6 +275,22 @@ impl Event {
             operation: Operation::Key(key),
         }
     }
+    pub fn ink() -> Self {
+        Self {
+            kind: GestureKind::Pad,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::Ink,
+        }
+    }
+    pub fn clear_ink() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::ClearInk,
+        }
+    }
     pub fn back() -> Self {
         Self {
             kind: GestureKind::Activate,
@@ -860,6 +876,7 @@ pub struct AppUi {
     viewport: ViewportPolicy,
     motion_viewport: Option<String>,
     touch_pad: Option<String>,
+    ink_options: Option<otrios_interfaces::canvas::InkOptions>,
     text_scroll: Option<(String, [f32; 2])>,
     text_document: Option<(String, TextResource, u8, [u8; 4])>,
     reorder: Vec<(String, u16)>,
@@ -878,6 +895,7 @@ impl AppUi {
             viewport: ViewportPolicy::Fit,
             motion_viewport: None,
             touch_pad: None,
+            ink_options: None,
             text_scroll: None,
             text_document: None,
             reorder: vec![],
@@ -943,6 +961,10 @@ impl AppUi {
     }
     pub fn with_touch_pad(mut self, key: &str) -> Self {
         self.touch_pad = Some(key.into());
+        self
+    }
+    pub fn with_ink_options(mut self, options: otrios_interfaces::canvas::InkOptions) -> Self {
+        self.ink_options = Some(options);
         self
     }
     pub fn with_presentation(mut self, presentation: Presentation) -> Self {
@@ -1048,6 +1070,7 @@ impl AppUi {
             })
         } else if let Some(key) = self.touch_pad {
             Some(Presentation::TouchPad {
+                ink: self.ink_options,
                 control: *compiler
                     .named_controls
                     .get(&key)

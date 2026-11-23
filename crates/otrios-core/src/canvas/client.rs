@@ -20,6 +20,7 @@ mod oib_leave;
 mod oib_property_editor;
 mod oib_working_copy;
 mod oib_workspace;
+mod preferences;
 mod shell_style;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
@@ -244,6 +245,8 @@ pub struct DesignerUsage {
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
+    pub ink: Option<crate::dashboard::ink::Stats>,
+    pub preferences: otrios_interfaces::spaces::UserPreferences,
     pub monitoring: Option<local_monitoring::Usage>,
     pub designer: Option<DesignerUsage>,
     pub oib: Option<super::oib::Info>,
@@ -477,6 +480,13 @@ impl Client {
             None
         };
         let changed = self.spaces.receive(bytes).map_err(err)?;
+        if changed {
+            let preferences = self.user_preferences();
+            self.set_appearance(
+                preferences.appearance.name(),
+                self.system_appearance == oib_workspace::Appearance::Dark,
+            )?;
+        }
         if self.host.transfer.as_ref().is_some_and(|d| {
             self.spaces.snapshot().is_none_or(|s| {
                 s.identity.as_deref() != Some(d.actor.as_str())
@@ -1100,6 +1110,9 @@ impl Client {
                 self.build_host(true)?;
             }
             HostAction::MoveConfirm => return self.confirm_host_move(),
+            HostAction::DeveloperMode | HostAction::HitZones | HostAction::Theme(_) => {
+                return self.change_preferences(action);
+            }
             HostAction::ProfileSave => {
                 let snapshot = self.spaces.snapshot().ok_or("Spaces unavailable")?;
                 let revision = snapshot.profile.as_ref().map_or(0, |p| p.revision);
@@ -1634,7 +1647,9 @@ impl Client {
             |chat| chat.effect_vertices(self.appearance_is_dark()),
         )?;
         self.append_focus_vertices(&mut vertices)?;
-        if let Some(m) = &self.active {
+        if let Some(m) = &self.active
+            && self.hit_zones_on_touch()
+        {
             let color = m
                 .shell_appearance
                 .palette()
@@ -1931,7 +1946,7 @@ impl Client {
         }
         let next = decode_catalog(bytes)?;
         let old = self.catalog.as_ref().ok_or("Missing catalog")?;
-        if next.format != old.format || next.apps.len() != old.apps.len() {
+        if next.format != old.format || next.apps.len() < old.apps.len() {
             return Err("UI update changed the catalog contract".into());
         }
         for entry in &old.apps {
@@ -1940,7 +1955,11 @@ impl Client {
                 .iter()
                 .find(|n| n.app.id == entry.app.id)
                 .ok_or("UI update removed an app")?;
-            if entry.app != replacement.app || entry.private != replacement.private {
+            if entry.app != replacement.app
+                || entry.private != replacement.private
+                || next.apps.len() > old.apps.len()
+                    && (entry.path != replacement.path || entry.ui_hash != replacement.ui_hash)
+            {
                 return Err("Only app UI data may change".into());
             }
         }
@@ -2239,6 +2258,12 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            ink: self
+                .active
+                .as_ref()
+                .filter(|m| matches!(m.ui.presentation, Some(Presentation::TouchPad { .. })))
+                .map(|m| m.ink.stats()),
+            preferences: self.user_preferences(),
             monitoring: self
                 .active
                 .as_ref()
@@ -3389,6 +3414,7 @@ impl Client {
             && !matches!(
                 h.operation,
                 Operation::Chat(_)
+                    | Operation::ClearInk
                     | Operation::Back
                     | Operation::SignOut
                     | Operation::OibInstance {
@@ -3524,6 +3550,13 @@ impl Client {
                     super::chat::UiAction::BrowserLogin => self.navigate("monitoring")?,
                     super::chat::UiAction::Changed => {}
                 };
+                return Ok(true);
+            }
+            Operation::Ink => return Ok(false),
+            Operation::ClearInk => {
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                m.ink.clear();
+                m.invalidate();
                 return Ok(true);
             }
             Operation::EditOrder => {
@@ -3904,13 +3937,21 @@ impl Client {
         } else {
             m.capture_validation = None;
         }
-        let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
+        let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control,..}) if g.action==Action::AppEvent(control)));
         if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
         }
         if pad && let Some(g) = &delivery.gesture {
             m.ink.gesture(event.id, g, m.now);
             m.invalidate();
+        }
+        if pad
+            && matches!(
+                m.ui.presentation,
+                Some(Presentation::TouchPad { ink: Some(_), .. })
+            )
+        {
+            return Ok(true);
         }
         // Pad moves are transient presentation data. Only the released point is
         // a durable app edit; its local marker still follows every sample.
@@ -5467,7 +5508,10 @@ fn qualify(
             GestureKind::Slider | GestureKind::Dial => {
                 h.fields.len() == 1 && numeric && h.operation == Operation::Set
             }
-            GestureKind::Pad => h.fields.len() == 2 && numeric && h.operation == Operation::Set,
+            GestureKind::Pad => {
+                (h.fields.len() == 2 && numeric && h.operation == Operation::Set)
+                    || (h.fields.is_empty() && h.operation == Operation::Ink)
+            }
             GestureKind::Activate => true,
         };
         if !shape {
@@ -5509,6 +5553,15 @@ fn qualify(
                     && matches!(ui.presentation, Some(Presentation::Chat))
             }
             Operation::Back | Operation::Stress | Operation::SignOut => h.fields.is_empty(),
+            Operation::Ink => {
+                h.fields.is_empty()
+                    && h.kind == GestureKind::Pad
+                    && matches!(ui.presentation, Some(Presentation::TouchPad { control, ink: Some(_), .. }) if control == h.control)
+            }
+            Operation::ClearInk => {
+                h.fields.is_empty()
+                    && matches!(ui.presentation, Some(Presentation::TouchPad { .. }))
+            }
             Operation::EditOrder => {
                 h.fields.is_empty() && matches!(ui.presentation, Some(Presentation::Reorder { .. }))
             }
@@ -5713,7 +5766,14 @@ fn qualify(
                     return Err("Invalid motion fields".into());
                 }
             }
-            Presentation::TouchPad { control } => {
+            Presentation::TouchPad { control, ink } => {
+                if ink.is_some_and(|o| {
+                    o.max_segments == 0
+                        || o.max_segments > 64
+                        || o.lifetime_ms.is_some_and(|ms| ms == 0 || ms > 60_000)
+                }) {
+                    return Err("Invalid local ink policy".into());
+                }
                 if !ui
                     .handlers
                     .iter()
@@ -5771,6 +5831,10 @@ fn qualify(
         } else {
             None
         };
+    let ink_options = match ui.presentation {
+        Some(Presentation::TouchPad { ink, .. }) => ink,
+        _ => None,
+    };
     let mut m = Mount {
         chat: matches!(ui.presentation, Some(Presentation::Chat))
             .then(super::chat::Client::default),
@@ -5857,7 +5921,7 @@ fn qualify(
         editors,
         font: None,
         focus: None,
-        ink: Default::default(),
+        ink: crate::dashboard::ink::Ink::configured(ink_options),
         now: 0,
         wall: 0,
         stress: 0,
@@ -6151,7 +6215,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(preview) = &m.map_drag {
         host_map::present_drag(&mut root, preview, m.viewport);
     }
-    if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
+    if let Some(Presentation::TouchPad { control, .. }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
                 n.children
@@ -6242,9 +6306,11 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             if let Some(Action::AppEvent(control)) = action
                 && ui.handlers.iter().any(|h| {
                     h.control == control
+                        && !matches!(ui.presentation, Some(Presentation::TouchPad { control: pad, ink: Some(_) }) if pad == control)
                         && !matches!(
                             h.operation,
                             Operation::Back
+                                | Operation::ClearInk
                                 | Operation::SignOut
                                 | Operation::OibInstance {
                                     action: otrios_interfaces::oib::InstanceAction::Inspect,

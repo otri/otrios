@@ -9,7 +9,7 @@ const bundleRoot=/^authority\/bundles\/([a-z-]+\.otapp)\//;
 const dataFiles=new Set(['Info.flex','UI/main.flex','Integrity/files.flex','Integrity/publisher.flex']);
 const libraryDataFiles=new Set(['Info.flex','OIB/library.flex','Integrity/files.flex','Integrity/publisher.flex']);
 function compatibleBundles(previous,next){
-  if(previous.bundle_abi!=='otrios-app-bundle-v1'||next.bundle_abi!==previous.bundle_abi)return false;
+  if(previous.ui_abi!=='otrios-app-ui-v1'||previous.bundle_abi!=='otrios-app-bundle-v1'||next.bundle_abi!==previous.bundle_abi)return false;
   const roots=m=>Array.from(new Set(Object.keys(m.authority||{}).map(name=>bundleRoot.exec(name)?.[1]).filter(Boolean))).sort();
   const a=roots(previous),b=roots(next),contracts=previous.app_contracts;
   if(!a.length||canonical(a)!==canonical(b)||!record(contracts)||!record(next.app_contracts)||canonical(contracts)!==canonical(next.app_contracts)||canonical(Object.keys(contracts).sort())!==canonical(a))return false;
@@ -51,12 +51,34 @@ function catalogChange(previous,next,behavior,component){
   }
   return true;
 }
+export function appAdditionChange(previous,next){
+  if(previous.ui_abi!=='otrios-app-ui-v1'||previous.bundle_abi!=='otrios-app-bundle-v1'||next.bundle_abi!==previous.bundle_abi)return false;
+  const metadata=m=>Object.fromEntries(Object.entries(m).filter(([k])=>!['assets','authority','app_contracts'].includes(k)));
+  if(canonical(metadata(previous))!==canonical(metadata(next)))return false;
+  const a=previous.assets,b=next.assets;
+  if(!record(a)||!record(b)||!Object.keys(a).length||canonical(Object.keys(a).sort())!==canonical(Object.keys(b).sort())||Object.keys(a).some(k=>k!=='apps/catalog.flex'&&canonical(a[k])!==canonical(b[k])))return false;
+  const old=previous.authority,current=next.authority;if(!record(old)||!record(current)||!Object.keys(old).length)return false;
+  const roots=m=>new Set(Object.keys(m).map(n=>bundleRoot.exec(n)?.[1]).filter(Boolean));
+  const before=roots(old),after=roots(current),added=new Set([...after].filter(k=>!before.has(k)));
+  const contracts=previous.app_contracts,updated=next.app_contracts;
+  if(!before.size||!added.size||after.size>16||[...before].some(k=>!after.has(k))||!record(contracts)||!record(updated)||canonical(Object.keys(contracts).sort())!==canonical([...before].sort())||canonical(Object.keys(updated).sort())!==canonical([...after].sort()))return false;
+  if(Object.entries(contracts).some(([k,v])=>updated[k]!==v)||Object.values(updated).some(v=>typeof v!=='string'||!/^[a-f0-9]{64}$/.test(v)))return false;
+  if(Object.keys(old).some(k=>canonical(old[k])!==canonical(current[k])))return false;
+  for(const root of added)if(['Info.flex','UI/main.flex','Schemas/state.flex','Integrity/files.flex','Integrity/publisher.flex'].some(n=>!Object.hasOwn(current,`authority/bundles/${root}/${n}`)))return false;
+  for(const name of Object.keys(current).filter(n=>!Object.hasOwn(old,n))){
+    const match=bundleRoot.exec(name);if(!match||!added.has(match[1]))return false;
+    const relative=name.slice(match[0].length);if(!relative.split('/').every(p=>/^[A-Za-z0-9_.-]+$/.test(p)&&p!=='.'&&p!=='..'))return false;
+    if(relative==='Schemas/state.flex'||relative.startsWith('Resources/'))continue;
+    if(!packageChange(name,previous.behavior_abi==='otrios-app-behavior-v1',previous.component_behavior_abi==='otrios-component-behavior-v1'))return false;
+  }
+  return true;
+}
 // A default UI-only classification never permits executable guest replacement.
 export function uiOnlyChange(previous,next,behavior=false){return catalogChange(previous,next,behavior,false);}
 export function appOnlyChange(previous,next){
   const behavior=previous.behavior_abi==='otrios-app-behavior-v1'&&next.behavior_abi===previous.behavior_abi;
   const component=previous.component_behavior_abi==='otrios-component-behavior-v1'&&next.component_behavior_abi===previous.component_behavior_abi;
-  return catalogChange(previous,next,behavior,component);
+  return catalogChange(previous,next,behavior,component)||appAdditionChange(previous,next);
 }
 async function read(url,limit){const r=await fetch(url,{credentials:'omit',redirect:'error'});if(!r.ok)throw Error('UI update unavailable');return boundedBody(r,limit);}
 export async function prepareUiUpdate(base,previous,next,admitted){

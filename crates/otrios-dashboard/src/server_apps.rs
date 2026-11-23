@@ -1863,7 +1863,7 @@ impl Hub {
                         ),
                         ink: matches!(
                             description.presentation,
-                            Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
+                            Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: None, .. })
                         ),
                         primary_ref: String::new(),
                     },

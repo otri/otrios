@@ -57,20 +57,37 @@ impl Store {
         Ok(Some(record.profile))
     }
     pub(super) fn commit_profile(&mut self, actor: &str, request: &Request) -> Result<()> {
-        let Change::Profile {
-            name,
-            expected_revision,
-        } = &request.change
-        else {
-            return Err(Error::Invalid);
+        let current = self.profile(actor)?;
+        let (name, preferences, expected_revision) = match &request.change {
+            Change::Profile {
+                name,
+                expected_revision,
+            } => (
+                name.clone(),
+                current
+                    .as_ref()
+                    .map_or_else(Default::default, |p| p.preferences),
+                *expected_revision,
+            ),
+            Change::Preferences {
+                preferences,
+                expected_revision,
+            } => (
+                current
+                    .as_ref()
+                    .map_or_else(|| actor.to_owned(), |p| p.name.clone()),
+                *preferences,
+                *expected_revision,
+            ),
+            _ => return Err(Error::Invalid),
         };
-        if request.version != VERSION || !valid_identity(actor) || !valid_name(name) {
+        if request.version != VERSION || !valid_identity(actor) || !valid_name(&name) {
             return Err(Error::Invalid);
         }
         if request.expected_generation != self.registry()?.generation {
             return Err(Error::Conflict);
         }
-        if self.profile(actor)?.map_or(0, |p| p.revision) != *expected_revision {
+        if self.profile(actor)?.map_or(0, |p| p.revision) != expected_revision {
             return Err(Error::Conflict);
         }
         let root = suffix(self.path(), ".profiles");
@@ -110,7 +127,7 @@ impl Store {
             }
             count += 1;
         }
-        if *expected_revision == 0 && count >= 256 {
+        if expected_revision == 0 && count >= 256 {
             return Err(Error::Capacity);
         }
         let record = ProfileRecord {
@@ -119,6 +136,7 @@ impl Store {
             actor: actor.into(),
             profile: UserProfile {
                 name: name.trim().into(),
+                preferences,
                 revision: expected_revision.checked_add(1).ok_or(Error::Capacity)?,
             },
         };
