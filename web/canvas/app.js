@@ -100,6 +100,8 @@ try{
   const fitVisibleViewport=()=>{
     const v=window.visualViewport;if(v&&v.scale>1.01)return;
     const width=v?.width||innerWidth,height=v?.height||innerHeight;
+    // A collapsed/rotating browser surface can briefly report no available area.
+    if(![layoutWidth,layoutHeight,width,height].every(n=>Number.isFinite(n)&&n>0))return;
     document.documentElement.style.setProperty('--visible-height',`${height}px`);document.documentElement.style.setProperty('--visible-width',`${width}px`);document.documentElement.style.setProperty('--visible-top',`${v?.offsetTop||0}px`);document.documentElement.style.setProperty('--visible-left',`${v?.offsetLeft||0}px`);
     baseViewport=layoutViewport(layoutWidth,layoutHeight,model?.viewportPolicy||{kind:'fit'});
     if(model)requestViewport(model.presentation==='chat'?chatViewport(width,height):baseViewport);
