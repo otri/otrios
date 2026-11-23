@@ -56,9 +56,11 @@ on Touch off. Keyboard focus/responder behavior is independent of this overlay.
 Monitoring's local timer and publisher remained active; the display had connected
 Monitoring using its existing identity before the drawing journey.
 
-Physical tracing accuracy remains for the user to assess on return. No new touch
-calibration was installed. No interactive browser qualification or broad suite was
-run for this slice.
+The user then physically traced all four edges and the central cross, supplied a
+photo, and confirmed that input felt well registered directly under the fingertip.
+They attributed the roughness to fingers sticking to the display surface. Physical
+touch acceptance is complete; no new calibration was installed. No interactive
+browser qualification or broad suite was run for this slice.
 
 ## Focused validation
 
@@ -76,5 +78,12 @@ Passed during this work:
 - Signed installer/activation, exact host-byte comparison and native binary hash check.
 
 Machine-readable release, profile and drawing evidence is retained in the existing
-Dashboard runtime's `build/touch-tracing-20261123/` directory. The signed releases
-remain in its immutable release store and the OrbStack authority store.
+Dashboard runtime's `build/touch-tracing-20261123/` directory. The active signed release
+remains in its immutable release store and the OrbStack authority store.
+
+
+After physical acceptance, the prescribed `maintain-dashboard-builder.py` dry run
+and `--apply` completed with no blocked items. Disposable compiler caches and eight
+inactive local signed releases were removed; the active release, signing keys,
+configuration, app state and evidence were preserved. Automatic builders were
+already stopped and their configuration was left unchanged. Frame was not restarted.
