@@ -4823,10 +4823,13 @@ impl Client {
         if h.kind == GestureKind::Activate {
             return Ok(false);
         }
+        let Some(&field) = h.fields.first() else {
+            return Ok(false);
+        };
         let shift = |value: u16, delta: i16| {
             (i32::from(value) + i32::from(delta) * 10).clamp(0, 1000) as u16
         };
-        let a = shift(m.number(h.fields[0])?, dx);
+        let a = shift(m.number(field)?, dx);
         let b = if h.fields.len() > 1 {
             shift(m.number(h.fields[1])?, dy)
         } else {
@@ -4848,7 +4851,10 @@ impl Client {
         if h.kind == GestureKind::Activate {
             return Ok(None);
         }
-        Ok(Some(f64::from(m.number(h.fields[0])?) / 10.))
+        let Some(&field) = h.fields.first() else {
+            return Ok(None);
+        };
+        Ok(Some(f64::from(m.number(field)?) / 10.))
     }
 }
 impl Mount {

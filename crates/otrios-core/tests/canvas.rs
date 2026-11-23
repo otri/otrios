@@ -5905,6 +5905,12 @@ fn touch_tracing_is_fullscreen_local_persistent_and_clearable() {
     let mut c = Client::default();
     activate(&mut c, trace::ui(&[]), &trace::manifest().state_ref, vec![]);
     let epoch = c.epoch();
+    // Web accessibility enumerates every control before presenting the mount.
+    // A local pad has no scalar register and cannot accept slider key steps.
+    for id in c.control_ids().unwrap() {
+        assert_eq!(c.control_value(id).unwrap(), None);
+        assert!(!c.adjust_control(id, 1, 1).unwrap());
+    }
     for (phase, position) in [
         (PointerPhase::Down, [8., 8.]),
         (PointerPhase::Move, [640., 400.]),
