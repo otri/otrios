@@ -4,7 +4,7 @@ use otrios_interfaces::canvas::*;
 pub fn manifest() -> App {
     crate::authoring::app(
         "touch-trace",
-        "Touch Tracing",
+        "Draw",
         "canvas-app",
         &["ui.rs", "sdk:canvas-authoring-v3"],
     )

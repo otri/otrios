@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-# Touch Tracing
+# Draw
 
-A full-screen shared drawing under **Test Playground → Touch Tracing**. The square
+A full-screen shared drawing in the top-level **Public** space at `/draw`. The square
 grid covers the viewport, and strokes share world coordinates across Frame,
 iPhone and desktop browsers. The initial reference view is 1280×800. Camera
 position and uniform zoom stay local, so another user's view never moves yours.
 **Fit Drawing** fits retained stroke bounds, or restores the empty reference view.
-**Clear** clears the shared drawing; **Exit** returns to Test Playground.
+**Clear** clears the shared drawing; **Exit** returns to Home.
 
 One finger draws; two fingers pan and pinch. Mouse left drag draws; right/middle
 or Space drag pans. Wheel behavior follows the authenticated profile's Developer
@@ -27,3 +27,6 @@ evicted at capacity. Portable drawing export is explicitly unsupported for now.
 This does not change device calibration. Legacy local retained ink and the
 Components pad's five-second shared ghost trails remain independent modes.
 See [RFC 0039](../../docs/rfcs/0039-shared-drawing.md).
+
+The stable `touch-trace` app/data identity is retained when renaming and moving
+the launcher entry, so existing shared strokes remain attached.

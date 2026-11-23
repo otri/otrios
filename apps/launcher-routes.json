@@ -1,4 +1,5 @@
 {
   "oib-designer": "oib-designer",
-  "bundle-counter": "test-playground/bundle-counter"
+  "bundle-counter": "test-playground/bundle-counter",
+  "touch-trace": "draw"
 }

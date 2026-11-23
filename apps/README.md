@@ -15,7 +15,7 @@ apps/
   layout-lab/                   # Reusable components and five-minute signal
   layout-document/              # Bounded reflowed document reader
   layout-text-scroll/           # Local two-axis momentum demo
-  touch-trace/                  # Shared world-space drawing, local camera and square grid
+  touch-trace/                  # Draw: top-level shared canvas, local camera and square grid
   input-lab/                    # Shared text registers; local editing/keyboard
   animation-lab/                 # Shared intent, local animation clock
   three-d-lab/                   # Shared intent, local tetrahedron presentation

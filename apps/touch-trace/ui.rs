@@ -3,7 +3,7 @@ use crate::authoring::*;
 use otrios_interfaces::canvas::{InkOptions, Ui};
 pub fn description() -> Ui {
     let pad = canvas(vec![
-        text("Touch Tracing")
+        text("Draw")
             .frame([0., 20., 280., 40.])
             .center_x()
             .font_scale(2.)
@@ -31,24 +31,17 @@ pub fn description() -> Ui {
     .frame([0., 716., 306., 60.])
     .center_x()
     .pin_bottom(24.);
-    AppUi::new(
-        "touch-trace",
-        "Touch Tracing",
-        schema("touch-trace-state-v1", &[]),
-    )
-    .with_touch_pad("drawing-control")
-    .with_ink_options(InkOptions {
-        drawing: Some(otrios_interfaces::drawing::Options {
-            reference: [1280, 800],
-            grid: 80,
-        }),
-        lifetime_ms: None,
-        max_segments: 64,
-        fullscreen: true,
-    })
-    .with_responsive_viewport([320., 300.])
-    .build(
-        "Touch Tracing",
-        vec![rectangle(BG).pin_edges(0.), pad, toolbar],
-    )
+    AppUi::new("touch-trace", "Draw", schema("touch-trace-state-v1", &[]))
+        .with_touch_pad("drawing-control")
+        .with_ink_options(InkOptions {
+            drawing: Some(otrios_interfaces::drawing::Options {
+                reference: [1280, 800],
+                grid: 80,
+            }),
+            lifetime_ms: None,
+            max_segments: 64,
+            fullscreen: true,
+        })
+        .with_responsive_viewport([320., 300.])
+        .build("Draw", vec![rectangle(BG).pin_edges(0.), pad, toolbar])
 }

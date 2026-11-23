@@ -12,6 +12,7 @@ pub fn description() -> Ui {
                     &[
                         "brass-relay",
                         "oib-designer",
+                        "touch-trace",
                         "test-playground",
                         "monitoring",
                     ],
@@ -40,6 +41,13 @@ pub fn description() -> Ui {
                     "OIB Designer",
                     "Design components and interfaces",
                     LaunchIcon::Designer,
+                ),
+                launch_card(
+                    "touch-trace",
+                    "draw",
+                    "Draw",
+                    "A shared canvas",
+                    LaunchIcon::Panning,
                 ),
                 launch_card(
                     "test-playground",
