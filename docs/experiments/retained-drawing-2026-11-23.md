@@ -110,5 +110,14 @@ only within their separate kernel clock domain.
   and publisher run, and revision 212 was acknowledged after the server update.
   Existing calibration, identity and user preferences were retained.
 
-The old compatible signed release and authority executable remain available
-pending physical acceptance. Disposable-builder pruning is deferred until then.
+## Accepted-work closeout
+
+The user accepted the performance improvements on 2026-11-23. The documented
+builder maintenance dry run and apply both completed with no blocked paths.
+The existing builder was stopped throughout and remains stopped, matching its
+prior configuration. Cleanup removed 11,994,002,265 logical bytes of disposable
+Cargo/Wasm caches (8,845,303,808 allocated bytes inventoried) and 12 inactive
+local signed releases (463,880,839 bytes). Filesystem space recovery
+may differ because of shared blocks. The active signed release, signing keys,
+configuration, app state, toolchains and top-level checker executables remain.
+No new build, runtime activation or app-data changes were needed for closeout.
