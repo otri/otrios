@@ -6030,6 +6030,17 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
     };
     let (mut a, mut sa) = mount([1280., 800.]);
     let (mut b, mut sb) = mount([400., 800.]);
+    assert_eq!(
+        b.viewport_policy(),
+        otrios_interfaces::layout::ViewportPolicy::Responsive {
+            minimum: [320., 300.]
+        }
+    );
+    assert_eq!(
+        b.scene().unwrap().root().frame.width,
+        400.,
+        "shell must not expand fullscreen drawing controls to desktop units"
+    );
     for (phase, position) in [
         (PointerPhase::Down, [640., 400.]),
         (PointerPhase::Move, [720., 400.]),

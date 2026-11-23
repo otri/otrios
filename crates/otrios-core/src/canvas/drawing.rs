@@ -217,22 +217,18 @@ impl View {
     }
     pub fn nodes(&self, board: &state::Drawing, extent: [f32; 2], base: u32) -> Vec<SceneNode> {
         let mut out = vec![];
-        let mut add = |points: Vec<[f32; 2]>, width: f32, color: [u8; 4]| {
+        let mut add = |primitive: Primitive| {
             let mut node = crate::dashboard::components::node(
                 base + out.len() as u32,
                 Rect::new(0., 0., extent[0], extent[1]),
-                Primitive::Path {
-                    points,
-                    width,
-                    color,
-                },
+                primitive,
             );
             node.responder = Some(otrios_interfaces::scene::TouchResponder::PassThrough);
             out.push(node);
         };
         let scale = self.scale(extent);
         let mut step = f32::from(self.options.grid);
-        while step * scale < 32. {
+        while step * scale < 32_f32.max((extent[0] + extent[1]) / 192.) {
             step *= 2.;
         }
         while step * scale > 160. {
@@ -242,14 +238,22 @@ impl View {
         let high = self.world(extent, extent);
         let mut x = (low[0] / step).floor() * step;
         while x <= high[0] {
-            let p = self.screen([x, 0.], extent)[0];
-            add(vec![[p, 0.], [p, extent[1]]], 1., [112, 121, 131, 80]);
+            let p = self.screen([x, 0.], extent)[0].clamp(0., extent[0]);
+            add(Primitive::Path {
+                points: vec![[p, 0.], [p, extent[1]]],
+                width: 1.,
+                color: [112, 121, 131, 100],
+            });
             x += step;
         }
         let mut y = (low[1] / step).floor() * step;
         while y <= high[1] {
-            let p = self.screen([0., y], extent)[1];
-            add(vec![[0., p], [extent[0], p]], 1., [112, 121, 131, 80]);
+            let p = self.screen([0., y], extent)[1].clamp(0., extent[1]);
+            add(Primitive::Path {
+                points: vec![[0., p], [extent[0], p]],
+                width: 1.,
+                color: [112, 121, 131, 100],
+            });
             y += step;
         }
         let mut strokes = board.strokes.clone();
@@ -271,10 +275,56 @@ impl View {
             if points.len() == 1 {
                 points.push([points[0][0] + 0.25, points[0][1]]);
             }
-            add(points, (3. * scale).clamp(1., 16.), [94, 218, 231, 255]);
+            // Clip before scene admission: zoomed world points can be far
+            // beyond the scene coordinate budget. Keep disjoint runs separate.
+            let width = (3. * scale).clamp(1., 16.);
+            let mut triangles = vec![];
+            for pair in points.windows(2) {
+                if let Some([a, b]) = clip_segment(pair[0], pair[1], extent) {
+                    let d = [b[0] - a[0], b[1] - a[1]];
+                    let length = d[0].hypot(d[1]);
+                    if length == 0. {
+                        continue;
+                    }
+                    let n = [-d[1] / length * width / 2., d[0] / length * width / 2.];
+                    let quad = [
+                        [a[0] + n[0], a[1] + n[1]],
+                        [b[0] + n[0], b[1] + n[1]],
+                        [a[0] - n[0], a[1] - n[1]],
+                        [b[0] - n[0], b[1] - n[1]],
+                    ]
+                    .map(|p| [p[0].clamp(0., extent[0]), p[1].clamp(0., extent[1])]);
+                    triangles.extend([quad[0], quad[1], quad[2], quad[2], quad[1], quad[3]]);
+                }
+            }
+            if !triangles.is_empty() {
+                add(Primitive::Triangles {
+                    points: triangles,
+                    color: [94, 218, 231, 255],
+                });
+            }
         }
         out
     }
+}
+fn clip_segment(a: [f32; 2], b: [f32; 2], extent: [f32; 2]) -> Option<[[f32; 2]; 2]> {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let (mut low, mut high) = (0_f32, 1_f32);
+    for i in 0..2 {
+        if d[i] == 0. {
+            if a[i] < 0. || a[i] > extent[i] {
+                return None;
+            }
+        } else {
+            let u = -a[i] / d[i];
+            let v = (extent[i] - a[i]) / d[i];
+            low = low.max(u.min(v));
+            high = high.min(u.max(v));
+        }
+    }
+    (low <= high).then(|| {
+        [low, high].map(|t| std::array::from_fn(|i| (a[i] + t * d[i]).clamp(0., extent[i])))
+    })
 }
 impl super::Client {
     pub fn pan_drawing(&mut self, epoch: u32, dx: f32, dy: f32, active: bool) -> Result<bool> {
@@ -337,6 +387,20 @@ mod tests {
                 .is_empty()
         );
         assert!(view.zoom > 1.);
+        let board = state::Drawing {
+            epoch: [0; 16],
+            strokes: vec![Stroke {
+                epoch: [0; 16],
+                id: [1; 16],
+                points: vec![[-262144, 0], [262144, 0], [0, 262144]],
+            }],
+        };
+        let mut far = view.clone();
+        far.zoom = 32.;
+        let nodes = far.nodes(&board, [8192., 8192.], 1);
+        let root = crate::dashboard::components::canvas(0, Rect::new(0., 0., 8192., 8192.), nodes);
+        crate::dashboard::scene::Scene::new(root)
+            .expect("zoom and offscreen points stay within scene budgets");
         assert!(
             view.pointer(1, PointerPhase::Up, [100., 300.], extent, [0; 16], true)
                 .unwrap()

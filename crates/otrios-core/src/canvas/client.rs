@@ -5077,7 +5077,7 @@ impl Mount {
     }
     fn viewport_policy(&self) -> otrios_interfaces::layout::ViewportPolicy {
         use otrios_interfaces::layout::ViewportPolicy;
-        if self.breadcrumbs.is_none() {
+        if self.breadcrumbs.is_none() || self.drawing.is_some() {
             return self.layout.viewport_policy();
         }
         if self.chat.is_some()
