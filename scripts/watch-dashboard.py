@@ -53,7 +53,7 @@ def rebuild(config,wanted,activate=True,checks=False):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES','crates','apps','assets','tools','web/shared/fonts','web/shared/model-shaders.mjs']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES','crates','apps','assets','tools','web/shared/fonts','web/shared/model-shaders.mjs','web/shared/world-shaders.mjs']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
