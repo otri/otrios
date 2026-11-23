@@ -24,6 +24,15 @@ export class PointerSamples {
       this.pending.set(id,batch);
     }
   }
+  takeOrdered(){
+    const entries=[...this.pending.values()].flatMap(batch=>batch.samples.map(args=>({batch,args}))).sort((a,b)=>a.args[4]-b.args[4]);
+    if(!entries.length)return null;
+    const {epoch,viewportRevision}=entries[0].batch;
+    const picked=[];
+    for(const entry of entries){if(picked.length===64||entry.batch.epoch!==epoch||entry.batch.viewportRevision!==viewportRevision)break;picked.push(entry);}
+    for(const {batch,args}of picked){const index=batch.samples.indexOf(args);batch.samples.splice(index,1);if(!batch.samples.length)this.pending.delete(args[1]);}
+    return {type:'pointer-batch',epoch,viewportRevision,samples:picked.map(e=>e.args)};
+  }
   take(id){const batch=this.pending.get(id);this.pending.delete(id);return batch;}
   [Symbol.iterator](){return this.pending[Symbol.iterator]();}
 }

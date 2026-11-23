@@ -156,7 +156,11 @@ impl View {
             return Ok(commands);
         }
         if self.contacts.len() >= 2 {
-            if let (Some((old, old_distance)), Some((new, distance))) = (before, self.pinch()) {
+            // Contact transitions establish/end a gesture, never transform it.
+            // Cancel/up coordinates may be absent or stale on browser hosts.
+            if phase == PointerPhase::Move
+                && let (Some((old, old_distance)), Some((new, distance))) = (before, self.pinch())
+            {
                 let anchor = self.world(old, extent);
                 self.zoom = (self.zoom * (distance / old_distance)).clamp(1. / 1024., 32.);
                 let scale = self.scale(extent);
@@ -355,6 +359,56 @@ impl super::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pinch_closes_below_initial_zoom_pans_with_fingers_and_lift_never_jumps() {
+        let mut view = View::new(Options {
+            reference: [1280, 800],
+            grid: 80,
+        });
+        let extent = [400., 800.];
+        for (id, phase, p) in [
+            (1, PointerPhase::Down, [100., 300.]),
+            (2, PointerPhase::Down, [200., 300.]),
+            (2, PointerPhase::Move, [300., 300.]),
+            (2, PointerPhase::Move, [150., 300.]),
+        ] {
+            assert!(
+                view.pointer(id, phase, p, extent, [0; 16], true)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert!(
+            (view.zoom - 0.5).abs() < 0.001,
+            "pinch closed zooms below the starting view"
+        );
+        for (id, p) in [(2, [200., 300.]), (1, [110., 320.]), (2, [210., 320.])] {
+            view.pointer(id, PointerPhase::Move, p, extent, [0; 16], true)
+                .unwrap();
+        }
+        assert!((view.zoom - 1.).abs() < 0.001);
+        assert!(
+            (view.center[0] - 608.).abs() < 0.001 && (view.center[1] - 336.).abs() < 0.001,
+            "content follows the fingers right and down"
+        );
+        let before = (view.center, view.zoom);
+        for (id, phase, p) in [
+            (1, PointerPhase::Up, [0., 0.]),
+            (2, PointerPhase::Move, [500., 500.]),
+            (2, PointerPhase::Up, [0., 0.]),
+        ] {
+            assert!(
+                view.pointer(id, phase, p, extent, [0; 16], true)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                (view.center, view.zoom),
+                before,
+                "contact transitions do not move the camera"
+            );
+        }
+    }
     #[test]
     fn drawing_camera_preserves_anchor_and_pinch_creates_no_strokes() {
         let mut view = View::new(Options {

@@ -19,3 +19,13 @@ test('cross-realm timestamps use the same absolute monotonic clock and reject fu
   assert.equal(sampleTime({timeStamp:1700000000123},clock),1700000000123);
   assert.equal(sampleTime({timeStamp:500},clock),1700000000200);
 });
+
+test('multitouch batches preserve global sample order and drain before contact transitions',()=>{
+  const q=new PointerSamples();
+  for(const [id,at]of [[1,10],[2,12],[1,18],[2,20],[1,26]])q.add({pointerId:id,clientX:at,timeStamp:at},convert);
+  assert.deepEqual(q.takeOrdered().samples.map(p=>[p[1],p[4]]),[[1,10],[2,12],[1,18],[2,20],[1,26]]);
+  assert.equal(q.takeOrdered(),null);
+  for(let id=1;id<=2;id++)for(let at=0;at<200;at+=4)q.add({pointerId:id,clientX:at,timeStamp:at},convert);
+  const first=q.takeOrdered(),second=q.takeOrdered();assert.equal(first.samples.length,64);assert.equal(second.samples.length,36);
+  assert(first.samples.at(-1)[4]<=second.samples[0][4]);assert.equal(q.size,0);
+});

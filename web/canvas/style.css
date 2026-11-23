@@ -21,3 +21,5 @@ body{position:fixed;left:var(--visible-left,0px);top:var(--visible-top,0px);widt
 
 /* Native editing and Canvas fields share a circular 12-unit corner. */
 .canvas-editor::placeholder{color:var(--otrios-muted);opacity:1}
+/* The drawing camera owns direct-touch pan/pinch; other screens retain browser zoom. */
+.screen[data-presentation="shared-ink"] canvas{touch-action:none}
