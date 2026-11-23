@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0039: bounded shared drawing and local camera
 
-Status: implementation in progress, authorized dashboard experiment.
+Status: implemented; live acceptance recorded in
+[shared Touch Tracing](../experiments/shared-touch-tracing-2026-11-23.md).
 
 Touch Tracing opts into a reusable drawing surface using `InkOptions.drawing`.
 There is no app-name switch. Legacy local retained ink and shared fading ink keep
@@ -46,9 +47,14 @@ Viewport changes retain the same camera center and relative magnification.
 One touch draws. Two touches pan and pinch around their centroid; the remaining
 finger cannot accidentally resume drawing after a two-touch gesture. Mouse left
 drag draws; right/middle or Space drag pans. Wheel zoom anchors at the pointer.
-Browser trackpad pinch uses Ctrl-wheel or Safari gesture events; direct touch
+Native type-B evdev contacts retain their slot identities through the same pointer
+path. Browser trackpad pinch uses Ctrl-wheel or Safari gesture events; direct touch
 pointer gestures take priority to avoid applying one pinch twice.
 
 Developer Mode exposes a persisted self-profile switch between wheel-pan and
 wheel-zoom. Pinch zoom and mouse pan shortcuts work in either setting. There is
 no permanently visible Mouse/Trackpad mode selector. The setting grants no access.
+
+Projected segments are clipped before scene admission. Adaptive grid spacing also
+reserves a bounded node budget at maximum viewport sizes. Drawing subtree hash
+changes invalidate cached presentation independently of scalar-field selectors.
