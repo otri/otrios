@@ -113,6 +113,7 @@ pub(super) fn run() -> Result<(), String> {
                                 "device_age_us":e.age_us,"phase":e.phase})
                             });
                             Sample {
+                                id: e.id,
                                 phase: e.phase,
                                 position: [e.x, e.y],
                                 sampled,

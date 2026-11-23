@@ -35,6 +35,8 @@ pub struct Info {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Touch {
     pub phase: i32,
+    /// Stable evdev slot identity for the lifetime of a contact.
+    pub id: u32,
     pub x: f32,
     pub y: f32,
     /// Sample age when read, preserving evdev timing through batched delivery.

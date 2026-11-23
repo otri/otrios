@@ -25,8 +25,9 @@ static ssize_t fixture_read(int fd,void *buf,size_t size);
 #undef close
 #undef ioctl
 #undef read
-static struct input_event queue[32];
+static struct input_event queue[128];
 static size_t begin,end;
+static int mt;
 static int opened,closed,held,axis_x=300,axis_y=700,bad_axis,disconnected;
 static int fixture_open(const char *path,int flags,...) {
     assert(flags==(O_RDONLY|O_NONBLOCK|O_CLOEXEC));
@@ -41,6 +42,11 @@ static int fixture_ioctl(int fd,unsigned long request,...) {
         struct input_absinfo axis={.value=request==EVIOCGABS(ABS_X)?axis_x:axis_y,.minimum=100,.maximum=bad_axis?100:1100};
         memcpy(arg,&axis,sizeof(axis));return 0;
     }
+    if(request==EVIOCGABS(ABS_MT_SLOT) || request==EVIOCGABS(ABS_MT_POSITION_X) || request==EVIOCGABS(ABS_MT_POSITION_Y)) {
+        if(!mt){errno=EINVAL;return -1;}
+        struct input_absinfo axis={.minimum=0,.maximum=request==EVIOCGABS(ABS_MT_SLOT)?9:1000};
+        memcpy(arg,&axis,sizeof(axis));return 0;
+    }
     assert(_IOC_NR(request)==_IOC_NR(EVIOCGKEY(1)));
     memset(arg,0,_IOC_SIZE(request));
     if(held)((unsigned long *)arg)[BTN_TOUCH/(8*sizeof(unsigned long))]|=1ul<<(BTN_TOUCH%(8*sizeof(unsigned long)));
@@ -53,7 +59,7 @@ static ssize_t fixture_read(int fd,void *buf,size_t size) {
     memcpy(buf,&queue[begin++],size);return (ssize_t)size;
 }
 static void event(unsigned short type,unsigned short code,int value) {
-    assert(end<32);queue[end++]=(struct input_event){.type=type,.code=code,.value=value};
+    assert(end<128);queue[end++]=(struct input_event){.type=type,.code=code,.value=value};
 }
 static void edge(int down){event(EV_KEY,BTN_TOUCH,down);event(EV_SYN,SYN_REPORT,0);}
 int main(void) {
@@ -81,6 +87,23 @@ int main(void) {
     begin=end=0;source=ot_touch_open("touch",error,sizeof(error));assert(source);
     event(EV_SYN,SYN_REPORT,0);edge(0);assert(ot_touch_read(source,out,64)==0);
     edge(1);edge(0);assert(ot_touch_read(source,out,64)==2);
+    ot_touch_close(source);assert(opened==closed);
+    /* Two simultaneous contacts keep independent IDs through a one-event
+     * output buffer. Releasing one does not interrupt the other. */
+    mt=1;held=0;begin=end=0;source=ot_touch_open("touch",error,sizeof(error));assert(source);
+    for(int i=0;i<2;i++) {
+        event(EV_ABS,ABS_MT_SLOT,i);event(EV_ABS,ABS_MT_TRACKING_ID,10+i);
+        event(EV_ABS,ABS_MT_POSITION_X,200+i*400);event(EV_ABS,ABS_MT_POSITION_Y,300);
+    }
+    edge(1);
+    assert(ot_touch_read(source,out,1)==1 && out[0].id==1 && out[0].phase==0 && out[0].x==0.2f);
+    assert(ot_touch_read(source,out,1)==1 && out[0].id==2 && out[0].phase==0 && out[0].x==0.6f);
+    event(EV_ABS,ABS_MT_SLOT,0);event(EV_ABS,ABS_MT_TRACKING_ID,-1);
+    event(EV_ABS,ABS_MT_SLOT,1);event(EV_ABS,ABS_MT_POSITION_X,700);event(EV_SYN,SYN_REPORT,0);
+    assert(ot_touch_read(source,out,64)==2 && out[0].phase==2 && out[0].id==1 && out[1].phase==1 && out[1].id==2 && out[1].x==0.7f);
+    event(EV_SYN,SYN_DROPPED,0);event(EV_SYN,SYN_REPORT,0);held=1;
+    assert(ot_touch_read(source,out,64)==1 && out[0].phase==3);
+    edge(0);assert(ot_touch_read(source,out,64)==0);
     ot_touch_close(source);assert(opened==closed);
     puts("evdev fixtures passed: partial init, unchanged axes, bounded batches, stream loss, held contact, disconnect, cleanup");
     return 0;

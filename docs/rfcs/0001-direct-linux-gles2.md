@@ -70,6 +70,19 @@ must continue while graphics upload or a page flip is blocked. Event overload or
 device failure must be explicit, and mount replacement/revocation must suppress
 stale input rather than directing an old contact into a new UI.
 
+## Multi-contact input extension — 2026-11-23
+
+The existing evdev owner also accepts Linux type-B multitouch devices, bounded to
+32 slots. Each synchronous `ot_touch` includes a `uint32_t` contact ID, mirrored
+by the Rust `repr(C)` field. A SYN frame is drained completely before consuming
+another frame, including when the caller supplies a one-event buffer. Legacy
+ABS_X/ABS_Y devices retain the single-contact path. Calibration and rotation
+apply independently to every contact. SYN_DROPPED cancels all captures and waits
+for a clean lift; reopening a held device follows the same rule. No new unsafe
+scope, callbacks, retained pointers or device configuration changes are needed.
+The safe input worker keeps a bounded capture per contact, preserving IDs through
+pointer dispatch and cancelling stale captures on mount replacement/revocation.
+
 ## Dynamic emoji atlas extension (2026-11-14)
 
 Full emoji sequence lookup and bounded tile decoding remain shared LGPL runtime

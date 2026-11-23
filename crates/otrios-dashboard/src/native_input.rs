@@ -4,6 +4,7 @@ use crate::native_worker::Input;
 use otrios_core::dashboard::display::{Calibration, Surface};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use std::{
+    collections::BTreeMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -20,6 +21,7 @@ pub(super) struct Target {
 }
 pub(super) type SharedTarget = Arc<Mutex<Option<Target>>>;
 pub(super) struct Sample {
+    pub id: u32,
     pub phase: i32,
     pub position: [f32; 2],
     pub sampled: Instant,
@@ -32,7 +34,7 @@ pub(super) fn run(
     surface: Surface,
     calibration: Calibration,
 ) -> Result<(), String> {
-    let mut contact: Option<Target> = None;
+    let mut contacts = BTreeMap::<u32, Target>::new();
     let send = |event| {
         tx.try_send(event)
             .map_err(|e| format!("Touch dispatch queue unavailable: {e}"))
@@ -46,9 +48,10 @@ pub(super) fn run(
         for sample in events {
             let current = target.lock().map_err(|_| "Touch target poisoned")?.clone();
             if sample.phase == 3 {
-                if let Some(old) = contact.take().or(current) {
+                if let Some(old) = contacts.values().next().cloned().or(current) {
                     send(Input::CanvasCancel(old.epoch))?;
                 }
+                contacts.clear();
                 continue;
             }
             let phase = match sample.phase {
@@ -58,12 +61,26 @@ pub(super) fn run(
                 _ => return Err("Invalid input phase".into()),
             };
             if phase == PointerPhase::Down {
-                if let Some(old) = contact.take() {
-                    send(Input::CanvasCancel(old.epoch))?;
+                if contacts.contains_key(&sample.id)
+                    || contacts.values().any(|old| {
+                        current.as_ref().is_none_or(|now| {
+                            old.epoch != now.epoch || old.viewport != now.viewport
+                        })
+                    })
+                {
+                    if let Some(old) = contacts.values().next() {
+                        send(Input::CanvasCancel(old.epoch))?;
+                    }
+                    contacts.clear();
                 }
-                contact = current.clone().filter(|t| t.access.load(Ordering::Acquire));
+                if let Some(owner) = current.clone().filter(|t| t.access.load(Ordering::Acquire)) {
+                    if contacts.len() >= 32 {
+                        return Err("Touch contact limit".into());
+                    }
+                    contacts.insert(sample.id, owner);
+                }
             }
-            let Some(owner) = contact.as_ref() else {
+            let Some(owner) = contacts.get(&sample.id) else {
                 continue;
             };
             if !owner.access.load(Ordering::Acquire)
@@ -72,7 +89,7 @@ pub(super) fn run(
                     .is_none_or(|t| t.epoch != owner.epoch || t.viewport != owner.viewport)
             {
                 send(Input::CanvasCancel(owner.epoch))?;
-                contact = None;
+                contacts.clear();
                 continue;
             }
             if let Some(position) = surface.touch_for(calibration, sample.position, owner.viewport)
@@ -80,7 +97,7 @@ pub(super) fn run(
                 send(Input::CanvasPointer(
                     owner.epoch,
                     PointerEvent {
-                        id: 1,
+                        id: sample.id,
                         phase,
                         position,
                     },
@@ -88,18 +105,18 @@ pub(super) fn run(
                 ))?;
             } else {
                 send(Input::CanvasCancel(owner.epoch))?;
-                contact = None;
+                contacts.clear();
                 continue;
             }
             if phase == PointerPhase::Up {
-                contact = None;
+                contacts.remove(&sample.id);
             }
         }
         if idle {
             thread::sleep(Duration::from_millis(2));
         }
     }
-    if let Some(owner) = contact {
+    if let Some(owner) = contacts.values().next() {
         send(Input::CanvasCancel(owner.epoch))?;
     }
     Ok(())
@@ -138,11 +155,13 @@ mod tests {
         source
             .send(vec![
                 Sample {
+                    id: 1,
                     phase: 0,
                     position: [0.2, 0.8],
                     sampled: at,
                 },
                 Sample {
+                    id: 1,
                     phase: 2,
                     position: [0.2, 0.8],
                     sampled: at + Duration::from_millis(20),
@@ -159,6 +178,54 @@ mod tests {
                 panic!("pointer edge")
             };
             assert_eq!((epoch, e.phase, time), (7, phase, sampled));
+        }
+        stop.store(true, Ordering::Release);
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
+    fn independent_contacts_keep_ids_and_releasing_one_keeps_the_other() {
+        let shared = Arc::new(Mutex::new(Some(target(7))));
+        let stop = Arc::new(AtomicBool::new(false));
+        let done = stop.clone();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let mut first = true;
+        let worker = thread::spawn(move || {
+            run(
+                || {
+                    if !first {
+                        return Ok(vec![]);
+                    }
+                    first = false;
+                    Ok([(1, 0), (2, 0), (1, 2), (2, 1), (2, 2)]
+                        .into_iter()
+                        .map(|(id, phase)| Sample {
+                            id,
+                            phase,
+                            position: [0.5, 0.5],
+                            sampled: Instant::now(),
+                        })
+                        .collect())
+                },
+                shared,
+                done,
+                tx,
+                Surface::new(0).unwrap(),
+                Calibration::new([1., 0., 0., 0., 1., 0.]).unwrap(),
+            )
+        });
+        for (id, phase) in [
+            (1, PointerPhase::Down),
+            (2, PointerPhase::Down),
+            (1, PointerPhase::Up),
+            (2, PointerPhase::Move),
+            (2, PointerPhase::Up),
+        ] {
+            let Input::CanvasPointer(7, event, _) =
+                rx.recv_timeout(Duration::from_secs(1)).unwrap()
+            else {
+                panic!("independent contact")
+            };
+            assert_eq!((event.id, event.phase), (id, phase));
         }
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
@@ -183,6 +250,7 @@ mod tests {
         });
         let sample = |phase| {
             vec![Sample {
+                id: 1,
                 phase,
                 position: [0.2, 0.8],
                 sampled: Instant::now(),
@@ -241,6 +309,7 @@ mod tests {
             || {
                 Ok([0, 2]
                     .map(|phase| Sample {
+                        id: 1,
                         phase,
                         position: [0.2, 0.8],
                         sampled: Instant::now(),
