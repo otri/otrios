@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read_to_string(&mut input)?;
     let metadata: Value = serde_json::from_str(&input)?;
     let mut client = Client::default();
+    client.set_chat_native(std::env::args().any(|arg| arg == "--native"));
     client.set_font(Arc::new(otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
