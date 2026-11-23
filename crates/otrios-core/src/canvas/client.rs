@@ -3595,7 +3595,7 @@ impl Client {
                 if let Some(view) = &mut m.drawing {
                     view.fit(&m.doc.drawing()?, m.viewport);
                     view.camera_changed(m.now);
-                    m.invalidate();
+                    m.invalidate_presentation();
                     return Ok(true);
                 }
                 return Ok(false);
@@ -4014,7 +4014,7 @@ impl Client {
                 if camera_before != view.camera() {
                     view.camera_changed(m.now);
                 }
-                m.invalidate();
+                m.invalidate_presentation();
                 return Ok(true);
             }
             m.ink.gesture(event.id, g, m.now);
@@ -4783,7 +4783,7 @@ impl Client {
         }
         let presence_changed = m.drawing.as_mut().is_some_and(|v| v.presence_tick(now));
         if presence_changed {
-            m.invalidate();
+            m.invalidate_presentation();
         }
         let changed = presence_changed || m.ink.tick(now) || clock || scrolled || map_changed;
         let keyboard_feedback = m.keyboard.feedback_key();
@@ -4837,7 +4837,7 @@ impl Client {
         if let Some(view) = &mut m.drawing {
             let changed = view.presence_receive(bytes, now)?;
             if changed {
-                m.invalidate();
+                m.invalidate_presentation();
             }
             return Ok(changed);
         }
@@ -6981,7 +6981,7 @@ impl Client {
             if let Some(view) = &mut m.drawing {
                 view.camera_changed(m.now);
             }
-            m.invalidate();
+            m.invalidate_presentation();
         }
     }
 }

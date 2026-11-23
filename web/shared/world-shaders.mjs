@@ -24,15 +24,22 @@ varying mediump float halfWidth;
 void main(){float alpha=tint.a*clamp(halfWidth+0.5-abs(edge),0.0,1.0);gl_FragColor=vec4(tint.rgb*alpha,alpha);}
 `;
 export const gridVertex=`
-attribute vec2 position;
+attribute vec3 line;
 uniform mat3 projection;
 uniform vec3 grid;
-varying mediump vec2 cell;
-void main(){cell=(position-grid.yz)/grid.x;vec3 q=projection*vec3(position,1.0);gl_Position=vec4(q.xy,0.0,q.z);}
-`;
+uniform vec2 extent;
+uniform float axis;
+varying mediump float edge;
+void main(){
+ float along=line.x*grid.x+mix(grid.y,grid.z,axis);
+ vec2 a=mix(vec2(along,0.0),vec2(0.0,along),axis);
+ vec2 b=mix(vec2(along,extent.y),vec2(extent.x,along),axis);
+ vec2 normal=mix(vec2(1.0,0.0),vec2(0.0,1.0),axis);
+ edge=line.z;vec3 q=projection*vec3(mix(a,b,line.y)+normal*edge,1.0);
+ gl_Position=vec4(q.xy,0.0,q.z);
+}`;
 export const gridFragment=`
-#extension GL_OES_standard_derivatives : enable
 precision mediump float;
-varying mediump vec2 cell;
-void main(){vec2 d=abs(fract(cell+0.5)-0.5);vec2 w=max(fwidth(cell),vec2(0.0001));float a=0.30*(1.0-min(1.0,min(d.x/w.x,d.y/w.y)));gl_FragColor=vec4(vec3(0.44,0.47,0.51)*a,a);}
+varying mediump float edge;
+void main(){float a=0.30*clamp(1.0-abs(edge),0.0,1.0);gl_FragColor=vec4(vec3(0.44,0.47,0.51)*a,a);}
 `;

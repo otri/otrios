@@ -68,7 +68,9 @@ resource identities. At most 256 chunks are retained for the 64 × 192 point
 app-data bound. A full chunk has 2,268 float components (9,072 bytes).
 
 The common GLES2/WebGL1 shader expands endpoint pairs into anti-aliased line
-quads; the grid is a separate procedural pass. It uses bounded camera-relative
+quads; the grid is a separate pass of thin shader-positioned lines. A static
+206-line template is drawn once per axis with camera/grid uniforms, avoiding
+full-screen fragment work on Frame. Camera updates preserve the UI layout cache. It uses bounded camera-relative
 coordinates and adaptive square spacing. Base/background, world drawing and UI
 overlay remain ordered layers. The native safe FFI and Web worker bridge copy
 new geometry only when an immutable resource version first becomes visible;
