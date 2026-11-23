@@ -42,6 +42,18 @@ impl CanvasApp {
     pub fn appearance_preference(&self) -> String {
         self.inner.appearance_preference().into()
     }
+    pub fn monitoring_generated(&self) -> Option<f64> {
+        self.inner.monitoring_generated().map(|v| v as f64)
+    }
+    pub fn set_monitoring_as_of(&mut self, generated: f64, label: &str) -> Result<bool, String> {
+        if !generated.is_finite()
+            || generated.fract() != 0.
+            || !(0. ..=8.64e12).contains(&generated)
+        {
+            return Err("Invalid Monitoring date".into());
+        }
+        self.inner.set_monitoring_as_of(generated as i64, label)
+    }
     pub fn appearance_is_dark(&self) -> bool {
         self.inner.appearance_is_dark()
     }

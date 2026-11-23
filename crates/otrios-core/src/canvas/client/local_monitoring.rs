@@ -14,6 +14,42 @@ pub struct Usage {
     pub local: bool,
 }
 impl Client {
+    pub fn monitoring_generated(&self) -> Option<i64> {
+        self.active
+            .as_ref()?
+            .monitoring
+            .as_ref()
+            .map(|s| s.head().window.generated)
+    }
+    /// Host-local date formatting changes only the derived view, never app data.
+    pub fn set_monitoring_as_of(&mut self, generated: i64, label: &str) -> Result<bool> {
+        if label.is_empty()
+            || label.len() > 32
+            || !label.is_ascii()
+            || label.bytes().any(|b| b < 32 || b == 127)
+        {
+            return Err("Invalid local Monitoring time label".into());
+        }
+        let Some(m) = &mut self.active else {
+            return Ok(false);
+        };
+        let Some(snapshot) = &m.monitoring else {
+            return Ok(false);
+        };
+        if snapshot.head().window.generated != generated
+            || m.monitoring_as_of.as_deref() == Some(label)
+        {
+            return Ok(false);
+        }
+        let mut data = snapshot.data().clone();
+        data.window.collected_label = label.into();
+        m.view = Some(Layout::from_bytes(&super::super::monitoring::project(
+            &data,
+        )?)?);
+        m.monitoring_as_of = Some(label.into());
+        m.invalidate();
+        Ok(true)
+    }
     /// This view is confirmed against the durable local producer, independently
     /// of the remote authority connection. Ordinary remote leases stay online-only.
     pub fn owns_monitoring_view(&self) -> bool {
@@ -214,6 +250,21 @@ mod tests {
         assert!(client.poll_owned_monitoring().unwrap());
         assert!(client.owns_monitoring_view());
         assert!(client.confirmed());
+        assert!(
+            client
+                .set_monitoring_as_of(604800, "Jan 08 09:00 JST")
+                .unwrap()
+        );
+        assert!(
+            !client
+                .set_monitoring_as_of(604800, "Jan 08 09:00 JST")
+                .unwrap()
+        );
+        assert!(
+            !client
+                .set_monitoring_as_of(604801, "Jan 08 09:00 JST")
+                .unwrap()
+        );
         assert_eq!(
             client.resource_usage().monitoring.unwrap().root,
             hex(&first.root())

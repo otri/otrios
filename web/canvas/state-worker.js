@@ -31,10 +31,19 @@ function tick(now,wall){const changed=app.tick(now,wall);if(app.rejected_mount_p
 // Input and network work continue while the renderer holds its single credit.
 // Coalesce dirty requests before crossing Wasm or assembling transferable arrays.
 function publish(geometry=true){pendingGeometry ||= geometry;app.request_frame();sendFrame();}
+function monitoringAsOf(generated){
+  const date=new Date(generated*1000);if(!Number.isFinite(date.getTime()))return null;
+  const formatter=new Intl.DateTimeFormat('en-US',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZoneName:'short'});
+  const parts=Object.fromEntries(formatter.formatToParts(date).map(p=>[p.type,p.value]));
+  const zone=formatter.resolvedOptions().timeZone==='Asia/Tokyo'?'JST':parts.timeZoneName;
+  return `${parts.month} ${parts.day} ${parts.hour}:${parts.minute} ${zone}`;
+}
 function sendFrame(){
   if(graphicsPaused||inFlight!==null)return;
   const serial=app.begin_frame();if(serial===undefined||serial===null)return;
   inFlight=serial;
+  const generated=app.monitoring_generated();
+  if(generated!==undefined&&generated!==null){const label=monitoringAsOf(generated);if(label)app.set_monitoring_as_of(generated,label);}
   const geometry=pendingGeometry;pendingGeometry=false;
   syncInk();
   const chat=JSON.parse(app.chat_info());const logKey=chat?`${chat.first_sequence}:${chat.last_sequence}:${chat.messages}:${chat.authors_revision}`:'';if(logKey!==chatLogKey){chatLogKey=logKey;postMessage({type:'chat-log',messages:chat?JSON.parse(app.chat_messages()):[]});}

@@ -561,6 +561,7 @@ pub(super) fn state_worker(
     let mut ink_pending = None;
     let mut demand = Demand::default();
     let mut dirty = true;
+    let mut monitoring_stamp: Option<(i64, Option<String>)> = None;
     let mut received_updates = 0;
     let mut remote_sample = None;
     let mut measured_sample = 0;
@@ -1112,6 +1113,14 @@ pub(super) fn state_worker(
         }
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
             return Ok(());
+        }
+        if let Some(generated) = client.monitoring_generated() {
+            if monitoring_stamp.as_ref().is_none_or(|s| s.0 != generated) {
+                monitoring_stamp = Some((generated, monitoring::local_as_of(generated)));
+            }
+            if let Some((_, Some(label))) = &monitoring_stamp {
+                dirty |= client.set_monitoring_as_of(generated, label)?;
+            }
         }
         if dirty {
             demand.request();

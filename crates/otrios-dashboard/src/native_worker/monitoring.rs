@@ -2,6 +2,21 @@
 //! File observation only; typed validation, ownership and projection stay in core.
 use super::*;
 use std::path::PathBuf;
+pub(super) fn local_as_of(generated: i64) -> Option<String> {
+    // Format at the host boundary using Linux's configured timezone database.
+    // Invoked only for a new collection/mount, not on every presentation tick.
+    let output = std::process::Command::new("date")
+        .args(["-d", &format!("@{generated}"), "+%b %d %H:%M %Z"])
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let label = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    (label.len() <= 32 && !label.is_empty() && label.bytes().all(|b| (32..127).contains(&b)))
+        .then_some(label)
+}
 pub(super) struct Owner {
     root: PathBuf,
     next: Instant,

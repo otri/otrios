@@ -150,6 +150,7 @@ struct Mount {
     keyboard_pointer: Option<u32>,
     view: Option<Layout>,
     monitoring: Option<super::monitoring::Snapshot>,
+    monitoring_as_of: Option<String>,
     pad_preview: BTreeMap<u16, Value>,
     order_editing: bool,
     order_drag: Option<OrderDrag>,
@@ -4831,6 +4832,7 @@ impl Mount {
                 }
                 let view = Layout::from_bytes(&super::monitoring::project(snapshot.data())?)?;
                 self.monitoring = Some(snapshot);
+                self.monitoring_as_of = None;
                 view
             }
             Some(Presentation::View { .. }) => Layout::from_bytes(bytes)?,
@@ -5865,6 +5867,7 @@ fn qualify(
         keyboard_pointer: None,
         view: initial_monitoring_view,
         monitoring: None,
+        monitoring_as_of: None,
         pad_preview: BTreeMap::new(),
         order_editing: false,
         order_drag: None,
