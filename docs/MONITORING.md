@@ -15,7 +15,10 @@ It uses native GLES2; browsers use the same Rust chart projection through WebGL.
 - Production `memory_usage_heap_used`: hourly means in MiB, plus a separate current instant value. The chart's scale includes both the history and current reading.
 - Current WordPress database status, Apache busy workers, English/Japanese post counts and days since backup.
 
-All range queries share an aligned end hour and start exactly seven days earlier, with a 3,600-second step (169 inclusive evaluation timestamps). UTC bounds are printed on the plots. The newest history point can be up to an hour behind collection; current cards use instant queries at the collection time. Hourly point samples can miss short-lived bundle/count changes; health and memory use the aggregations described above. The first health bucket also looks back an hour before the first evaluation timestamp.
+All range queries share an aligned end hour and start exactly seven days earlier, with a 3,600-second step (169 inclusive evaluation timestamps). UTC bounds are printed on the plots. **AS OF** is formatted locally by the viewer:
+browsers use their detected timezone (with the collection date's DST offset),
+and Frame is configured with `TZ=Asia/Tokyo` to display JST. Canonical timestamps
+and Merkle roots are unchanged by this presentation setting. The newest history point can be up to an hour behind collection; current cards use instant queries at the collection time. Hourly point samples can miss short-lived bundle/count changes; health and memory use the aggregations described above. The first health bucket also looks back an hour before the first evaluation timestamp.
 
 Absent/nonfinite samples remain missing. Paths split at gaps while retaining their original horizontal time positions; isolated valid samples render as dots. Missing current values say `NO DATA`, never the old demo samples. Multiple matching series are rejected rather than silently selecting an arbitrary instance. Prometheus warnings, invalid timestamps, overlarge responses, query failures and invalid binary scenes retain the previous complete view. Its **AS OF** label stays unchanged, so it must not be interpreted as a fresh health check. There is no automatic stale colour/alarm yet.
 
