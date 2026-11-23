@@ -48,3 +48,10 @@ contracts, collector, identities, protocol v44 and opening control v1 are
 unchanged. The previous compatible code release remains available. Frame
 reported this runtime/UI release with confirmed state and a live stream; it
 resumed Monitoring. No drawing Clear or app-data replacement was performed.
+
+## Physical iPhone acceptance
+
+The user confirmed: “That works very well now on iPhone.” Other devices remain
+for their next check. The builder maintenance review ran against the SPDStudio1
+runtime; destructive pruning is deferred so compatible rollback remains available
+through those checks. No additional builds or deployment were needed.
