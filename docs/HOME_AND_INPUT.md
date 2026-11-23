@@ -1,17 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Home and reusable input
 
-Home is an admitted Canvas launcher with three compact cards: **The Brass Relay**,
-**Test Playground** and **Monitoring**. All shipped apps share neutral charcoal
-surfaces, brass and copper accents, fine outlines and a header divider. Each card contains an icon, title and subheading. Test
-Playground owns the seven demo destinations: Components, Layouts, Long Document,
-Text Panning, Text Input, 2D Animations and 3D Animations. Layouts has no extra
-links to the document or panning demos. Headers provide clickable ancestors:
-`< OTriOS • Test Playground` and `< OTriOS < Test Playground • Layouts`, for
-example. Each ancestor names its destination in the owning UI; there are no
-separate Home or Back buttons. Monitoring retains its private admission boundary.
-Brass Relay uses the same header font and standard app layout width, independently
-of its denser phone body text. Members and You stay inline with the heading.
+Home groups installed apps by Space. The public launchers are **The Brass Relay**,
+**OIB Designer** and **Test Playground**; Monitoring belongs to Operations.
+Demo launchers live under Test Playground, including **Touch Tracing**. Light and
+dark themes share navigation, typography and brass/copper icon motifs. Breadcrumbs
+use `OTriOS › The Brass Relay`, `OTriOS › Test Playground › Components` and
+`OTriOS › Monitoring`; Space names stay out of breadcrumbs. Monitoring retains
+its private admission boundary and fixed content aspect below the shared header.
+Touch Tracing deliberately uses the whole screen and supplies its own Exit control.
 
 Every Test Playground screen reflows between 1280×800 landscape and 800×1280
 portrait. Motion demos own a flexible stage below their controls; the same stage
@@ -83,9 +80,12 @@ See [app sources](../apps/README.md), [scene routing](SCENE_TREE.md),
 [storage](CLIENT_STORAGE.md) and [current acceptance](experiments/canvas-packed-wire.md).
 The earlier Shell, screen enum and global dashboard navigation actions are retired.
 
-## Editing Test Playground card order
+## Source-only legacy Playground card order
 
-Test Playground owns Edit/Done and the wrapping demo cards. Its independent
+The source-only legacy Test Playground UI owns Edit/Done and wrapping demo cards.
+The managed launcher instead derives its children from signed catalog paths and
+Space attachments, so adding a child does not rewrite these legacy registers.
+The legacy UI Its independent
 `app:test-playground/state` holds seven position registers. A move changes only
 the moved card's register; other connected clients animate the order while keeping
 their own editing mode. Landscape uses three columns and portrait uses two.
@@ -103,7 +103,8 @@ Home opens at `/` and owns `/test-playground` and `/monitoring`. The hub owns
 `/test-playground/components`, `/test-playground/layouts`,
 `/test-playground/long-document`, `/test-playground/text-panning`,
 `/test-playground/text-input`, `/test-playground/animations-two-d` and
-`/test-playground/animations-three-d`. Opening or refreshing a path restores that screen;
+`/test-playground/animations-three-d`, and
+`/test-playground/touch-tracing`. Opening or refreshing a path restores that screen;
 Back/Forward follows visited paths. Keyboard visibility, focus, Edit mode and drag
 state remain local. Monitoring links still require sign-in before private admission.
 
@@ -166,3 +167,22 @@ reserved blank toolbar. The fade ends at the screen edge and lets input through
 around the fixed controls. At the end of a scroll, the spacer raises the final
 content above those controls. Browser map canvases align to the bottom of their
 visible window while retaining uniform scaling.
+
+## Local ink and developer preferences
+
+`Presentation::TouchPad` accepts optional `InkOptions`. Without options it keeps
+its existing shared five-second ghost trails. With options it uses local ink:
+`lifetime_ms: None` retains strokes until Clear or unmount; a finite lifetime
+expires them. The segment budget is 1–64, each with at most 192 points. Long
+strokes share segment endpoints and evict oldest segments at the bound.
+`Operation::Ink` consumes Pad gestures without replicated field writes;
+`Operation::ClearInk` clears only that mount. Full-screen presentation hides the
+host breadcrumb without introducing app-name-specific runtime behavior. Grid,
+border, toolbar and labels remain app-authored UI. See [Touch Tracing](../apps/touch-trace/README.md).
+
+Signed-in profiles expose **Developer Mode**, off by default. Enabling it reveals
+**Hit Zone on Touch** and **System / Light / Dark** appearance controls. These
+preferences persist in the authenticated self-profile, with revision checks;
+they neither change Space roles nor grant access. Ordinary touch feedback stays
+hidden unless both Developer Mode and Hit Zone on Touch are enabled. Keyboard
+focus indication and responder routing remain independent.

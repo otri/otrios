@@ -464,8 +464,8 @@ fn main() -> Result<()> {
                 else { bundle::with_revision(current, before.revision().checked_add(1).ok_or("App revision overflow")?)? };
             write_tree(Path::new(&args[3]), &current)
         }
-        Some("refresh") if args.len() == 10 && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
-            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], None, true),
+        Some("refresh") if (args.len() == 10 || args.len() == 12 && args[10] == "--routes") && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
+            compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], args.get(11).map(Path::new), true),
         Some("compose") if (args.len() == 10 || args.len() == 12 && args[10] == "--routes") && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>
             compose(Path::new(&args[1]), Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[5]), Path::new(&args[7]), &args[9], args.get(11).map(Path::new), false),
         Some("inspect") if args.len() == 2 => report(&read_tree(Path::new(&args[1]))?),

@@ -20,7 +20,9 @@ changes after storage succeeds. Public visitors share these roots with the
 frame. Clients hold replicas, previews and pending commands in RAM only. Code,
 fonts and blobs use disposable bounded caches: about 512 MiB web. The native
 agent defaults to 2 GiB; the checked-in frame service configures 128 MiB.
-Touch trails are an ephemeral stream and fade after five seconds.
+The Components touch pad shares ephemeral trails that fade after five seconds.
+[Touch Tracing](../apps/touch-trace/README.md) uses the same primitive with local,
+bounded strokes retained until Clear or unmount; it publishes no drawing data.
 
 Input Lab text is shared typed-register state; focus, selection, keyboard page
 and repeat timers stay local. This is not character-by-character collaborative

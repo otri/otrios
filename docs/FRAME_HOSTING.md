@@ -509,3 +509,19 @@ protocol metadata and build sources all come from the selected checkout. Do not
 run a copied historical watcher together with historical sibling publishing
 scripts. When Git refresh changes the selected revision, the watcher re-executes
 from that checkout before building so imported Python tools change with it.
+
+## Adding an app without restarting the display
+
+A qualified host can adopt a strictly additive signed catalog while retaining its
+native process, current mount and local ink. Existing catalog entries, routes,
+contracts and bundle bytes must be unchanged, as must all host assets and protocol
+metadata. New bundles remain bounded by the existing 16-app catalog limit and
+must satisfy admission policy. The normal confirmed-edit/finished-gesture barrier
+still applies. The authority continues to control which Spaces expose the app.
+
+`install-app.py --routes ROUTES.json` uses `canvas-bundle refresh` to retain the
+authored Home and assign a new canonical path. App additions are recognized by
+both the native supervisor and browser update classifier. Removing apps or combining
+an addition with changes to existing bundles uses the conservative restart path.
+The first deployment of new primitives or protocol support still needs a runtime
+upgrade; installing an app supported by that runtime does not.
