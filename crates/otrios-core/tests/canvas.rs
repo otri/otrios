@@ -387,6 +387,7 @@ fn activate_snapshot(
                 Some(Presentation::TouchPad { ink: Some(_), .. })
             )) {
         let mut document = Document::new(ui.state_schema.clone(), state).unwrap();
+        document.configure_drawing(&ui).unwrap();
         if oib::seed(&ui).is_some() {
             document.configure_oib(&ui).unwrap();
         }
@@ -5903,7 +5904,11 @@ fn touch_tracing_is_fullscreen_local_persistent_and_clearable() {
     mod trace;
     use otrios_interfaces::scene::{PointerEvent, PointerPhase};
     let mut c = Client::default();
-    activate(&mut c, trace::ui(&[]), &trace::manifest().state_ref, vec![]);
+    let mut ui = trace::ui(&[]);
+    if let Some(Presentation::TouchPad { ink: Some(o), .. }) = &mut ui.presentation {
+        o.drawing = None;
+    }
+    activate(&mut c, ui, &trace::manifest().state_ref, vec![]);
     let epoch = c.epoch();
     // Web accessibility enumerates every control before presenting the mount.
     // A local pad has no scalar register and cannot accept slider key steps.
@@ -5967,4 +5972,115 @@ fn touch_tracing_is_fullscreen_local_persistent_and_clearable() {
         .unwrap();
     c.activate(epoch, clear).unwrap();
     assert_eq!(c.resource_usage().ink.unwrap().points, 0);
+}
+
+#[test]
+fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
+    #[path = "../../../apps/touch-trace/app.rs"]
+    mod trace;
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let ui = trace::ui(&[]);
+    let bytes = encode_ui(&ui).unwrap();
+    let mut doc = Document::new(ui.state_schema.clone(), "shared-drawing").unwrap();
+    doc.configure_drawing(&ui).unwrap();
+    let catalog = encode_catalog(&Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![CatalogEntry {
+            app: App {
+                state_ref: "shared-drawing".into(),
+                ..trace::manifest()
+            },
+            path: "touch-trace".into(),
+            private: false,
+            ui_hash: hash(&bytes),
+        }],
+    })
+    .unwrap();
+    let mut mount = |viewport| {
+        let mut c = Client::default();
+        c.set_viewport(viewport).unwrap();
+        c.admit_catalog(&catalog).unwrap();
+        c.open(&ui.ui_ref, "shared-drawing");
+        let ClientMessage::Mount { epoch, writer, .. } =
+            decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!()
+        };
+        let (mut session, _) = doc.open_session(&writer, 0).unwrap();
+        let state = doc.generate(&mut session).unwrap().unwrap();
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui: bytes.clone(),
+                ui_hash: hash(&bytes),
+                code: vec![],
+                state,
+                binding: None,
+                initial_view: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),
+            ClientMessage::AcceptMount { .. }
+        ));
+        pump(&mut c, &mut doc, &mut session);
+        (c, session)
+    };
+    let (mut a, mut sa) = mount([1280., 800.]);
+    let (mut b, mut sb) = mount([400., 800.]);
+    for (phase, position) in [
+        (PointerPhase::Down, [640., 400.]),
+        (PointerPhase::Move, [720., 400.]),
+        (PointerPhase::Up, [720., 480.]),
+    ] {
+        a.pointer_at(
+            a.epoch(),
+            PointerEvent {
+                id: 1,
+                phase,
+                position,
+            },
+            100,
+        )
+        .unwrap();
+        pump(&mut a, &mut doc, &mut sa);
+        pump(&mut b, &mut doc, &mut sb);
+    }
+    assert_eq!(a.resource_usage().ink.unwrap().points, 3);
+    assert_eq!(b.resource_usage().ink.unwrap().points, 3);
+    assert_eq!(
+        doc.drawing().unwrap().strokes[0].points,
+        vec![[2560, 1600], [2880, 1600], [2880, 1920]]
+    );
+    let before = doc.save().unwrap();
+    b.zoom_drawing(b.epoch(), 2., 200., 400.).unwrap();
+    b.pan_drawing(b.epoch(), 30., 20., false).unwrap();
+    pump(&mut b, &mut doc, &mut sb);
+    assert_eq!(doc.save().unwrap(), before);
+    assert_ne!(
+        a.resource_usage().drawing.unwrap().zoom,
+        b.resource_usage().drawing.unwrap().zoom
+    );
+    let clear = a
+        .control_ids()
+        .unwrap()
+        .into_iter()
+        .find(|id| a.control_label(*id).unwrap() == "Clear")
+        .unwrap();
+    a.activate(a.epoch(), clear).unwrap();
+    pump(&mut a, &mut doc, &mut sa);
+    pump(&mut b, &mut doc, &mut sb);
+    assert_eq!(b.resource_usage().ink.unwrap().points, 0);
+    for viewport in [[400., 800.], [1280., 800.], [1600., 900.]] {
+        b.set_viewport(viewport).unwrap();
+        assert!(
+            b.scene()
+                .unwrap()
+                .controls()
+                .iter()
+                .all(|c| c.origin[0] >= 0. && c.origin[1] >= 0.)
+        );
+    }
 }

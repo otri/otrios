@@ -142,6 +142,7 @@ struct Mount {
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
+    drawing: Option<super::drawing::View>,
     now: u64,
     wall: i64,
     stress: u8,
@@ -246,6 +247,7 @@ pub struct DesignerUsage {
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
     pub ink: Option<crate::dashboard::ink::Stats>,
+    pub drawing: Option<super::drawing::Usage>,
     pub preferences: otrios_interfaces::spaces::UserPreferences,
     pub monitoring: Option<local_monitoring::Usage>,
     pub designer: Option<DesignerUsage>,
@@ -1110,7 +1112,10 @@ impl Client {
                 self.build_host(true)?;
             }
             HostAction::MoveConfirm => return self.confirm_host_move(),
-            HostAction::DeveloperMode | HostAction::HitZones | HostAction::Theme(_) => {
+            HostAction::DeveloperMode
+            | HostAction::HitZones
+            | HostAction::Theme(_)
+            | HostAction::DrawingScroll => {
                 return self.change_preferences(action);
             }
             HostAction::ProfileSave => {
@@ -2099,6 +2104,7 @@ impl Client {
                     || m.delete_pointer_active()
                     || m.input.active()
                     || m.keyboard_pointer.is_some()
+                    || m.drawing.as_ref().is_some_and(|v| v.external_pan)
                     || m.order_drag.is_some()
                     || m.text_views.values().any(TextViewport::active)
                     || m.preview_scroll.as_ref().is_some_and(|s| s.touching())
@@ -2258,11 +2264,28 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            drawing: self
+                .active
+                .as_ref()
+                .and_then(|m| m.drawing.as_ref().zip(m.doc.drawing().ok()))
+                .map(|(v, b)| v.usage(&b)),
             ink: self
                 .active
                 .as_ref()
                 .filter(|m| matches!(m.ui.presentation, Some(Presentation::TouchPad { .. })))
-                .map(|m| m.ink.stats()),
+                .map(|m| {
+                    m.drawing
+                        .as_ref()
+                        .and_then(|v| m.doc.drawing().ok().map(|b| v.usage(&b)))
+                        .map_or_else(
+                            || m.ink.stats(),
+                            |u| crate::dashboard::ink::Stats {
+                                persistent: true,
+                                points: u.points,
+                                segments: u.segments,
+                            },
+                        )
+                }),
             preferences: self.user_preferences(),
             monitoring: self
                 .active
@@ -2888,6 +2911,10 @@ impl Client {
                         candidate.doc.restore_pending(&old.doc)?;
                         candidate.now = old.now;
                         candidate.wall = old.wall;
+                        if let (Some(next), Some(previous)) = (&mut candidate.drawing, &old.drawing)
+                        {
+                            next.preserve_camera(previous);
+                        }
                         candidate.refresh()?;
                     }
                     if self.previous_catalog.is_some()
@@ -3415,6 +3442,7 @@ impl Client {
                 h.operation,
                 Operation::Chat(_)
                     | Operation::ClearInk
+                    | Operation::InkView(_)
                     | Operation::Back
                     | Operation::SignOut
                     | Operation::OibInstance {
@@ -3552,9 +3580,30 @@ impl Client {
                 };
                 return Ok(true);
             }
+            Operation::InkView(otrios_interfaces::drawing::ViewAction::Fit) => {
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                if let Some(view) = &mut m.drawing {
+                    view.fit(&m.doc.drawing()?, m.viewport);
+                    m.invalidate();
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
             Operation::Ink => return Ok(false),
             Operation::ClearInk => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
+                if let Some(view) = &mut m.drawing {
+                    let epoch = m.doc.drawing()?.epoch;
+                    let changed =
+                        m.doc
+                            .queue_drawing(otrios_interfaces::drawing::Command::Clear {
+                                expected: epoch,
+                                next: state::writer_nonce()?,
+                            })?;
+                    view.cancel();
+                    m.invalidate();
+                    return Ok(changed);
+                }
                 m.ink.clear();
                 m.invalidate();
                 return Ok(true);
@@ -3942,6 +3991,17 @@ impl Client {
             return Ok(false);
         }
         if pad && let Some(g) = &delivery.gesture {
+            if let Some(view) = &mut m.drawing {
+                let board = m.doc.drawing()?;
+                let editable = m.binding.as_ref().is_none_or(|b| b.editable);
+                for command in
+                    view.pointer(event.id, g.phase, g.local, g.extent, board.epoch, editable)?
+                {
+                    m.doc.queue_drawing(command)?;
+                }
+                m.invalidate();
+                return Ok(true);
+            }
             m.ink.gesture(event.id, g, m.now);
             m.invalidate();
         }
@@ -4456,6 +4516,9 @@ impl Client {
             m.keyboard.cancel();
             m.keyboard_pointer = None;
             m.ink.cancel();
+            if let Some(view) = &mut m.drawing {
+                view.cancel();
+            }
             m.pad_preview.clear();
             m.refresh()?;
             m.invalidate();
@@ -5564,7 +5627,7 @@ fn qualify(
                     && h.kind == GestureKind::Pad
                     && matches!(ui.presentation, Some(Presentation::TouchPad { control, ink: Some(_), .. }) if control == h.control)
             }
-            Operation::ClearInk => {
+            Operation::InkView(_) | Operation::ClearInk => {
                 h.fields.is_empty()
                     && matches!(ui.presentation, Some(Presentation::TouchPad { .. }))
             }
@@ -5777,6 +5840,15 @@ fn qualify(
                     o.max_segments == 0
                         || o.max_segments > 64
                         || o.lifetime_ms.is_some_and(|ms| ms == 0 || ms > 60_000)
+                        || o.drawing.is_some_and(|d| {
+                            if o.max_segments != otrios_interfaces::drawing::MAX_SEGMENTS as u16 {
+                                return true;
+                            }
+                            d.grid == 0
+                                || d.grid > 512
+                                || d.reference.iter().any(|n| !(64..=4096).contains(n))
+                                || o.lifetime_ms.is_some()
+                        })
                 }) {
                     return Err("Invalid local ink policy".into());
                 }
@@ -5928,6 +6000,9 @@ fn qualify(
         font: None,
         focus: None,
         ink: crate::dashboard::ink::Ink::configured(ink_options),
+        drawing: ink_options
+            .and_then(|o| o.drawing)
+            .map(super::drawing::View::new),
         now: 0,
         wall: 0,
         stress: 0,
@@ -6222,17 +6297,24 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         host_map::present_drag(&mut root, preview, m.viewport);
     }
     if let Some(Presentation::TouchPad { control, .. }) = m.ui.presentation {
-        fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
+        fn append(n: &mut SceneNode, control: u8, m: &Mount) -> Result<()> {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
-                n.children
-                    .extend(ink.nodes([n.frame.width, n.frame.height], 4_000_000_000));
+                let extent = [n.frame.width, n.frame.height];
+                if let Some(view) = &m.drawing {
+                    let mut nodes = view.nodes(&m.doc.drawing()?, extent, 4_000_000_000);
+                    nodes.append(&mut n.children);
+                    n.children = nodes;
+                } else {
+                    n.children.extend(m.ink.nodes(extent, 4_000_000_000));
+                }
             } else {
                 for c in &mut n.children {
-                    append(c, control, ink)
+                    append(c, control, m)?;
                 }
             }
+            Ok(())
         }
-        append(&mut root, control, &m.ink);
+        append(&mut root, control, m)?;
     }
     if let Some(Presentation::View { mut frame } | Presentation::Monitoring { mut frame }) =
         m.ui.presentation
@@ -6317,6 +6399,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
                             h.operation,
                             Operation::Back
                                 | Operation::ClearInk
+                                | Operation::InkView(_)
                                 | Operation::SignOut
                                 | Operation::OibInstance {
                                     action: otrios_interfaces::oib::InstanceAction::Inspect,
@@ -6842,3 +6925,14 @@ fn text_pointer(
 
 #[cfg(test)]
 mod component_behavior_tests;
+impl Client {
+    pub(super) fn active_drawing_mut(&mut self) -> Option<(&mut super::drawing::View, [f32; 2])> {
+        let m = self.active.as_mut()?;
+        Some((m.drawing.as_mut()?, m.viewport))
+    }
+    pub(super) fn invalidate_drawing(&mut self) {
+        if let Some(m) = &mut self.active {
+            m.invalidate();
+        }
+    }
+}

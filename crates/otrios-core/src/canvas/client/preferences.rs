@@ -26,6 +26,9 @@ impl Client {
             HostAction::HitZones if preferences.developer_mode => {
                 preferences.hit_zones_on_touch = !preferences.hit_zones_on_touch
             }
+            HostAction::DrawingScroll if preferences.developer_mode => {
+                preferences.drawing_scroll_zooms = !preferences.drawing_scroll_zooms
+            }
             HostAction::Theme(theme) if preferences.developer_mode => {
                 preferences.appearance = theme
             }

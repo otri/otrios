@@ -120,6 +120,8 @@ pub enum Operation {
     ClearInk,
     /// A local ink gesture; has no replicated fields.
     Ink,
+    /// Local camera/input settings; no app-data write.
+    InkView(crate::drawing::ViewAction),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -216,15 +218,19 @@ pub enum Presentation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InkOptions {
+    /// Opt into durable, shared app data and a local world-space camera.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing: Option<crate::drawing::Options>,
     /// None retains local strokes until Clear or leaving the mount.
     pub lifetime_ms: Option<u32>,
-    /// Admitted retention budget; runtime requires 1..=64 path segments.
+    /// Local retention budget: 1..=64 segments. Shared drawing requires 64.
     pub max_segments: u16,
     pub fullscreen: bool,
 }
 impl Default for InkOptions {
     fn default() -> Self {
         Self {
+            drawing: None,
             lifetime_ms: Some(5000),
             max_segments: 24,
             fullscreen: false,
@@ -363,6 +369,10 @@ pub struct MountBinding {
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateRequest {
+    Drawing {
+        sequence: u64,
+        command: crate::drawing::Command,
+    },
     OibApply {
         sequence: u64,
         apply: crate::oib::authoring::Apply,

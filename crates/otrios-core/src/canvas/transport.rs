@@ -598,6 +598,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
 }
 pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Result<()> {
     let tag = match value {
+        StateRequest::Drawing { .. } => 40,
         StateRequest::OibApply { .. } => 39,
         StateRequest::OibWrite { .. } => 37,
         StateRequest::OibInstance { .. } => 38,
@@ -607,6 +608,11 @@ pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Res
         StateRequest::Resync => 36,
     };
     write(out, tag, |w| match value {
+        StateRequest::Drawing { sequence, command } => {
+            super::state::drawing::validate_command(command)?;
+            w.u64(*sequence)?;
+            w.blob(&flexbuffers::to_vec(command).map_err(err)?)
+        }
         StateRequest::OibApply { sequence, apply } => {
             w.u64(*sequence)?;
             let bytes = flexbuffers::to_vec(apply).map_err(err)?;
@@ -680,6 +686,18 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
     }
     read(bytes, |r| {
         let message = match r.u8()? {
+            40 => {
+                let sequence = r.u64()?;
+                let bytes = r.blob(8192)?;
+                crate::flex_guard::validate(&bytes, 16, 4096, 8192)?;
+                let command = flexbuffers::from_slice(&bytes).map_err(err)?;
+                super::state::drawing::validate_command(&command)?;
+                if flexbuffers::to_vec(&command).map_err(err)? != bytes {
+                    return Err("Noncanonical drawing command".into());
+                }
+                StateRequest::Drawing { sequence, command }
+            }
+
             39 => {
                 let sequence = r.u64()?;
                 let bytes = r.blob(otrios_interfaces::oib::authoring::MAX_BATCH_BYTES)?;

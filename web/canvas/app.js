@@ -196,6 +196,17 @@ try{
   }
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>worker.postMessage({type:'reduced-motion',reduced:event.matches}));
   const pointers=new Set(),moves=new PointerSamples(),pointerStarts=new Map();
+  const touchPointers=new Set();const cameraPointers=new Map();let spacePan=false,gestureScale=null,cursor=null;
+  const drawingActive=()=>model?.presentation==='shared-ink';
+  function drawingPosition(event){const rect=canvas.getBoundingClientRect();return pointerPosition(event.clientX,event.clientY,rect,model.extent);}
+  function cameraCommand(data,capture){command({type:'drawing-camera',epoch:capture?.epoch??model?.epoch,viewportRevision:capture?.viewportRevision??model?.viewportRevision,...data});}
+  canvas.addEventListener('contextmenu',event=>{if(drawingActive())event.preventDefault();});
+  window.addEventListener('keydown',event=>{if(drawingActive()&&event.code==='Space'&&(event.target===canvas||event.target===document.body||event.target.getAttribute?.('aria-label')==='Drawing surface')){spacePan=true;event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
+  window.addEventListener('keyup',event=>{if(event.code==='Space')spacePan=false;},{capture:true});
+  canvas.addEventListener('gesturestart',event=>{if(!drawingActive()||touchPointers.size)return;event.preventDefault();gestureScale=event.scale||1;},{passive:false});
+  canvas.addEventListener('gesturechange',event=>{if(!drawingActive()||gestureScale===null||touchPointers.size)return;event.preventDefault();const rect=canvas.getBoundingClientRect();const point=Number.isFinite(event.clientX)?drawingPosition(event):cursor||model.extent.map(n=>n/2);cameraCommand({factor:event.scale/gestureScale,position:point});gestureScale=event.scale;},{passive:false});
+  canvas.addEventListener('gestureend',event=>{if(gestureScale!==null)event.preventDefault();gestureScale=null;},{passive:false});
+
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,sampleTime(e,performance)]};}
   window.addEventListener('pointerdown',()=>{keyboardFocus=false;},{capture:true});
   window.addEventListener('keydown',e=>{
@@ -207,7 +218,15 @@ try{
     }
   },{capture:true});
   canvas.addEventListener('wheel',e=>{
-    if(graphicsLost||!(model?.resources?.map_scroll||model?.resources?.panel_scroll||model?.resources?.oib_preview_scroll))return;
+    if(graphicsLost)return;
+    if(drawingActive()){
+      e.preventDefault();const rect=canvas.getBoundingClientRect();const unit=e.deltaMode===1?32:e.deltaMode===2?rect.height:1;
+      if(gestureScale!==null&&e.ctrlKey)return;
+      if(e.ctrlKey||model.resources?.preferences?.drawing_scroll_zooms){cameraCommand({factor:Math.exp(-e.deltaY*unit*(e.ctrlKey ? 0.01 : 0.002)),position:drawingPosition(e)});}
+      else{cameraCommand({delta:[-e.deltaX*unit*model.extent[0]/rect.width,-e.deltaY*unit*model.extent[1]/rect.height],active:cameraPointers.size>0});}
+      return;
+    }
+    if(!(model?.resources?.map_scroll||model?.resources?.panel_scroll||model?.resources?.oib_preview_scroll))return;
     e.preventDefault();
     const rect=canvas.getBoundingClientRect();
     const unit=e.deltaMode===1?32:e.deltaMode===2?rect.height:1;
@@ -215,11 +234,15 @@ try{
     const position=pointerPosition(e.clientX,e.clientY,rect,model.extent);
     if(Number.isFinite(delta))command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta,position,id:position.map(Math.round).join(',')});
   },{passive:false});
-  canvas.addEventListener('pointerdown',e=>{if(graphicsLost)return;e.preventDefault();if(!document.activeElement?.matches('.canvas-editor'))canvas.focus({preventScroll:true});pointers.add(e.pointerId);if(timings)pointerStarts.set(e.pointerId,timingTools.eventTimestamp(e,performance));canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
-  canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.add(e,s=>pointer(s,1));});
-  function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.take(e.pointerId));}command(pointer(e,phase),e,pointerStarts.get(e.pointerId));pointerStarts.delete(e.pointerId);pointers.delete(e.pointerId);}
+  canvas.addEventListener('pointerdown',e=>{if(graphicsLost)return;e.preventDefault();
+    if(drawingActive()&&(e.button===2||e.button===1||spacePan)){
+      canvas.focus({preventScroll:true});canvas.setPointerCapture(e.pointerId);const record={epoch:model.epoch,viewportRevision:model.viewportRevision,x:e.clientX,y:e.clientY};cameraPointers.set(e.pointerId,record);cameraCommand({delta:[0,0],active:true},record);return;
+    }
+if(e.pointerType==='touch')touchPointers.add(e.pointerId);if(!document.activeElement?.matches('.canvas-editor'))canvas.focus({preventScroll:true});pointers.add(e.pointerId);if(timings)pointerStarts.set(e.pointerId,timingTools.eventTimestamp(e,performance));canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
+  canvas.addEventListener('pointermove',e=>{if(drawingActive())cursor=drawingPosition(e);const pan=cameraPointers.get(e.pointerId);if(pan){const rect=canvas.getBoundingClientRect();cameraCommand({delta:[(e.clientX-pan.x)*model.extent[0]/rect.width,(e.clientY-pan.y)*model.extent[1]/rect.height],active:true},pan);pan.x=e.clientX;pan.y=e.clientY;return;}if(pointers.has(e.pointerId))moves.add(e,s=>pointer(s,1));});
+  function finish(e,phase){touchPointers.delete(e.pointerId);const pan=cameraPointers.get(e.pointerId);if(pan){cameraPointers.delete(e.pointerId);cameraCommand({delta:[0,0],active:false},pan);return;}if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.take(e.pointerId));}command(pointer(e,phase),e,pointerStarts.get(e.pointerId));pointerStarts.delete(e.pointerId);pointers.delete(e.pointerId);}
   canvas.addEventListener('pointerup',e=>finish(e,2));canvas.addEventListener('pointercancel',e=>finish(e,3));canvas.addEventListener('lostpointercapture',e=>finish(e,3));
-  window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.timeOrigin+performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
+  window.addEventListener('blur',()=>{spacePan=false;gestureScale=null;cameraPointers.clear();touchPointers.clear();moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.timeOrigin+performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
   window.addEventListener('keydown',e=>{if(graphicsLost||e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if((model?.resources?.map_scroll||model?.resources?.panel_scroll)&&['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)){e.preventDefault();const delta={ArrowUp:-64,ArrowDown:64,PageUp:-model.extent[1]*.8,PageDown:model.extent[1]*.8,Home:-1e6,End:1e6}[e.key];command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta});return;}if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
   window.addEventListener('paste',e=>{if(graphicsLost)return;if(e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
   let lastMetric=0,scrollSamples=[],scrollLast=null,scrollLabel='',scrollHudAt=0,scrollWasActive=false,scrollHudExtent='';

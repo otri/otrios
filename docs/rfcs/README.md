@@ -47,3 +47,5 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0036: Independently upgradable OIB component libraries](0036-upgradable-oib-component-libraries.md) | L1 signed libraries and bounded L2 component Wasm ABI/Slider implemented and live-qualified on Frame/Web; XR backend remains proposed |
 | [RFC 0037: OIB design systems, named styles and variable modes](0037-oib-design-system.md) | Proposed: descriptive color variables, typed style references, Light/Dark modes, states, overrides and incremental paint; visual reference in DESIGN.md |
 | [RFC 0038: Locally owned Monitoring data and authorized replication](0038-local-monitoring-replication.md) | Typed Merkle app data, explicit Frame ownership and outbound authorized publication; acceptance in the RFC |
+
+- [0039: Shared drawing and local camera](0039-shared-drawing.md)

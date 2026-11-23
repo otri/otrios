@@ -407,6 +407,9 @@ impl CanvasApp {
             Some(Presentation::TextDocument { .. }) => "text-document",
             Some(Presentation::Chat) => "chat",
             Some(Presentation::Editor { .. }) => "input",
+            Some(Presentation::TouchPad { ink: Some(o), .. }) if o.drawing.is_some() => {
+                "shared-ink"
+            }
             Some(Presentation::TouchPad { ink: Some(_), .. }) => "local-ink",
             Some(Presentation::TouchPad { .. }) => "touch-pad",
             _ => "none",
@@ -434,6 +437,24 @@ impl CanvasApp {
     }
     pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool, String> {
         self.inner.adjust_control(id, dx, dy)
+    }
+    pub fn pan_drawing(
+        &mut self,
+        epoch: u32,
+        dx: f32,
+        dy: f32,
+        active: bool,
+    ) -> Result<bool, String> {
+        self.inner.pan_drawing(epoch, dx, dy, active)
+    }
+    pub fn zoom_drawing(
+        &mut self,
+        epoch: u32,
+        factor: f32,
+        x: f32,
+        y: f32,
+    ) -> Result<bool, String> {
+        self.inner.zoom_drawing(epoch, factor, x, y)
     }
     pub fn control_value(&self, id: u32) -> Result<f64, String> {
         Ok(self.inner.control_value(id)?.unwrap_or(f64::NAN))

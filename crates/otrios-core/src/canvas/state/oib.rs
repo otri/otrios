@@ -1337,6 +1337,7 @@ impl StateAdapter {
         // compiles/validates the draft and journals the active result atomically.
         // Repeating that work here only blocks delivery of the button release.
         self.flight = Some(Flight {
+            drawing: None,
             oib_apply: None,
             oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self
@@ -1807,6 +1808,7 @@ impl StateAdapter {
             }
         }
         self.flight = Some(Flight {
+            drawing: None,
             oib_apply: None,
             oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self

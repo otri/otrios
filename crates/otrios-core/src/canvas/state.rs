@@ -4,7 +4,9 @@ use super::*;
 use crate::merkle::{self, Actor, Authority, Cursor, Edit, Snapshot, Subscription};
 use otrios_interfaces::layout::Value;
 use std::collections::BTreeMap;
+pub(super) mod drawing;
 mod oib;
+pub use drawing::Drawing;
 mod portable;
 const ROOT_SCHEMA: &[u8] = b"otrios-canvas-merkle-v1";
 const RECEIPTS: usize = 1024;
@@ -51,11 +53,13 @@ pub struct Document {
     wall: i64,
     /// Authority policy from admitted UI dependencies; not replicated state.
     signal_fields: u64,
+    drawing_enabled: bool,
     workspace: std::sync::Arc<std::sync::Mutex<merkle::Workspace>>,
 }
 #[derive(Clone, Default)]
 pub struct Session {
     oib_edit: bool,
+    drawing_edit: bool,
     writer: Option<[u8; 16]>,
     slot: Option<usize>,
     authority: Option<Authority>,
@@ -159,6 +163,7 @@ impl Document {
             field_hashes,
             wall: 0,
             signal_fields: 0,
+            drawing_enabled: false,
             workspace: Default::default(),
         })
     }
@@ -226,6 +231,7 @@ impl Document {
             tree,
             wall: 0,
             signal_fields: 0,
+            drawing_enabled: false,
             workspace: Default::default(),
         };
         result.validate_tree()?;
@@ -263,8 +269,12 @@ impl Document {
         }
         retained(old, tree)?;
         for kind in tree.child_keys() {
-            if !(1..=4).contains(&kind) {
+            if !(1..=5).contains(&kind) {
                 return Err("Unknown Canvas subtree".into());
+            }
+            if kind == 5 {
+                self.validate_drawing(tree)?;
+                continue;
             }
             if kind == 4 {
                 if old.is_some_and(|o| {
@@ -642,7 +652,8 @@ impl Document {
         edit: bool,
     ) -> Result<(Session, bool)> {
         let writer: [u8; 16] = writer.try_into().map_err(|_| "Invalid writer nonce")?;
-        let writable = edit && self.schema.fields.iter().any(|field| field.writable);
+        let writable =
+            edit && (self.drawing_enabled || self.schema.fields.iter().any(|field| field.writable));
         if !writable && resume != 0 {
             return Err("Read-only scope cannot resume an issued write".into());
         }
@@ -658,6 +669,7 @@ impl Document {
         Ok((
             Session {
                 oib_edit: false,
+                drawing_edit: writable && self.drawing_enabled,
                 writer: Some(writer),
                 slot,
                 authority: Some(authority),
@@ -846,6 +858,9 @@ impl Document {
                 self.tree = candidate.tree;
                 Ok(true)
             }
+            StateRequest::Drawing { sequence, command } => {
+                self.receive_drawing(session, writer, sequence, command)
+            }
             StateRequest::Write { sequence, values } => {
                 self.validate_commands(&values, false)?;
                 if values.is_empty() {
@@ -926,10 +941,11 @@ impl Document {
                 .map_err(err)?;
         }
         if session.subscription.is_none() {
-            let selection = session
+            let mut selection = session
                 .selection
                 .clone()
                 .unwrap_or_else(|| StateSelection::all(&self.schema));
+            selection.drawing |= self.drawing_enabled;
             let coverage = selection.coverage_oib(session.slot, session.oib_edit)?;
             session.subscription = Some(
                 authority
@@ -966,6 +982,7 @@ impl Document {
 
 #[derive(Clone)]
 struct Flight {
+    drawing: Option<otrios_interfaces::drawing::Command>,
     oib_apply: Option<otrios_interfaces::oib::authoring::Apply>,
     oib_epoch: Option<Vec<u8>>,
     oib: Vec<otrios_interfaces::oib::Change>,
@@ -1042,6 +1059,7 @@ pub struct StateAdapter {
     writer: [u8; 16],
     replica: Option<merkle::Replica>,
     pending: BTreeMap<u16, Value>,
+    drawing_pending: std::collections::VecDeque<otrios_interfaces::drawing::Command>,
     pending_since: Option<u64>,
     dispatch: DispatchPolicy,
     clock: u64,
@@ -1077,6 +1095,7 @@ impl StateAdapter {
             return Err("Missing admitted OIB state".into());
         }
         result.doc.configure_oib(ui)?;
+        result.doc.configure_drawing(ui)?;
         Ok(result)
     }
     fn with_selection(
@@ -1106,6 +1125,7 @@ impl StateAdapter {
             last_issue: None,
             deadline: None,
             flight: None,
+            drawing_pending: Default::default(),
             acknowledged: 0,
             slot: None,
             ack: None,
@@ -1139,6 +1159,7 @@ impl StateAdapter {
             last_issue: None,
             deadline: None,
             flight: None,
+            drawing_pending: Default::default(),
             acknowledged: 0,
             slot: None,
             ack: None,
@@ -1154,6 +1175,7 @@ impl StateAdapter {
             return Err("Pending intent scope mismatch".into());
         }
         self.pending = old.pending.clone();
+        self.drawing_pending = old.drawing_pending.clone();
         self.pending_since = old.pending_since;
         self.dispatch = old.dispatch;
         self.clock = old.clock;
@@ -1213,6 +1235,7 @@ impl StateAdapter {
         self.read_only = read_only;
         if read_only {
             self.pending.clear();
+            self.drawing_pending.clear();
             self.pending_since = None;
             self.flight = None;
             self.deadline = None;
@@ -1225,7 +1248,10 @@ impl StateAdapter {
         self.hello_sent = false;
     }
     pub fn confirmed(&self) -> bool {
-        self.pending.is_empty() && self.flight.is_none() && self.replica.is_some()
+        self.pending.is_empty()
+            && self.drawing_pending.is_empty()
+            && self.flight.is_none()
+            && self.replica.is_some()
     }
     pub fn schema(&self) -> &StateSchema {
         self.doc.schema()
@@ -1276,8 +1302,10 @@ impl StateAdapter {
     }
     pub fn pending_count(&self) -> usize {
         self.pending.len()
+            + self.drawing_pending.len()
             + self.flight.as_ref().map_or(0, |f| {
                 f.values.len()
+                    + usize::from(f.drawing.is_some())
                     + f.oib.len()
                     + usize::from(f.oib_instance.is_some())
                     + usize::from(f.oib_apply.is_some())
@@ -1296,16 +1324,30 @@ impl StateAdapter {
     }
     pub fn dispatch_usage(&self) -> DispatchUsage {
         DispatchUsage {
-            pending_fields: self.pending.len(),
+            pending_fields: self.pending.len() + self.drawing_pending.len(),
             issued_fields: self.flight.as_ref().map_or(0, |f| {
                 f.values.len()
+                    + usize::from(f.drawing.is_some())
                     + f.oib.len()
                     + usize::from(f.oib_instance.is_some())
                     + usize::from(f.oib_apply.is_some())
             }),
-            pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
+            pending_payload_bytes: self
+                .pending
+                .values()
+                .map(value_payload_bytes)
+                .sum::<usize>()
+                + self
+                    .drawing_pending
+                    .iter()
+                    .map(drawing::command_bytes)
+                    .sum::<usize>(),
             issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
-                f.values.iter().map(|(_, v)| value_payload_bytes(v)).sum()
+                f.values
+                    .iter()
+                    .map(|(_, v)| value_payload_bytes(v))
+                    .sum::<usize>()
+                    + f.drawing.as_ref().map_or(0, drawing::command_bytes)
             }),
             pending_age_ms: self.pending_since.map(|at| self.clock.saturating_sub(at)),
             issued_age_ms: self
@@ -1405,6 +1447,24 @@ impl StateAdapter {
             })
             .map(Some);
         }
+        if self.flight.is_none()
+            && let Some(command) = self.drawing_pending.pop_front()
+        {
+            self.flight = Some(Flight {
+                drawing: Some(command),
+                oib_apply: None,
+                oib_epoch: None,
+                oib: vec![],
+                oib_instance: None,
+                sequence: self
+                    .acknowledged
+                    .checked_add(1)
+                    .ok_or("Drawing sequence exhausted")?,
+                values: vec![],
+                sent: false,
+                issued_at: self.clock,
+            });
+        }
         if self.flight.is_none() && !self.pending.is_empty() {
             if self.deadline.is_some_and(|at| self.clock < at) {
                 return Ok(None);
@@ -1414,6 +1474,7 @@ impl StateAdapter {
             self.pending_since = None;
             let values = std::mem::take(&mut self.pending).into_iter().collect();
             self.flight = Some(Flight {
+                drawing: None,
                 oib_apply: None,
                 oib_epoch: None,
                 sequence: self
@@ -1431,6 +1492,13 @@ impl StateAdapter {
             && !f.sent
         {
             f.sent = true;
+            if let Some(command) = &f.drawing {
+                return encode_state_request(&StateRequest::Drawing {
+                    sequence: f.sequence,
+                    command: command.clone(),
+                })
+                .map(Some);
+            }
             if let Some(apply) = &f.oib_apply {
                 return encode_state_request(&StateRequest::OibApply {
                     sequence: f.sequence,
@@ -1529,10 +1597,12 @@ impl StateAdapter {
             // rebase an old document's work onto a new incarnation.
             self.flight = None;
             self.pending.clear();
+            self.drawing_pending.clear();
             self.pending_since = None;
             self.deadline = None;
             self.acknowledged = 0;
         }
+        next.drawing_enabled = self.doc.drawing_enabled;
         next.wall = self.doc.wall;
         let cursor = replica.cursor().ok_or("Missing state cursor")?;
         self.ack = Some((cursor, next.tree.hash()));

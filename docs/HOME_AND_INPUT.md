@@ -171,7 +171,7 @@ visible window while retaining uniform scaling.
 ## Local ink and developer preferences
 
 `Presentation::TouchPad` accepts optional `InkOptions`. Without options it keeps
-its existing shared five-second ghost trails. With options it uses local ink:
+its existing shared five-second ghost trails. With options and no `drawing` binding it uses local ink:
 `lifetime_ms: None` retains strokes until Clear or unmount; a finite lifetime
 expires them. The segment budget is 1–64, each with at most 192 points. Long
 strokes share segment endpoints and evict oldest segments at the bound.
@@ -186,3 +186,10 @@ preferences persist in the authenticated self-profile, with revision checks;
 they neither change Space roles nor grant access. Ordinary touch feedback stays
 hidden unless both Developer Mode and Hit Zone on Touch are enabled. Keyboard
 focus indication and responder routing remain independent.
+
+
+`InkOptions.drawing` opts into Space-owned shared strokes and a device-local
+uniform camera. The grid covers the viewport in square world cells. One touch
+draws; two touches pan/pinch. Mouse right/middle or Space drag pans; wheel behavior
+can be tested with **Scroll: Pan / Zoom** in Developer Mode. Pinch/Ctrl-wheel and
+Safari trackpad gestures zoom around their anchor. See [RFC 0039](rfcs/0039-shared-drawing.md).

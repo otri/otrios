@@ -302,6 +302,7 @@ impl StateAdapter {
         }
         // Preserve the captured epoch even if admission changed since editing.
         self.flight = Some(Flight {
+            drawing: None,
             oib_apply: Some(apply),
             oib_epoch: None,
             oib: vec![],

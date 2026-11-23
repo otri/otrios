@@ -812,6 +812,18 @@ pub(super) fn render(
                             HostAction::Theme(theme),
                         );
                     }
+                    if sign_in {
+                        b.choice(
+                            if preferences.drawing_scroll_zooms {
+                                "Scroll: Zoom"
+                            } else {
+                                "Scroll: Pan"
+                            },
+                            preferences.drawing_scroll_zooms,
+                            [left, top + 424., width, 56.],
+                            HostAction::DrawingScroll,
+                        );
+                    }
                 }
             }
             if sign_out && snapshot.identity.is_some() {
@@ -821,7 +833,7 @@ pub(super) fn render(
                     [
                         left,
                         top + if preferences.developer_mode {
-                            424.
+                            496.
                         } else {
                             256.
                         },

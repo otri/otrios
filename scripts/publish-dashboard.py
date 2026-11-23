@@ -94,7 +94,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
             if not 52<=len(tool)<=32*1024*1024 or tool[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(tool[18:20],'little')!=40:raise ValueError('Expected bounded ARM32 Monitoring collector')
             path='native/armv7/dashboard-monitoring';(stage/path).write_bytes(tool)
             assets[path]={'bytes':len(tool),'sha256':digest(tool)}
-        manifest={'component_behavior_abi':'otrios-component-behavior-v1','behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v43','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'component_behavior_abi':'otrios-component-behavior-v1','behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v44','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         if bundles:
             manifest['bundle_abi']='otrios-app-bundle-v1'
             manifest['app_contracts']=app_contracts

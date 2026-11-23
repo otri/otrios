@@ -6,6 +6,7 @@ mod client;
 pub mod component_behavior;
 mod device_apps;
 pub mod document;
+pub mod drawing;
 mod host_ui;
 pub mod model;
 pub mod monitoring;

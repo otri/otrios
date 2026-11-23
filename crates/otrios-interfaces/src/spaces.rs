@@ -79,6 +79,8 @@ impl AppearancePreference {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserPreferences {
+    #[serde(default)]
+    pub drawing_scroll_zooms: bool,
     pub developer_mode: bool,
     pub hit_zones_on_touch: bool,
     pub appearance: AppearancePreference,

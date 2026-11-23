@@ -15,7 +15,7 @@ apps/
   layout-lab/                   # Reusable components and five-minute signal
   layout-document/              # Bounded reflowed document reader
   layout-text-scroll/           # Local two-axis momentum demo
-  touch-trace/                  # Full-screen local persistent ink, Clear and Exit
+  touch-trace/                  # Shared world-space drawing, local camera and square grid
   input-lab/                    # Shared text registers; local editing/keyboard
   animation-lab/                 # Shared intent, local animation clock
   three-d-lab/                   # Shared intent, local tetrahedron presentation
@@ -47,7 +47,7 @@ capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
 Text panning uses UI v3, the document reader uses v4, and Brass Relay uses v5.
 Motion demos use UI v6, which binds their presentation to an authored stage node.
-Other shipped screens remain v2. The current state protocol is v43; the opening
+Other shipped screens remain v2. The current state protocol is v44; the opening
 release-control envelope remains v1. The UI format version is independent of
 the state wire protocol.
 Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to inspect the

@@ -149,6 +149,7 @@ pub(super) enum HostAction {
     DeveloperMode,
     HitZones,
     Theme(otrios_interfaces::spaces::AppearancePreference),
+    DrawingScroll,
     BackgroundApply,
     Settings(String, Pane),
     Resize(String),

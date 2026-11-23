@@ -6,6 +6,7 @@ use super::*;
 pub struct StateSelection {
     pub(crate) fields: u64,
     pub(crate) signals: u64,
+    pub(crate) drawing: bool,
     oib: bool,
     oib_instances: bool,
 }
@@ -18,6 +19,7 @@ impl StateSelection {
         Self {
             fields,
             signals: fields,
+            drawing: false,
             oib: false,
             oib_instances: false,
         }
@@ -141,6 +143,7 @@ impl StateSelection {
         Ok(Self {
             fields,
             signals,
+            drawing: matches!(ui.presentation, Some(Presentation::TouchPad { ink: Some(o), .. }) if o.drawing.is_some()),
             oib: super::oib::seed(ui).is_some(),
             oib_instances: super::oib::seed(ui)
                 .is_some_and(|s| s.graph.is_some() || s.instance_surface.is_some()),
@@ -163,7 +166,7 @@ impl StateSelection {
                 registers.push(state::path(3, id));
             }
         }
-        let subtrees = if self.oib {
+        let mut subtrees = if self.oib {
             if edit {
                 vec![vec![4]]
             } else {
@@ -176,6 +179,9 @@ impl StateSelection {
         } else {
             vec![]
         };
+        if self.drawing {
+            subtrees.push(vec![5]);
+        }
         crate::merkle::Coverage::new(&registers, &subtrees).map_err(err)
     }
 }

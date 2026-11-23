@@ -395,6 +395,26 @@ pub(super) async fn provision(app: &App, path: &Path) -> Result<(), String> {
                 imports.push(hub.import_legacy_chat(actor, &space, id, root)?);
             }
         }
+        if item["refresh_policies"] == true {
+            let audience = hub
+                .registry()
+                .map_err(|e| e.to_string())?
+                .spaces
+                .iter()
+                .find(|s| s.id == space)
+                .ok_or("Missing Space")?
+                .audience;
+            // Explicit operator request: refresh same-schema app capabilities,
+            // retaining this Space's audience, memberships and collection IDs.
+            apply(
+                hub,
+                actor,
+                Change::Audience {
+                    space: space.clone(),
+                    audience,
+                },
+            )?;
+        }
         records.push(json!({"name":name,"space":space,"imports":imports}));
     }
     if let Some(services) = config["services"].as_array() {

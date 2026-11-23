@@ -186,8 +186,9 @@ fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 /// body uses its own expected-version operation; arbitrary app source changes
 /// still require a fresh collection. Callers journal the candidate before swap.
 fn configure_package_oib(doc: &mut Document, ui: &otrios_interfaces::canvas::Ui) -> Result<bool> {
+    let drawing_changed = doc.configure_drawing(ui)?;
     match doc.configure_oib(ui) {
-        Ok(changed) => Ok(changed),
+        Ok(changed) => Ok(changed || drawing_changed),
         Err(original) => {
             if canvas::oib::seed(ui)
                 .and_then(|seed| seed.graph.as_ref())
@@ -1819,7 +1820,8 @@ impl Hub {
                     &description.state_schema,
                 )?)),
                 closed_only: private,
-                editable: description.state_schema.fields.iter().any(|f| f.writable),
+                editable: description.state_schema.fields.iter().any(|f| f.writable)
+                    || matches!(description.presentation, Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: Some(o), .. }) if o.drawing.is_some()),
                 comments: matches!(
                     description.presentation,
                     Some(otrios_interfaces::canvas::Presentation::Chat)
@@ -1863,7 +1865,10 @@ impl Hub {
                         ),
                         ink: matches!(
                             description.presentation,
-                            Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: None, .. })
+                            Some(otrios_interfaces::canvas::Presentation::TouchPad {
+                                ink: None,
+                                ..
+                            })
                         ),
                         primary_ref: String::new(),
                     },
@@ -2185,7 +2190,8 @@ impl Hub {
                         .as_secs() as i64,
                 );
                 let (mut sync, changed) = if mount_binding.as_ref().is_some_and(|b| !b.editable)
-                    || !p.schema.fields.iter().any(|field| field.writable)
+                    || !(p.schema.fields.iter().any(|field| field.writable)
+                        || matches!(canvas::decode_ui(&p.ui)?.presentation, Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: Some(o), .. }) if o.drawing.is_some()))
                 {
                     (candidate.open_read_session(&writer)?, false)
                 } else {
@@ -2313,6 +2319,7 @@ impl Hub {
                     if matches!(
                         canvas::decode_state_request(&bytes)?,
                         otrios_interfaces::canvas::StateRequest::Write { .. }
+                            | otrios_interfaces::canvas::StateRequest::Drawing { .. }
                     ) && !self.allowed(
                         scope,
                         binding,

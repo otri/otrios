@@ -362,6 +362,7 @@ mod tests {
     #[test]
     fn persistent_ink_retains_segment_boundaries_until_clear_without_network_output() {
         let mut ink = Ink::configured(Some(otrios_interfaces::canvas::InkOptions {
+            drawing: None,
             lifetime_ms: None,
             max_segments: 64,
             fullscreen: true,

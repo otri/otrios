@@ -1910,6 +1910,7 @@ fn self_profiles_persist_with_revision_conflicts_without_renaming_principals_or_
         2
     );
     let preferences = UserPreferences {
+        drawing_scroll_zooms: true,
         developer_mode: true,
         hit_zones_on_touch: true,
         appearance: AppearancePreference::Light,

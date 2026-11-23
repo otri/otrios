@@ -283,6 +283,14 @@ impl Event {
             operation: Operation::Ink,
         }
     }
+    pub fn fit_drawing() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::InkView(otrios_interfaces::drawing::ViewAction::Fit),
+        }
+    }
     pub fn clear_ink() -> Self {
         Self {
             kind: GestureKind::Activate,
