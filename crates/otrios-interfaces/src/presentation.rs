@@ -10,6 +10,7 @@
 pub enum Layer {
     Base,
     Document,
+    Drawing,
     Overlay,
     Effects,
 }

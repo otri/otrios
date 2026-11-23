@@ -1334,6 +1334,12 @@ impl Hub {
         );
         Ok(())
     }
+    pub(super) fn viewport_label(&self, identity: Option<&str>) -> String {
+        identity
+            .and_then(|actor| self.spaces.as_ref()?.profile(actor).ok().flatten())
+            .map(|p| p.name)
+            .unwrap_or_else(|| "Visitor".into())
+    }
     pub(super) fn ink_room(
         &mut self,
         activation: &Activation,
@@ -1867,6 +1873,12 @@ impl Hub {
                             description.presentation,
                             Some(otrios_interfaces::canvas::Presentation::TouchPad {
                                 ink: None,
+                                ..
+                            }) | Some(otrios_interfaces::canvas::Presentation::TouchPad {
+                                ink: Some(otrios_interfaces::canvas::InkOptions {
+                                    drawing: Some(_),
+                                    ..
+                                }),
                                 ..
                             })
                         ),

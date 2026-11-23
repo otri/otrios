@@ -74,3 +74,72 @@ pub fn decode_server(b: &[u8]) -> Result<(u32, u16, Option<Point>), String> {
     point.extend(&b[12..]);
     Ok((peer, age, Some(Point::decode(&point)?)))
 }
+
+/// Ephemeral world viewport, relayed only inside the currently admitted app room.
+pub const VIEW_MAGIC: &[u8; 7] = b"OTVIEW1";
+pub const VIEW_CLIENT_BYTES: usize = 24;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Viewport {
+    pub bounds: [i32; 4],
+    pub active: bool,
+}
+impl Viewport {
+    pub fn encode(self) -> Vec<u8> {
+        let mut b = VIEW_MAGIC.to_vec();
+        for n in self.bounds {
+            b.extend(n.to_le_bytes());
+        }
+        b.push(u8::from(self.active));
+        b
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, String> {
+        if b.len() != VIEW_CLIENT_BYTES || &b[..7] != VIEW_MAGIC || b[23] > 1 {
+            return Err("Invalid viewport presence".into());
+        }
+        let bounds = std::array::from_fn(|i| {
+            i32::from_le_bytes(b[7 + i * 4..11 + i * 4].try_into().unwrap())
+        });
+        if bounds.iter().any(|n| n.unsigned_abs() > 1 << 30)
+            || bounds[0] >= bounds[2]
+            || bounds[1] >= bounds[3]
+        {
+            return Err("Viewport bounds".into());
+        }
+        Ok(Self {
+            bounds,
+            active: b[23] != 0,
+        })
+    }
+}
+pub fn view_envelope(peer: u32, age: u16, name: &str, view: Viewport) -> Vec<u8> {
+    let mut b = VIEW_MAGIC.to_vec();
+    b.extend(peer.to_le_bytes());
+    b.extend(age.to_le_bytes());
+    b.extend(&view.encode()[7..]);
+    let name = name.as_bytes();
+    let mut end = name.len().min(64);
+    while end > 0 && std::str::from_utf8(&name[..end]).is_err() {
+        end -= 1;
+    }
+    b.push(end as u8);
+    b.extend(&name[..end]);
+    b
+}
+pub fn decode_view(b: &[u8]) -> Result<(u32, u16, String, Viewport, usize), String> {
+    if b.len() < 31 || &b[..7] != VIEW_MAGIC {
+        return Err("Viewport envelope".into());
+    }
+    let peer = u32::from_le_bytes(b[7..11].try_into().unwrap());
+    let age = u16::from_le_bytes(b[11..13].try_into().unwrap());
+    let count = b[30] as usize;
+    if peer == 0 || u64::from(age) > LIFETIME_MS || count > 64 || b.len() < 31 + count {
+        return Err("Viewport envelope bounds".into());
+    }
+    let mut raw = VIEW_MAGIC.to_vec();
+    raw.extend(&b[13..30]);
+    let view = Viewport::decode(&raw)?;
+    let name = std::str::from_utf8(&b[31..31 + count])
+        .map_err(|_| "Viewport name")?
+        .to_owned();
+    Ok((peer, age, name, view, 31 + count))
+}

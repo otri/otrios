@@ -611,6 +611,12 @@ impl CanvasApp {
     }
     /// Metadata and resource IDs only. The worker transfers each RGBA image once
     /// per graphics generation; changing poses transfer only the vertex buffer.
+    pub fn drawing_frame(&self)->Result<String,String>{
+        serde_json::to_string(&self.frame()?.drawing).map_err(|e|e.to_string())
+    }
+    pub fn drawing_vertices(&self,id:u64)->Result<Vec<f32>,String>{
+        Ok(self.frame()?.drawing.as_ref().and_then(|f|f.resources.iter().find(|r|r.version==id)).ok_or("Missing world chunk")?.vertices.clone())
+    }
     pub fn model_frame(&self) -> Result<String, String> {
         let Some(model) = &self.frame()?.model_effects else {
             return Ok("null".into());

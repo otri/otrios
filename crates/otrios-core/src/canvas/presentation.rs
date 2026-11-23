@@ -19,6 +19,7 @@ pub struct Frame {
     pub document: Option<document::Frame>,
     pub reflow: Option<reflow::Frame>,
     pub effects: Arc<Vec<f32>>,
+    pub drawing: Option<super::drawing::render::Frame>,
     pub model_effects: Option<Arc<super::model::Frame>>,
     pub viewport: [f32; 2],
     pub motion: Option<[f32; 4]>,
@@ -186,8 +187,12 @@ impl Composer {
             advance(&mut self.revisions.effects);
             Arc::new(effects)
         };
+        let drawing = client.drawing_frame()?;
         let document = client.document_frame();
         let mut order = vec![Layer::Base];
+        if drawing.is_some() {
+            order.push(Layer::Drawing);
+        }
         if document.is_some() {
             order.push(Layer::Document);
         }
@@ -204,6 +209,7 @@ impl Composer {
             document,
             effects,
             model_effects,
+            drawing,
             order,
             reflow: client.reflow_frame()?,
             viewport: [scene.root().frame.width, scene.root().frame.height],

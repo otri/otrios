@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import {worldVertex,worldFragment,gridVertex,gridFragment} from './world-shaders.mjs';
 // Shared WebGL1 host for retained geometry and analytic quadratic glyph quads.
 import {slugVertex,slugFragment} from './slug-shaders.mjs';
 import {modelVertex,modelFragment} from './model-shaders.mjs';
@@ -145,6 +146,7 @@ export class SceneRenderer {
   }
   assertReady(){if(this.lost||this.gl.isContextLost())throw Error('Graphics context lost. Reload to reconnect.');}
   createModelLayer(){this.assertReady();if(this.modelLayer)throw Error('Only one retained model overlay is supported');return this.modelLayer=new ModelLayer(this);}
+  createWorldLayer(){return new WorldLayer(this);}
   createLayer(){this.assertReady();const layer=new SceneLayer(this);this.layers.add(layer);return layer;}
   setFont(packet){
     this.assertReady();if(this.font)throw Error('A presentation context already owns its font resource');
@@ -395,4 +397,23 @@ class ModelLayer {
     if(gl.getError()!==gl.NO_ERROR)throw Error('GPU rejected the textured model draw');
   }
   dispose(){if(!this.invalid){const gl=this.owner.gl;for(const t of this.textures.values())gl.deleteTexture(t);if(this.buffer)gl.deleteBuffer(this.buffer);if(this.program)gl.deleteProgram(this.program);if(this.depthBuffer)gl.deleteRenderbuffer(this.depthBuffer);}this.textures.clear();this.batches=[];this.invalid=true;}
+}
+
+class WorldLayer {
+ constructor(owner){this.owner=owner;this.resources=new Map();this.namespace=null;this.frame=null;this.gridExtent=null;const gl=owner.gl;this.program=program(gl,worldVertex,worldFragment);this.gridProgram=program(gl,gridVertex,gridFragment);this.quad=gl.createBuffer();this.segment=attribute(gl,this.program,'segment');this.corner=attribute(gl,this.program,'corner');this.position=attribute(gl,this.gridProgram,'position');this.origin=required(gl,this.program,'origin');}
+ setFrame(frame,namespace){const gl=this.owner.gl;if(namespace!==this.namespace){for(const v of this.resources.values())gl.deleteBuffer(v.buffer);this.resources.clear();this.namespace=namespace;}
+  this.frame=frame;if(!frame){for(const v of this.resources.values())gl.deleteBuffer(v.buffer);this.resources.clear();return;}
+  if(frame.keep.length>256||frame.draws.length>256||!Number.isFinite(frame.scale)||frame.scale<=0||frame.scale>8192||frame.extent.length!==2||frame.extent.some(n=>!Number.isFinite(n)||n<1||n>8192)||frame.draws.some(d=>d.origin.length!==2||d.origin.some(n=>!Number.isFinite(n)||Math.abs(n)>2e9)))throw Error('World frame bounds');
+  const keep=new Set(frame.keep);for(const [id,v]of this.resources)if(!keep.has(id)){gl.deleteBuffer(v.buffer);this.resources.delete(id);}
+  for(const u of frame.upserts){floats(u.vertices,6,'world endpoints');if(u.vertices.length%36||u.vertices.length>63*36||!keep.has(u.version))throw Error('World resource bounds');const old=this.resources.get(u.version);if(old)gl.deleteBuffer(old.buffer);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,u.vertices,gl.STATIC_DRAW);this.resources.set(u.version,{buffer,count:u.vertices.length/6});}
+ }
+ draw(){const f=this.frame;if(!f)return;const owner=this.owner,gl=owner.gl;gl.enable(gl.BLEND);gl.disable(gl.DEPTH_TEST);gl.disable(gl.SCISSOR_TEST);for(let i=2;i<5;i++)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(0);gl.disableVertexAttribArray(1);
+  const projection=owner.transform;
+  gl.useProgram(this.gridProgram);gl.uniformMatrix3fv(gl.getUniformLocation(this.gridProgram,'projection'),false,projection);gl.uniform3fv(gl.getUniformLocation(this.gridProgram,'grid'),new Float32Array(f.grid));
+  gl.bindBuffer(gl.ARRAY_BUFFER,this.quad);if(!this.gridExtent||this.gridExtent.some((v,i)=>v!==f.extent[i])){gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0,f.extent[0],0,0,f.extent[1],0,f.extent[1],f.extent[0],0,...f.extent]),gl.STATIC_DRAW);this.gridExtent=f.extent.slice();}gl.enableVertexAttribArray(this.position);gl.vertexAttribPointer(this.position,2,gl.FLOAT,false,8,0);gl.drawArrays(gl.TRIANGLES,0,6);
+  gl.useProgram(this.program);gl.uniformMatrix3fv(gl.getUniformLocation(this.program,'projection'),false,projection);gl.uniform1f(gl.getUniformLocation(this.program,'scale'),f.scale);gl.uniform4f(gl.getUniformLocation(this.program,'tint'),94/255,218/255,231/255,1);gl.enableVertexAttribArray(1);
+  for(const d of f.draws){const r=this.resources.get(d.version);if(!r)throw Error('Missing world GPU chunk');gl.uniform2fv(this.origin,new Float32Array(d.origin));gl.bindBuffer(gl.ARRAY_BUFFER,r.buffer);gl.enableVertexAttribArray(this.segment);gl.enableVertexAttribArray(this.corner);gl.vertexAttribPointer(this.segment,4,gl.FLOAT,false,24,0);gl.vertexAttribPointer(this.corner,2,gl.FLOAT,false,24,16);gl.drawArrays(gl.TRIANGLES,0,r.count);}
+  for(let i=0;i<5;i++)gl.disableVertexAttribArray(i);owner.activeAttributes.clear();
+ }
+ dispose(){const gl=this.owner.gl;for(const v of this.resources.values())gl.deleteBuffer(v.buffer);this.resources.clear();gl.deleteBuffer(this.quad);gl.deleteProgram(this.program);gl.deleteProgram(this.gridProgram);this.frame=null;}
 }

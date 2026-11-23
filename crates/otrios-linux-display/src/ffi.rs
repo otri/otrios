@@ -56,6 +56,14 @@ unsafe extern "C" {
     fn ot_close(d: *mut c_void);
     fn ot_error(d: *mut c_void) -> *const c_char;
     fn ot_get_info(d: *mut c_void, info: *mut Info);
+    fn ot_world_upload(d: *mut c_void, slot: u32, vertices: *const f32, floats: usize) -> c_int;
+    fn ot_world_frame(
+        d: *mut c_void,
+        slots: *const u32,
+        origins: *const f32,
+        count: usize,
+        camera: *const f32,
+    ) -> c_int;
     fn ot_upload(d: *mut c_void, slot: u32, vertices: *const f32, floats: usize) -> c_int;
     fn ot_model_texture(
         d: *mut c_void,
@@ -466,6 +474,52 @@ impl Display {
     }
     /// Ordered resident resources. The caller retains their buffers and updates
     /// only views until an independently versioned resource changes.
+    pub fn world_upload(&mut self, slot: u32, vertices: &[f32]) -> Result<(), String> {
+        if slot >= 256
+            || vertices.len() % 36 != 0
+            || vertices.len() > 63 * 36
+            || vertices.iter().any(|n| !n.is_finite() || n.abs() > 262144.)
+        {
+            return Err("World vertex bounds".into());
+        }
+        // SAFETY: synchronous bounded slice; C copies into its owned GL buffer.
+        let result = unsafe {
+            ot_world_upload(self.owner.as_ptr(), slot, vertices.as_ptr(), vertices.len())
+        };
+        self.result(result)
+    }
+    pub fn world_frame(
+        &mut self,
+        slots: &[u32],
+        origins: &[f32],
+        camera: [f32; 6],
+    ) -> Result<(), String> {
+        if slots.len() > 256
+            || origins.len() != slots.len() * 2
+            || slots.iter().any(|n| *n >= 256)
+            || origins
+                .iter()
+                .chain(camera.iter())
+                .any(|n| !n.is_finite() || n.abs() > 2e9)
+            || camera[0] <= 0.
+            || camera[0] > 8192.
+            || camera[1..3].iter().any(|n| !(1. ..=8192.).contains(n))
+            || !(1. ..=160.).contains(&camera[3])
+        {
+            return Err("World camera bounds".into());
+        }
+        // SAFETY: bounded matching slices copied synchronously; no retained Rust pointers.
+        let result = unsafe {
+            ot_world_frame(
+                self.owner.as_ptr(),
+                slots.as_ptr(),
+                origins.as_ptr(),
+                slots.len(),
+                camera.as_ptr(),
+            )
+        };
+        self.result(result)
+    }
     pub fn draw_slots(&mut self, projection: [f32; 9], slots: &[u32]) -> Result<(), String> {
         if projection
             .iter()

@@ -142,7 +142,7 @@ struct Mount {
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
-    drawing: Option<super::drawing::View>,
+    pub(super) drawing: Option<super::drawing::View>,
     now: u64,
     wall: i64,
     stress: u8,
@@ -2399,6 +2399,9 @@ impl Client {
         self.navigation = Some((ui_ref.into(), state_ref.into()));
     }
     pub fn reset_connection(&mut self) {
+        if let Some(view) = self.active.as_mut().and_then(|m| m.drawing.as_mut()) {
+            view.reset_presence();
+        }
         self.spaces.reset();
         self.qualified = None;
         self.chat_disconnected();
@@ -3591,6 +3594,7 @@ impl Client {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 if let Some(view) = &mut m.drawing {
                     view.fit(&m.doc.drawing()?, m.viewport);
+                    view.camera_changed(m.now);
                     m.invalidate();
                     return Ok(true);
                 }
@@ -4000,11 +4004,15 @@ impl Client {
         if pad && let Some(g) = &delivery.gesture {
             if let Some(view) = &mut m.drawing {
                 let board = m.doc.drawing()?;
+                let camera_before = view.camera();
                 let editable = m.binding.as_ref().is_none_or(|b| b.editable);
                 for command in
                     view.pointer(event.id, g.phase, g.local, g.extent, board.epoch, editable)?
                 {
                     m.doc.queue_drawing(command)?;
+                }
+                if camera_before != view.camera() {
+                    view.camera_changed(m.now);
                 }
                 m.invalidate();
                 return Ok(true);
@@ -4236,6 +4244,13 @@ impl Client {
         self.active.as_mut()?.text_document.as_mut()?.frame()
     }
     pub fn document_scene_parts(&self, scene: &Scene) -> Result<Option<(Scene, Scene)>> {
+        if self.active.as_ref().is_some_and(|m| m.drawing.is_some()) {
+            let mut base = scene.root().clone();
+            let mut overlay = base.clone();
+            base.children.truncate(1);
+            overlay.children = overlay.children.into_iter().skip(1).collect();
+            return Ok(Some((Scene::new(base)?, Scene::new(overlay)?)));
+        }
         match self.presentation() {
             Some(Presentation::TextDocument { viewport, .. }) => {
                 super::document::scene::split(scene, u32::from(*viewport)).map(Some)
@@ -4766,7 +4781,11 @@ impl Client {
         if paint & 1 != 0 {
             m.invalidate_local_scene();
         }
-        let changed = m.ink.tick(now) || clock || scrolled || map_changed;
+        let presence_changed = m.drawing.as_mut().is_some_and(|v| v.presence_tick(now));
+        if presence_changed {
+            m.invalidate();
+        }
+        let changed = presence_changed || m.ink.tick(now) || clock || scrolled || map_changed;
         let keyboard_feedback = m.keyboard.feedback_key();
         let edit = m.keyboard.tick(now);
         let feedback_changed = keyboard_feedback != m.keyboard.feedback_key();
@@ -4786,11 +4805,14 @@ impl Client {
         self.active.as_mut().map_or_else(Vec::new, |m| {
             if m.designer_testing()
                 || self.managed_transport && m.binding.is_none()
-                || m.binding.as_ref().is_some_and(|b| !b.editable)
+                || m.drawing.is_none() && m.binding.as_ref().is_some_and(|b| !b.editable)
             {
                 return vec![];
             }
-            let bytes = m.ink.outgoing(now);
+            let bytes = m.drawing.as_mut().map_or_else(
+                || m.ink.outgoing(now),
+                |v| v.presence_outgoing(now, m.viewport),
+            );
             if bytes.is_empty() {
                 bytes
             } else {
@@ -4811,6 +4833,13 @@ impl Client {
         };
         if !matches!(m.ui.presentation, Some(Presentation::TouchPad { .. })) {
             return Ok(false);
+        }
+        if let Some(view) = &mut m.drawing {
+            let changed = view.presence_receive(bytes, now)?;
+            if changed {
+                m.invalidate();
+            }
+            return Ok(changed);
         }
         if !bytes
             .len()
@@ -6933,12 +6962,25 @@ fn text_pointer(
 #[cfg(test)]
 mod component_behavior_tests;
 impl Client {
+    pub fn drawing_frame(&mut self) -> Result<Option<super::drawing::render::Frame>> {
+        let Some(m) = &mut self.active else {
+            return Ok(None);
+        };
+        let Some(view) = &mut m.drawing else {
+            return Ok(None);
+        };
+        Ok(Some(view.frame(&m.doc.drawing()?, m.viewport)))
+    }
+
     pub(super) fn active_drawing_mut(&mut self) -> Option<(&mut super::drawing::View, [f32; 2])> {
         let m = self.active.as_mut()?;
         Some((m.drawing.as_mut()?, m.viewport))
     }
     pub(super) fn invalidate_drawing(&mut self) {
         if let Some(m) = &mut self.active {
+            if let Some(view) = &mut m.drawing {
+                view.camera_changed(m.now);
+            }
             m.invalidate();
         }
     }

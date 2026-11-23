@@ -78,6 +78,31 @@ fn main() {
         model.push_str(";\n");
     }
     fs::write(out.join("model_shaders.h"), model).unwrap();
+    let world_path = "../../web/shared/world-shaders.mjs";
+    println!("cargo:rerun-if-changed={world_path}");
+    let world = fs::read_to_string(world_path).unwrap();
+    let mut header = String::new();
+    for (symbol, export) in [
+        ("ot_world_vs", "worldVertex"),
+        ("ot_world_fs", "worldFragment"),
+        ("ot_grid_vs", "gridVertex"),
+        ("ot_grid_fs", "gridFragment"),
+    ] {
+        let glsl = world
+            .split_once(&format!("export const {export}=`"))
+            .unwrap()
+            .1
+            .split_once('`')
+            .unwrap()
+            .0;
+        header.push_str(&format!("static const char *{symbol} =\n"));
+        for line in glsl.lines() {
+            header.push_str(&format!("{:?}\n", format!("{line}\n")));
+        }
+        header.push_str(";\n");
+    }
+    fs::write(out.join("world_shaders.h"), header).unwrap();
+
     for source in ["platform", "touch"] {
         assert!(
             Command::new(&compiler)

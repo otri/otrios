@@ -875,6 +875,13 @@ pub(super) fn state_worker(
             matches!(
                 client.presentation(),
                 Some(otrios_interfaces::canvas::Presentation::TouchPad { ink: None, .. })
+                    | Some(otrios_interfaces::canvas::Presentation::TouchPad {
+                        ink: Some(otrios_interfaces::canvas::InkOptions {
+                            drawing: Some(_),
+                            ..
+                        }),
+                        ..
+                    })
             ),
             Ordering::Release,
         );

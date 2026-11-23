@@ -157,6 +157,8 @@ pub(super) fn run() -> Result<(), String> {
     let mut reflow_serial = None;
     let mut retained = None;
     let mut retained_overlay = None;
+    let mut world_epoch = None;
+    let mut world_resources = std::collections::BTreeMap::<u64, u32>::new();
     let mut effect_revision = None;
     let mut hud = u64::MAX;
     let mut scroll_meter = otrios_core::canvas::text_scroll::FrameMeter::default();
@@ -485,6 +487,48 @@ pub(super) fn run() -> Result<(), String> {
                         }
                         effect_revision = Some(f.paint.revisions.effects);
                     }
+                    if let Some(world) = &f.paint.drawing {
+                        if world_epoch != Some(f.paint.presentation_epoch) {
+                            world_resources.clear();
+                            world_epoch = Some(f.paint.presentation_epoch);
+                        }
+                        world_resources.retain(|id, _| world.keep.contains(id));
+                        let mut world_slots = vec![];
+                        let mut origins = vec![];
+                        for draw in &world.draws {
+                            let slot = if let Some(slot) = world_resources.get(&draw.version) {
+                                *slot
+                            } else {
+                                let slot = (0..256)
+                                    .find(|slot| !world_resources.values().any(|used| used == slot))
+                                    .ok_or("World GPU resource limit")?;
+                                display.world_upload(slot, &draw.resource.vertices)?;
+                                if pan.enabled() {
+                                    vertex_upload_bytes += draw.resource.vertices.len() * 4;
+                                    upload_calls += 1;
+                                }
+                                world_resources.insert(draw.version, slot);
+                                slot
+                            };
+                            world_slots.push(slot);
+                            origins.extend(draw.origin);
+                        }
+                        display.world_frame(
+                            &world_slots,
+                            &origins,
+                            [
+                                world.scale,
+                                world.extent[0],
+                                world.extent[1],
+                                world.grid[0],
+                                world.grid[1],
+                                world.grid[2],
+                            ],
+                        )?;
+                    } else {
+                        world_resources.clear();
+                        world_epoch = None;
+                    }
                     let mut slots = vec![];
                     for layer in &f.paint.order {
                         use otrios_core::canvas::presentation::Layer;
@@ -496,6 +540,7 @@ pub(super) fn run() -> Result<(), String> {
                                     slots.push(0);
                                 }
                             }
+                            Layer::Drawing => slots.push(131),
                             Layer::Document => slots.extend(document_slots.iter().copied()),
                             Layer::Overlay => {
                                 if let Some(chunks) = &chunk_slots {

@@ -10,11 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, broadcast};
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct Event {
     at: Instant,
     peer: u32,
-    point: Point,
+    point: Option<Point>,
+    view: Option<ink::Viewport>,
+    name: String,
 }
 pub(super) struct Room {
     recent: Mutex<VecDeque<Event>>,
@@ -25,6 +27,7 @@ pub(super) struct Room {
 }
 pub(super) struct Subscription {
     id: u32,
+    pub label: String,
     pub updates: broadcast::Receiver<Vec<Event>>,
     _permit: OwnedSemaphorePermit,
     window: Instant,
@@ -64,10 +67,11 @@ impl Room {
         let mut recent = self.recent.lock().await;
         recent.retain(|e| e.at.elapsed() < Duration::from_millis(ink::LIFETIME_MS));
         let mut bytes = ink::welcome(id);
-        bytes.extend(encode(&recent.iter().copied().collect::<Vec<_>>()));
+        bytes.extend(encode(&recent.iter().cloned().collect::<Vec<_>>()));
         Ok((
             Subscription {
                 id,
+                label: "Visitor".into(),
                 updates,
                 _permit: permit,
                 window: Instant::now(),
@@ -77,40 +81,63 @@ impl Room {
         ))
     }
     pub(super) async fn receive(&self, sub: &mut Subscription, bytes: &[u8]) -> Result<(), String> {
-        if bytes.is_empty()
-            || bytes.len() > 32 * ink::CLIENT_BYTES
-            || !bytes.len().is_multiple_of(ink::CLIENT_BYTES)
-        {
-            return Err("Invalid ink batch".into());
-        }
-        let points = bytes
-            .chunks_exact(ink::CLIENT_BYTES)
-            .map(Point::decode)
-            .collect::<Result<Vec<_>, _>>()?;
+        let view = bytes
+            .starts_with(ink::VIEW_MAGIC)
+            .then(|| ink::Viewport::decode(bytes))
+            .transpose()?;
+        let points = if view.is_some() {
+            vec![]
+        } else {
+            if bytes.is_empty()
+                || bytes.len() > 32 * ink::CLIENT_BYTES
+                || !bytes.len().is_multiple_of(ink::CLIENT_BYTES)
+            {
+                return Err("Invalid ink batch".into());
+            }
+            bytes
+                .chunks_exact(ink::CLIENT_BYTES)
+                .map(Point::decode)
+                .collect::<Result<Vec<_>, _>>()?
+        };
         if sub.window.elapsed() >= Duration::from_secs(1) {
             sub.window = Instant::now();
             sub.count = 0;
         }
-        sub.count += points.len();
+        sub.count += points.len() + usize::from(view.is_some());
         if sub.count > 64 {
             return Err("Ink rate limit".into());
         }
         let at = Instant::now();
-        let events = points
-            .into_iter()
-            .map(|point| Event {
+        let events = if let Some(view) = view {
+            vec![Event {
                 at,
                 peer: sub.id,
-                point,
-            })
-            .collect::<Vec<_>>();
+                point: None,
+                view: Some(view),
+                name: sub.label.clone(),
+            }]
+        } else {
+            points
+                .into_iter()
+                .map(|point| Event {
+                    at,
+                    peer: sub.id,
+                    point: Some(point),
+                    view: None,
+                    name: String::new(),
+                })
+                .collect::<Vec<_>>()
+        };
         let mut recent = self.recent.lock().await;
         recent.retain(|e| e.at.elapsed() < Duration::from_millis(ink::LIFETIME_MS));
+        if view.is_some() {
+            recent.retain(|e| e.peer != sub.id || e.view.is_none());
+        }
         for event in &events {
             if recent.len() >= 1024 {
                 recent.pop_front();
             }
-            recent.push_back(*event);
+            recent.push_back(event.clone());
         }
         drop(recent);
         let _ = self.bus.send(events);
@@ -122,8 +149,42 @@ pub(super) fn encode(events: &[Event]) -> Vec<u8> {
         .iter()
         .filter_map(|e| {
             let age = e.at.elapsed().as_millis();
-            (age < u128::from(ink::LIFETIME_MS)).then(|| ink::envelope(e.peer, age as u16, e.point))
+            (age < u128::from(ink::LIFETIME_MS)).then(|| {
+                if let Some(view) = e.view {
+                    ink::view_envelope(e.peer, age as u16, &e.name, view)
+                } else {
+                    ink::envelope(e.peer, age as u16, e.point.unwrap())
+                }
+            })
         })
         .flatten()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn viewport_relay_stamps_identity_and_compacts_latest_presence() {
+        let room = Room::new(4).unwrap();
+        let (mut a, _) = room.subscribe().await.unwrap();
+        let (mut b, _) = room.subscribe().await.unwrap();
+        a.label = "Frame".into();
+        let view = ink::Viewport {
+            bounds: [0, 0, 5120, 3200],
+            active: true,
+        };
+        room.receive(&mut a, &view.encode()).await.unwrap();
+        let packet = encode(&b.updates.recv().await.unwrap());
+        let (peer, _, name, decoded, count) = ink::decode_view(&packet).unwrap();
+        assert_eq!(peer, a.id);
+        assert_eq!(name, "Frame");
+        assert_eq!(view, decoded);
+        assert_eq!(count, packet.len());
+        room.receive(&mut a, &view.encode()).await.unwrap();
+        assert_eq!(room.recent.lock().await.len(), 1);
+        room.recent.lock().await.front_mut().unwrap().at = Instant::now() - Duration::from_secs(6);
+        room.expire().await;
+        assert!(room.recent.lock().await.is_empty());
+    }
 }

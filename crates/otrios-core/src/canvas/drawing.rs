@@ -3,15 +3,18 @@
 use super::{Result, state};
 use otrios_interfaces::{
     drawing::{COORDINATE_LIMIT, Command, MAX_POINTS, Options, Stroke},
-    scene::{PointerPhase, Primitive, Rect, SceneNode},
+    scene::{PointerPhase, Rect, SceneNode},
 };
 use std::collections::BTreeMap;
+pub mod render;
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Usage {
     pub center: [f32; 2],
     pub zoom: f32,
     pub segments: usize,
     pub points: usize,
+    pub gpu: render::Stats,
+    pub participants: usize,
 }
 #[derive(Clone)]
 pub struct View {
@@ -22,6 +25,12 @@ pub struct View {
     multi: bool,
     active: Option<(u32, Stroke)>,
     pub external_pan: bool,
+    pub render: render::Cache,
+    peer: u32,
+    peers: BTreeMap<u32, (u64, String, otrios_interfaces::ink::Viewport)>,
+    last_sent: Option<(u64, otrios_interfaces::ink::Viewport)>,
+    camera_at: Option<u64>,
+    presence_bucket: u64,
 }
 impl View {
     pub fn new(options: Options) -> Self {
@@ -33,6 +42,12 @@ impl View {
             multi: false,
             active: None,
             external_pan: false,
+            render: render::Cache::default(),
+            peer: 0,
+            peers: BTreeMap::new(),
+            last_sent: None,
+            camera_at: None,
+            presence_bucket: 0,
         }
     }
     pub(crate) fn preserve_camera(&mut self, old: &Self) {
@@ -217,98 +232,181 @@ impl View {
             zoom: self.zoom,
             segments: board.strokes.len(),
             points: board.strokes.iter().map(|s| s.points.len()).sum(),
+            gpu: self.render.stats.clone(),
+            participants: self.peers.len(),
         }
     }
-    pub fn nodes(&self, board: &state::Drawing, extent: [f32; 2], base: u32) -> Vec<SceneNode> {
-        let mut out = vec![];
-        let mut add = |primitive: Primitive| {
-            let mut node = crate::dashboard::components::node(
-                base + out.len() as u32,
-                Rect::new(0., 0., extent[0], extent[1]),
-                primitive,
-            );
-            node.responder = Some(otrios_interfaces::scene::TouchResponder::PassThrough);
-            out.push(node);
-        };
+    pub fn frame(&mut self, board: &state::Drawing, extent: [f32; 2]) -> render::Frame {
         let scale = self.scale(extent);
-        let mut step = f32::from(self.options.grid);
-        while step * scale < 32_f32.max((extent[0] + extent[1]) / 192.) {
-            step *= 2.;
+        let mut board = board.clone();
+        if let Some((_, active)) = &self.active
+            && active.epoch == board.epoch
+        {
+            if let Some(old) = board.strokes.iter_mut().find(|s| s.id == active.id) {
+                *old = active.clone();
+            } else {
+                board.strokes.push(active.clone());
+            }
         }
-        while step * scale > 160. {
-            step /= 2.;
+        self.render
+            .frame(&board, self.center, scale, extent, self.options.grid)
+    }
+    pub fn nodes(&self, _board: &state::Drawing, extent: [f32; 2], base: u32) -> Vec<SceneNode> {
+        let Some(at) = self.camera_at else {
+            return vec![];
+        };
+        let now = self.presence_bucket * 100;
+        let elapsed = now.saturating_sub(at);
+        if elapsed > 1500 {
+            return vec![];
         }
+        let alpha = if elapsed < 1000 {
+            220
+        } else {
+            ((1500 - elapsed) * 220 / 500) as u8
+        };
+        let mut nodes = vec![];
+        let palette = [
+            [255, 161, 94],
+            [208, 160, 255],
+            [255, 116, 172],
+            [185, 238, 143],
+            [125, 172, 255],
+        ];
+        for (id, (_, name, view)) in self.peers.iter().take(64) {
+            let low = self.screen(
+                [view.bounds[0] as f32 / 4., view.bounds[1] as f32 / 4.],
+                extent,
+            );
+            let high = self.screen(
+                [view.bounds[2] as f32 / 4., view.bounds[3] as f32 / 4.],
+                extent,
+            );
+            let rgb = palette[*id as usize % palette.len()];
+            let color = [rgb[0], rgb[1], rgb[2], alpha];
+            for (a, b) in [
+                (low, [high[0], low[1]]),
+                ([high[0], low[1]], high),
+                (high, [low[0], high[1]]),
+                ([low[0], high[1]], low),
+            ] {
+                if let Some([a, b]) = clip_segment(a, b, extent) {
+                    let mut n = crate::dashboard::components::node(
+                        base + nodes.len() as u32,
+                        Rect::new(0., 0., extent[0], extent[1]),
+                        otrios_interfaces::scene::Primitive::Path {
+                            points: vec![a, b],
+                            width: 1.5,
+                            color,
+                        },
+                    );
+                    n.responder = Some(otrios_interfaces::scene::TouchResponder::PassThrough);
+                    nodes.push(n);
+                }
+            }
+            if low[0] < extent[0] && low[1] < extent[1] && high[0] >= 0. && high[1] >= 0. {
+                let label = format!(
+                    "{} · {}",
+                    name.chars().take(24).collect::<String>(),
+                    id % 1000
+                );
+                let mut n = crate::dashboard::components::node(
+                    base + nodes.len() as u32,
+                    Rect::new(
+                        low[0].clamp(4., (extent[0] - 220.).max(4.)),
+                        low[1].clamp(4., (extent[1] - 24.).max(4.)),
+                        216.,
+                        24.,
+                    ),
+                    otrios_interfaces::scene::Primitive::Text {
+                        value: label,
+                        scale: 1,
+                        color,
+                    },
+                );
+                n.responder = Some(otrios_interfaces::scene::TouchResponder::PassThrough);
+                nodes.push(n);
+            }
+        }
+        nodes
+    }
+    pub fn camera(&self) -> ([f32; 2], f32) {
+        (self.center, self.zoom)
+    }
+    pub fn reset_presence(&mut self) {
+        self.peer = 0;
+        self.peers.clear();
+        self.last_sent = None;
+    }
+    pub fn camera_changed(&mut self, now: u64) {
+        self.camera_at = Some(now);
+    }
+    pub fn presence_outgoing(&mut self, now: u64, extent: [f32; 2]) -> Vec<u8> {
         let low = self.world([0., 0.], extent);
         let high = self.world(extent, extent);
-        let mut x = (low[0] / step).floor() * step;
-        while x <= high[0] {
-            let p = self.screen([x, 0.], extent)[0].clamp(0., extent[0]);
-            add(Primitive::Path {
-                points: vec![[p, 0.], [p, extent[1]]],
-                width: 1.,
-                color: [112, 121, 131, 100],
-            });
-            x += step;
+        let bounds = [low[0], low[1], high[0], high[1]].map(|n| {
+            (n * 4.)
+                .round()
+                .clamp(-(1_i32 << 30) as f32, (1_i32 << 30) as f32) as i32
+        });
+        let view = otrios_interfaces::ink::Viewport {
+            bounds,
+            active: self
+                .camera_at
+                .is_some_and(|at| now.saturating_sub(at) < 200),
+        };
+        if self.last_sent.is_some_and(|(at, old)| {
+            now.saturating_sub(at) < 100 || old == view && now.saturating_sub(at) < 1500
+        }) {
+            return vec![];
         }
-        let mut y = (low[1] / step).floor() * step;
-        while y <= high[1] {
-            let p = self.screen([0., y], extent)[1].clamp(0., extent[1]);
-            add(Primitive::Path {
-                points: vec![[0., p], [extent[0], p]],
-                width: 1.,
-                color: [112, 121, 131, 100],
-            });
-            y += step;
-        }
-        let mut strokes = board.strokes.clone();
-        if let Some((_, active)) = &self.active {
-            if active.epoch == board.epoch {
-                if let Some(old) = strokes.iter_mut().find(|s| s.id == active.id) {
-                    *old = active.clone();
-                } else {
-                    strokes.push(active.clone());
-                }
-            }
-        }
-        for stroke in strokes {
-            let mut points: Vec<_> = stroke
-                .points
-                .iter()
-                .map(|p| self.screen(p.map(|n| n as f32 / 4.), extent))
-                .collect();
-            if points.len() == 1 {
-                points.push([points[0][0] + 0.25, points[0][1]]);
-            }
-            // Clip before scene admission: zoomed world points can be far
-            // beyond the scene coordinate budget. Keep disjoint runs separate.
-            let width = (3. * scale).clamp(1., 16.);
-            let mut triangles = vec![];
-            for pair in points.windows(2) {
-                if let Some([a, b]) = clip_segment(pair[0], pair[1], extent) {
-                    let d = [b[0] - a[0], b[1] - a[1]];
-                    let length = d[0].hypot(d[1]);
-                    if length == 0. {
-                        continue;
+        self.last_sent = Some((now, view));
+        view.encode()
+    }
+    pub fn presence_receive(&mut self, mut bytes: &[u8], now: u64) -> Result<bool> {
+        let mut changed = false;
+        while !bytes.is_empty() {
+            if bytes.starts_with(otrios_interfaces::ink::VIEW_MAGIC) {
+                let (peer, age, name, view, count) = otrios_interfaces::ink::decode_view(bytes)?;
+                bytes = &bytes[count..];
+                if peer != self.peer {
+                    if self.peers.len() < 64 || self.peers.contains_key(&peer) {
+                        self.peers
+                            .insert(peer, (now.saturating_sub(u64::from(age)), name, view));
+                        changed = true;
                     }
-                    let n = [-d[1] / length * width / 2., d[0] / length * width / 2.];
-                    let quad = [
-                        [a[0] + n[0], a[1] + n[1]],
-                        [b[0] + n[0], b[1] + n[1]],
-                        [a[0] - n[0], a[1] - n[1]],
-                        [b[0] - n[0], b[1] - n[1]],
-                    ]
-                    .map(|p| [p[0].clamp(0., extent[0]), p[1].clamp(0., extent[1])]);
-                    triangles.extend([quad[0], quad[1], quad[2], quad[2], quad[1], quad[3]]);
                 }
-            }
-            if !triangles.is_empty() {
-                add(Primitive::Triangles {
-                    points: triangles,
-                    color: [94, 218, 231, 255],
-                });
+            } else {
+                if bytes.len() < otrios_interfaces::ink::SERVER_BYTES {
+                    return Err("Presence welcome bounds".into());
+                }
+                let (peer, _, point) = otrios_interfaces::ink::decode_server(
+                    &bytes[..otrios_interfaces::ink::SERVER_BYTES],
+                )?;
+                if point.is_none() {
+                    self.peer = peer;
+                    self.peers.remove(&peer);
+                }
+                bytes = &bytes[otrios_interfaces::ink::SERVER_BYTES..];
             }
         }
-        out
+        Ok(changed
+            && self
+                .camera_at
+                .is_some_and(|at| now.saturating_sub(at) < 1500))
+    }
+    pub fn presence_tick(&mut self, now: u64) -> bool {
+        let count = self.peers.len();
+        self.peers
+            .retain(|_, (at, _, _)| now.saturating_sub(*at) < 5000);
+        let bucket = now / 100;
+        let changed = !self.peers.is_empty()
+            && self.presence_bucket != bucket
+            && self
+                .camera_at
+                .is_some_and(|at| now.saturating_sub(at) < 1700);
+        self.presence_bucket = bucket;
+        changed || count != self.peers.len()
     }
 }
 fn clip_segment(a: [f32; 2], b: [f32; 2], extent: [f32; 2]) -> Option<[[f32; 2]; 2]> {
@@ -359,6 +457,43 @@ impl super::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn viewport_presence_is_bounded_ephemeral_and_never_takes_input() {
+        use otrios_interfaces::ink;
+        let mut view = View::new(Options {
+            reference: [1280, 800],
+            grid: 80,
+        });
+        view.presence_receive(&ink::welcome(7), 0).unwrap();
+        let camera = ink::Viewport {
+            bounds: [0, 0, 5120, 3200],
+            active: false,
+        };
+        view.presence_receive(&ink::view_envelope(8, 0, "Frame", camera), 100)
+            .unwrap();
+        assert!(
+            view.nodes(&state::Drawing::default(), [400., 800.], 100)
+                .is_empty()
+        );
+        view.camera_changed(200);
+        view.presence_tick(200);
+        let nodes = view.nodes(&state::Drawing::default(), [400., 800.], 100);
+        assert!(!nodes.is_empty());
+        assert!(nodes.iter().all(|n|n.responder==Some(otrios_interfaces::scene::TouchResponder::PassThrough)));
+        let packet = view.presence_outgoing(200, [400., 800.]);
+        assert!(ink::Viewport::decode(&packet).is_ok());
+        assert!(view.presence_outgoing(250, [400., 800.]).is_empty());
+        view.presence_tick(1800);
+        assert!(
+            view.nodes(&state::Drawing::default(), [400., 800.], 100)
+                .is_empty()
+        );
+        view.presence_tick(6000);
+        assert!(view.peers.is_empty());
+        let mut invalid = camera;
+        invalid.bounds = [10, 0, 0, 10];
+        assert!(ink::Viewport::decode(&invalid.encode()).is_err());
+    }
     #[test]
     fn pinch_closes_below_initial_zoom_pans_with_fingers_and_lift_never_jumps() {
         let mut view = View::new(Options {

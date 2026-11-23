@@ -21,7 +21,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
         names=['favicon.svg','favicon.ico','index.html','style.css','app.js','state-worker.js','document-transfer.mjs','presentation-transfer.mjs','app-transfers.mjs','touch-input.mjs','text-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
-        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','model-shaders.mjs','font-resource.mjs','font-reference.mjs','emoji-reference.mjs','fonts/Emoji.otemo','fonts/Emoji-LICENSE.txt','fonts/Emoji-NOTICE.txt','fonts/Roboto-Regular.otq.zst','fonts/Roboto.ttf','fonts/OFL.txt','Slug-LICENSE.txt']
+        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','model-shaders.mjs','world-shaders.mjs','font-resource.mjs','font-reference.mjs','emoji-reference.mjs','fonts/Emoji.otemo','fonts/Emoji-LICENSE.txt','fonts/Emoji-NOTICE.txt','fonts/Roboto-Regular.otq.zst','fonts/Roboto.ttf','fonts/OFL.txt','Slug-LICENSE.txt']
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name
@@ -94,7 +94,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
             if not 52<=len(tool)<=32*1024*1024 or tool[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(tool[18:20],'little')!=40:raise ValueError('Expected bounded ARM32 Monitoring collector')
             path='native/armv7/dashboard-monitoring';(stage/path).write_bytes(tool)
             assets[path]={'bytes':len(tool),'sha256':digest(tool)}
-        manifest={'component_behavior_abi':'otrios-component-behavior-v1','behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v44','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'component_behavior_abi':'otrios-component-behavior-v1','behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v45','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         if bundles:
             manifest['bundle_abi']='otrios-app-bundle-v1'
             manifest['app_contracts']=app_contracts

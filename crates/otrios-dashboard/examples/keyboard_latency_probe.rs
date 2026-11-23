@@ -267,6 +267,7 @@ mod linux {
                     match layer {
                         Layer::Base => slots.push(0),
                         Layer::Overlay => slots.push(1),
+                        Layer::Drawing => slots.push(131),
                         Layer::Document => slots.extend(document.iter().copied()),
                         Layer::Effects => slots.push(2),
                     }

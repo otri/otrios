@@ -118,3 +118,21 @@ the host GPU path. Native EGL requests a 16-bit depth buffer; linear scene targe
 attach one lazily when a model first draws. Model retirement clears the draw plan;
 textures remain reusable until owner destruction. The manual `model_pixel_probe`
 example checks the textured native draw and retirement on surfaceless Mesa.
+
+## Retained world drawing extension (2026-11-23)
+
+The existing reviewed synchronous graphics FFI accepts at most 256 owned stroke
+VBOs, each containing at most 63 complete six-vertex segments with six finite
+float components per vertex. The safe wrapper checks lengths, slot IDs and
+coordinate ranges before `ot_world_upload`; C repeats shape/slot bounds before
+copying into GL-owned buffers. `ot_world_frame` synchronously copies at most 256
+slot references, paired origins and six camera/grid constants. There are no
+retained Rust pointers, callbacks, new unsafe scopes or cross-thread GL owners.
+
+Scene slot 131 is reserved as the ordered world-layer sentinel (ordinary scene
+slots remain 0–130). The adapter draws the grid and visible stroke VBOs there,
+between the background and UI overlay. Camera updates require no stroke upload.
+Resources are bounded, reused by immutable version/slot, and destroyed with the
+EGL owner. Canonical shaders live in `web/shared/world-shaders.mjs`; both native
+GLES2 and WebGL1 compile them. The manual `world_pixel_probe` exercises stable
+buffer reuse at rest, pan and zoom on an actual native GPU.

@@ -11,7 +11,7 @@ let timings=false,navigationTiming=null,graphicsPaused=false,graphicsGeneration=
 const timingNow=()=>performance.timeOrigin+performance.now();
 let inputRevision=0,lastInputRevision=-1,composition=null;
 let lastChunked=false;
-const modelTextures=new Set();
+const modelTextures=new Set();const worldResources=new Set();let worldNamespace=null;
 let viewportRevision=0,lastViewportExtent=null,lastTextGeneration=0,lastPaint=0,lastPlacement=0,lastSemantics=0,lastEffects=0,pendingGeometry=false;
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
@@ -66,6 +66,14 @@ function sendFrame(){
       }
     }
   }
+  frame.drawing=ui?JSON.parse(app.drawing_frame()):null;
+  const worldKey=`${frame.ui}:${frame.epoch}`;
+  if(worldNamespace!==worldKey){worldResources.clear();worldNamespace=worldKey;}
+  if(frame.drawing){
+    const keep=new Set(frame.drawing.keep);for(const id of worldResources)if(!keep.has(id))worldResources.delete(id);
+    frame.drawing.upserts=[];
+    for(const draw of frame.drawing.draws)if(!worldResources.has(draw.version)){const vertices=app.drawing_vertices(BigInt(draw.version));frame.drawing.upserts.push({version:draw.version,vertices});worldResources.add(draw.version);}
+  }else{worldResources.clear();}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   const chunkMetadata=ui?JSON.parse(app.presentation_frame()):null,chunked=chunkMetadata!==null;
   presentation.update(chunkMetadata,`${frame.ui}:${frame.epoch}`);
@@ -84,10 +92,10 @@ function sendFrame(){
   if(frame.timing&&navigationTiming?.id===frame.timing.id)navigationTiming=null;
   frame.graphicsGeneration=graphicsGeneration;frame.document=documents.take(id=>({glyphVertices:app.document_chunk_vertices(id),vertices:app.document_chunk_geometry(id)}));
   frame.uiChunks=presentation.take((layer,id)=>({vertices:app.presentation_chunk_vertices(layer,id),glyphVertices:app.presentation_chunk_glyphs(layer,id),draws:app.presentation_chunk_draws(layer,id),textStyles:app.presentation_chunk_styles(layer,id)}));
-  const transfer=[...frame.uiChunks.upserts.flatMap(u=>[u.vertices.buffer,u.glyphVertices.buffer,u.draws.buffer,u.textStyles.buffer]),...frame.uiChunks.base.flatMap(d=>[d.views.buffer,d.paints.buffer]),...frame.uiChunks.overlay.flatMap(d=>[d.views.buffer,d.paints.buffer]),...(frame.textPaints?[frame.textPaints.buffer,frame.overlayPaints.buffer]:[]),...(frame.effects?[frame.effects.buffer]:[]),...(frame.model?[frame.model.vertices.buffer,...frame.model.textures.map(t=>t.pixels.buffer)]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.flatMap(u=>[u.glyphVertices.buffer,u.vertices.buffer])];
+  const transfer=[...(frame.drawing?frame.drawing.upserts.map(u=>u.vertices.buffer):[]),...frame.uiChunks.upserts.flatMap(u=>[u.vertices.buffer,u.glyphVertices.buffer,u.draws.buffer,u.textStyles.buffer]),...frame.uiChunks.base.flatMap(d=>[d.views.buffer,d.paints.buffer]),...frame.uiChunks.overlay.flatMap(d=>[d.views.buffer,d.paints.buffer]),...(frame.textPaints?[frame.textPaints.buffer,frame.overlayPaints.buffer]:[]),...(frame.effects?[frame.effects.buffer]:[]),...(frame.model?[frame.model.vertices.buffer,...frame.model.textures.map(t=>t.pixels.buffer)]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.flatMap(u=>[u.glyphVertices.buffer,u.vertices.buffer])];
   postMessage({type:'frame',...frame},transfer);
 }
-function clearPresentation(){modelTextures.clear();chatLogKey='';composition=null;documents.reset();presentation.reset();lastChunked=false;syncInk();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
+function clearPresentation(){modelTextures.clear();worldResources.clear();chatLogKey='';composition=null;documents.reset();presentation.reset();lastChunked=false;syncInk();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 async function signOut(){if(signingOut)return;signingOut=true;transportReady=false;dropPrivate();app.set_session_controls(false);publish();const done=await monitoring.logout();signingOut=false;if(done)postMessage({type:'transport-reconnect'});else postMessage({type:'warning',message:'Could not finish signing out. Reload to retry.'});}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){const actor=app.transfer_actor();if(actor!==transferActor){transferActor=actor;postMessage({type:'transfer-reset'});}const task=JSON.parse(app.take_transfer_task());if(task)postMessage({type:'transfer-task',task});if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();const download=JSON.parse(app.take_chat_download());if(download){const [asset,data]=download,bytes=Uint8Array.from(data);postMessage({type:'chat-download',epoch:app.epoch(),name:asset.name,bytes},[bytes.buffer]);}}
@@ -149,7 +157,7 @@ function receiveState(bytes,receivedAt){try{
     try{outgoing();publish();postMessage({type:'warning',message:'The app update was rejected. The current app is still available.'});}catch(recoveryError){error(recoveryError);postMessage({type:'transport-reconnect'});}
   }else{error(e);postMessage({type:'transport-reconnect'});}
 }}
-function wantsInk(){return !stopped&&app?.ui_ref()&&app.presentation_kind()==='touch-pad';}
+function wantsInk(){return !stopped&&app?.ui_ref()&&['touch-pad','shared-ink'].includes(app.presentation_kind());}
 function syncInk(){const active=!!wantsInk();if(active!==inkActive){inkActive=active;postMessage({type:'ink-subscribe',active});}}
 function navigate(screen){
   if(app.auth_required())app.clear_private();
@@ -167,8 +175,8 @@ onmessage=async({data:m})=>{try{
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
   if(m.type==='frame-ack'){if(m.serial!==inFlight||!app.frame_presented(m.serial))return;documents.ack(m.documentToken);presentation.ack(m.presentationToken);inFlight=null;sendFrame();return;}
-  if(m.type==='graphics-lost'){modelTextures.clear();graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;return;}
-  if(m.type==='document-replay'){modelTextures.clear();if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
+  if(m.type==='graphics-lost'){modelTextures.clear();worldResources.clear();graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;return;}
+  if(m.type==='document-replay'){modelTextures.clear();worldResources.clear();if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
   if(!app)return;
   if(m.type==='transfer-reply'){try{if(app.receive_transfer(m.id,m.reply))publish();}catch{if(app.receive_transfer(m.id,JSON.stringify({type:'failed',message:'The transfer reply was invalid. Close and try again.'})))publish();}outgoing();return;}
   if(m.type==='transport'){

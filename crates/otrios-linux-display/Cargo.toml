@@ -34,3 +34,7 @@ required-features = ["platform"]
 [[example]]
 name = "model_pixel_probe"
 required-features = ["platform"]
+
+[[example]]
+name = "world_pixel_probe"
+required-features = ["platform"]

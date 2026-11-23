@@ -7,6 +7,7 @@
 #include "platform.h"
 #include "slug_shaders.h"
 #include "model_shaders.h"
+#include "world_shaders.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -71,6 +72,8 @@ struct ot_display {
     uint32_t curve_width,curve_height,band_width,band_height;
     uint64_t text_hits,text_misses,cache_generation;
     int profile_text,stable_text,alpha_atlas,alpha_enabled;uint64_t cached_upload_bytes;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
+    GLuint world_program,grid_program,grid_vbo;
+    struct mesh world[256]; uint32_t world_slots[256];float world_origins[512],world_camera[6],world_grid_extent[2];size_t world_count;
     GLuint model_program,model_vbo,model_textures[4],model_depth;
     uint32_t model_draws[16*4];size_t model_words;float model_clip_depth[2];
     GLuint scene_fbo,scene_texture,resolve_program,resolve_vbo,encode_texture;
@@ -114,6 +117,7 @@ static int init_gl(ot_display *d) {
         glGenBuffers(1,&d->text[i].cached_vbo);
     }
     if(d->linear_scene && init_color_target(d)<0)return -1;
+    GLint vertex_units=0;glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);fprintf(stderr,"GPU renderer=%s vertex_texture_units=%d\n",glGetString(GL_RENDERER),vertex_units);
     return gl_ok(d,"GLES2 initialization");
 }
 static int select_display(ot_display *d) {
@@ -216,6 +220,35 @@ static int model_program(ot_display *d) {
     GLint ok=0;glGetProgramiv(d->model_program,GL_LINK_STATUS,&ok);
     if(!ok){glGetProgramInfoLog(d->model_program,sizeof(d->error),NULL,d->error);return -1;}
     glGenBuffers(1,&d->model_vbo);return gl_ok(d,"Create static model program");
+}
+
+static GLuint world_program(ot_display *d,const char *vs,const char *fs,int grid) {
+ GLuint a=shader(d,GL_VERTEX_SHADER,vs),b=shader(d,GL_FRAGMENT_SHADER,fs);if(!a||!b){if(a)glDeleteShader(a);if(b)glDeleteShader(b);return 0;}
+ GLuint p=glCreateProgram();glAttachShader(p,a);glAttachShader(p,b);glBindAttribLocation(p,0,grid?"position":"segment");if(!grid)glBindAttribLocation(p,1,"corner");glLinkProgram(p);glDeleteShader(a);glDeleteShader(b);
+ GLint ok=0;glGetProgramiv(p,GL_LINK_STATUS,&ok);if(!ok){glGetProgramInfoLog(p,sizeof(d->error),NULL,d->error);glDeleteProgram(p);return 0;}return p;
+}
+int ot_world_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats) {
+ if(slot>=256 || floats%36 || floats>63*36)return fail(d,"World chunk bounds");
+ if(!d->world[slot].vbo)glGenBuffers(1,&d->world[slot].vbo);
+ glBindBuffer(GL_ARRAY_BUFFER,d->world[slot].vbo);glBufferData(GL_ARRAY_BUFFER,floats*sizeof(float),vertices,GL_STATIC_DRAW);d->world[slot].count=(GLsizei)(floats/6);return gl_ok(d,"Upload immutable world chunk");
+}
+int ot_world_frame(ot_display *d,const uint32_t *slots,const float *origins,size_t count,const float *camera) {
+ if(count>256)return fail(d,"World draw count");
+ for(size_t i=0;i<count;i++)if(slots[i]>=256)return fail(d,"World draw slot");
+ if(count){memcpy(d->world_slots,slots,count*sizeof(uint32_t));memcpy(d->world_origins,origins,count*2*sizeof(float));}memcpy(d->world_camera,camera,6*sizeof(float));d->world_count=count;return 1;
+}
+static int draw_world(ot_display *d,const float *projection) {
+ if(!d->world_program){d->world_program=world_program(d,ot_world_vs,ot_world_fs,0);d->grid_program=world_program(d,ot_grid_vs,ot_grid_fs,1);if(!d->world_program||!d->grid_program)return -1;glGenBuffers(1,&d->grid_vbo);}
+ float *c=d->world_camera;
+ if(c[0]<=0)return 1;
+ glEnable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);for(GLuint i=2;i<5;i++)glDisableVertexAttribArray(i);
+ const float quad[]={0,0,c[1],0,0,c[2],0,c[2],c[1],0,c[1],c[2]};
+ glUseProgram(d->grid_program);glUniformMatrix3fv(glGetUniformLocation(d->grid_program,"projection"),1,GL_FALSE,projection);glUniform3fv(glGetUniformLocation(d->grid_program,"grid"),1,c+3);
+ glBindBuffer(GL_ARRAY_BUFFER,d->grid_vbo);if(d->world_grid_extent[0]!=c[1]||d->world_grid_extent[1]!=c[2]){glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_STATIC_DRAW);d->world_grid_extent[0]=c[1];d->world_grid_extent[1]=c[2];}glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),0);glDisableVertexAttribArray(1);glDrawArrays(GL_TRIANGLES,0,6);
+ glUseProgram(d->world_program);glUniformMatrix3fv(glGetUniformLocation(d->world_program,"projection"),1,GL_FALSE,projection);glUniform1f(glGetUniformLocation(d->world_program,"scale"),c[0]);glUniform4f(glGetUniformLocation(d->world_program,"tint"),94.f/255,218.f/255,231.f/255,1);
+ GLint origin=glGetUniformLocation(d->world_program,"origin");glEnableVertexAttribArray(1);
+ for(size_t i=0;i<d->world_count;i++){struct mesh *m=&d->world[d->world_slots[i]];glUniform2fv(origin,1,d->world_origins+i*2);glBindBuffer(GL_ARRAY_BUFFER,m->vbo);glVertexAttribPointer(0,4,GL_FLOAT,GL_FALSE,6*sizeof(float),0);glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,6*sizeof(float),(void*)(4*sizeof(float)));glDrawArrays(GL_TRIANGLES,0,m->count);}
+ return gl_ok(d,"Draw retained world and grid");
 }
 int ot_model_texture(ot_display *d,uint32_t slot,uint32_t width,uint32_t height,int repeat_s,int repeat_t,const uint8_t *rgba,size_t bytes) {
     if(slot>=4 || !width || !height || width>1024 || height>1024 || bytes!=(size_t)width*height*4 || !rgba ||
@@ -625,7 +658,7 @@ int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,si
     if(d->linear_scene)glClearColor(0.0051815167f,0.0116122452f,0.0221738848f,1);
     else glClearColor(16.f/255,28.f/255,41.f/255,1);
     glClear(GL_COLOR_BUFFER_BIT);
-    for(size_t i=0;i<count;i++){draw_slot(d,slots[i],projection);if(d->emoji_failed)return -1;if(slots[i]==2 && draw_model(d,projection)<0)return -1;}
+    for(size_t i=0;i<count;i++){if(slots[i]==131){if(draw_world(d,projection)<0)return -1;continue;}draw_slot(d,slots[i],projection);if(d->emoji_failed)return -1;if(slots[i]==2 && draw_model(d,projection)<0)return -1;}
     if(!d->linear_scene)return gl_ok(d,"Draw direct cached glyphs and primitives");
     glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,d->width,d->height);
     glUseProgram(d->resolve_program);glDisable(GL_BLEND);
@@ -639,6 +672,7 @@ int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,si
     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
     return gl_ok(d,"Draw linear scene and resolve sRGB");
 }
+static int draw_world(ot_display *d,const float *projection);
 static GLuint simple_program(ot_display *d,const char *vs,const char *fs,int color) {
     GLuint a=shader(d,GL_VERTEX_SHADER,vs);if(!a)return 0;
     GLuint b=shader(d,GL_FRAGMENT_SHADER,fs);if(!b){glDeleteShader(a);return 0;}
@@ -1116,7 +1150,7 @@ void ot_close(ot_display *d) {
             if(d->band_texture)glDeleteTextures(1,&d->band_texture);
             glDeleteTextures(EMOJI_PAGES,d->emoji_pages);glDeleteBuffers(1,&d->emoji_scratch);
             if(d->program)glDeleteProgram(d->program);
-            glDeleteProgram(d->model_program);glDeleteBuffers(1,&d->model_vbo);
+            glDeleteProgram(d->model_program);glDeleteProgram(d->world_program);glDeleteProgram(d->grid_program);glDeleteBuffers(1,&d->grid_vbo);for(size_t i=0;i<256;i++)glDeleteBuffers(1,&d->world[i].vbo);glDeleteBuffers(1,&d->model_vbo);
             glDeleteTextures(4,d->model_textures);glDeleteRenderbuffers(1,&d->model_depth);
             if(d->resolve_program)glDeleteProgram(d->resolve_program);
             if(d->cache_program)glDeleteProgram(d->cache_program);

@@ -5,7 +5,7 @@
 #include <stddef.h>
 typedef struct ot_display ot_display;
 typedef struct ot_touch_source ot_touch_source;
-#define OT_MAX_SCENE_SLOTS 131u
+#define OT_MAX_SCENE_SLOTS 132u
 typedef struct { uint64_t usec; uint32_t sequence, crtc; } ot_flip;
 typedef struct { int32_t phase; uint32_t id; float x, y; uint64_t age_us; } ot_touch;
 typedef struct { uint32_t width,height,format,stride; int32_t red,green,blue,alpha; } ot_info;
@@ -15,6 +15,9 @@ const char *ot_error(ot_display *d);
 void ot_get_info(ot_display *d,ot_info *info);
 /* Internal ABI: Rust validates finite scalar/colour/attribute contents before
  * these synchronous calls. C validates dimensions, ranges and owned allocations. */
+/* Retained world buffers: bounded synchronous inputs, no borrowed pointers retained. */
+int ot_world_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats);
+int ot_world_frame(ot_display *d,const uint32_t *slots,const float *origins,size_t count,const float *camera);
 int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats);
 /* Static model overlay: 12 floats per vertex, four words per draw
  * (first,count,texture slot,double sided). Texture pixels are copied to GL. */

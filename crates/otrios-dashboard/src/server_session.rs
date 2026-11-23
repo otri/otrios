@@ -185,7 +185,7 @@ impl ManagedInk {
         let Ok(room) = hub.ink_room(&active, app.peer_limits.iter().sum()) else {
             return false;
         };
-        let Ok((peer, bytes)) = room.subscribe().await else {
+        let Ok((mut peer, bytes)) = room.subscribe().await else {
             return false;
         };
         if !send(
@@ -196,6 +196,7 @@ impl ManagedInk {
         {
             return false;
         }
+        peer.label = hub.viewport_label(scope.identity.as_deref());
         self.room = Some(room);
         *subscription = Some(peer);
         true

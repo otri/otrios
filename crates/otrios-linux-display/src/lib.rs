@@ -8,7 +8,7 @@ pub use ffi::{Display, Flip, Info, Touch, TouchInput};
 
 pub const MAX_VERTICES: usize = 2_000_000;
 /// Three legacy layers plus bounded, independently retained document resources.
-pub const MAX_SCENE_SLOTS: u32 = 131;
+pub const MAX_SCENE_SLOTS: u32 = 132;
 /// Bound allocations and reject malformed geometry before FFI. Coordinates stay
 /// logical; the independently checked projection performs output rotation.
 pub fn validate_mesh(vertices: &[f32]) -> Result<(), String> {
