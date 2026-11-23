@@ -210,7 +210,7 @@ mod tests {
                     status: "canvas-app".into(),
                     dependencies: vec![],
                 },
-                path: String::new(),
+                path: "monitoring".into(),
                 ui_hash: hash(&ui),
                 private: true,
             }],
@@ -249,6 +249,17 @@ mod tests {
         client.open("app:monitoring/ui", "app:monitoring/state");
         assert!(client.poll_owned_monitoring().unwrap());
         assert!(client.owns_monitoring_view());
+        let scene = client.scene().unwrap();
+        for position in [[80., 12.], [80., 55.]] {
+            assert!(
+                scene.hit_path(position).iter().any(|n| n
+                    .node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Back to OTriOS")),
+                "Monitoring breadcrumb must include the top gutter"
+            );
+        }
         assert!(client.confirmed());
         assert!(
             client

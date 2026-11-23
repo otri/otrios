@@ -413,9 +413,22 @@ pub(super) fn present(root: &mut SceneNode, mount: &Mount) {
         });
         children.push(menu);
     }
+    // The top gutter belongs to the first-row controls. Keep their painted
+    // children in place while making the whole visible header edge hittable.
+    for child in &mut children {
+        child.frame.y += 24.;
+        if child.frame.y <= 24. && matches!(child.responder, Some(TouchResponder::Activate(_))) {
+            let inset = child.frame.y;
+            child.frame.y = 0.;
+            child.frame.height += inset;
+            for paint in &mut child.children {
+                paint.frame.y += inset;
+            }
+        }
+    }
     let header = canvas(
         BASE + 101,
-        Rect::new(24., 24., width.max(1.), header_height),
+        Rect::new(24., 0., width.max(1.), header_height + 24.),
         children,
     );
     if mount.chat.is_some()
