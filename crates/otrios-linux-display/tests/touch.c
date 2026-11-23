@@ -47,6 +47,11 @@ static int fixture_ioctl(int fd,unsigned long request,...) {
         struct input_absinfo axis={.minimum=0,.maximum=request==EVIOCGABS(ABS_MT_SLOT)?9:1000};
         memcpy(arg,&axis,sizeof(axis));return 0;
     }
+    if(_IOC_NR(request)==_IOC_NR(EVIOCGMTSLOTS(1))) {
+        int *positions=arg;int value=positions[0]==ABS_MT_POSITION_X?200:300;
+        for(size_t i=1;i<_IOC_SIZE(request)/sizeof(int);i++)positions[i]=value;
+        return 0;
+    }
     assert(_IOC_NR(request)==_IOC_NR(EVIOCGKEY(1)));
     memset(arg,0,_IOC_SIZE(request));
     if(held)((unsigned long *)arg)[BTN_TOUCH/(8*sizeof(unsigned long))]|=1ul<<(BTN_TOUCH%(8*sizeof(unsigned long)));
@@ -93,7 +98,8 @@ int main(void) {
     mt=1;held=0;begin=end=0;source=ot_touch_open("touch",error,sizeof(error));assert(source);
     for(int i=0;i<2;i++) {
         event(EV_ABS,ABS_MT_SLOT,i);event(EV_ABS,ABS_MT_TRACKING_ID,10+i);
-        event(EV_ABS,ABS_MT_POSITION_X,200+i*400);event(EV_ABS,ABS_MT_POSITION_Y,300);
+        /* First slot intentionally omits both unchanged axes. */
+        if(i){event(EV_ABS,ABS_MT_POSITION_X,600);event(EV_ABS,ABS_MT_POSITION_Y,300);}
     }
     edge(1);
     assert(ot_touch_read(source,out,1)==1 && out[0].id==1 && out[0].phase==0 && out[0].x==0.2f);
@@ -104,6 +110,8 @@ int main(void) {
     event(EV_SYN,SYN_DROPPED,0);event(EV_SYN,SYN_REPORT,0);held=1;
     assert(ot_touch_read(source,out,64)==1 && out[0].phase==3);
     edge(0);assert(ot_touch_read(source,out,64)==0);
+    event(EV_ABS,ABS_MT_SLOT,0);event(EV_ABS,ABS_MT_TRACKING_ID,30);edge(1);
+    assert(ot_touch_read(source,out,64)==1 && out[0].x==0.2f && out[0].y==0.3f);
     ot_touch_close(source);assert(opened==closed);
     puts("evdev fixtures passed: partial init, unchanged axes, bounded batches, stream loss, held contact, disconnect, cleanup");
     return 0;
