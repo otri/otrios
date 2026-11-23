@@ -1,0 +1,162 @@
+{
+  "before-2": {
+    "duration_ms": 3123.254,
+    "processed_inputs": 62,
+    "unique_updates": 25,
+    "updates_per_second": 8.004472258740403,
+    "latency_ms": {
+      "n": 25,
+      "median": 141.49,
+      "p95": 203.46,
+      "max": 250.46
+    },
+    "pointer_processing_ms": {
+      "n": 62,
+      "median": 31.64,
+      "p95": 37.28,
+      "max": 50.38
+    },
+    "compose_ms": {
+      "n": 25,
+      "median": 14.75,
+      "p95": 18.26,
+      "max": 18.7
+    },
+    "upload_bytes": 7158016,
+    "upload_calls": 102,
+    "return_interval_ms": {
+      "n": 24,
+      "median": 141.19,
+      "p95": 176.51,
+      "max": 176.6
+    },
+    "first_return_ms": 144.549,
+    "last_return_after_end_ms": 198.617,
+    "base_vertices": {
+      "n": 25,
+      "median": 12654,
+      "p95": 12696,
+      "max": 12696
+    },
+    "drm_interval_ms": {
+      "n": 24,
+      "median": 141.22,
+      "p95": 176.52,
+      "max": 176.52
+    }
+  },
+  "after-3": {
+    "duration_ms": 3116.92,
+    "processed_inputs": 62,
+    "unique_updates": 31,
+    "updates_per_second": 9.945715642364899,
+    "latency_ms": {
+      "n": 31,
+      "median": 65.69,
+      "p95": 93.27,
+      "max": 112.73
+    },
+    "pointer_processing_ms": {
+      "n": 62,
+      "median": 0.65,
+      "p95": 0.79,
+      "max": 0.94
+    },
+    "compose_ms": {
+      "n": 31,
+      "median": 2.27,
+      "p95": 3.41,
+      "max": 3.44
+    },
+    "upload_bytes": 1271680,
+    "upload_calls": 29,
+    "return_interval_ms": {
+      "n": 30,
+      "median": 105.9,
+      "p95": 141.21,
+      "max": 264.77
+    },
+    "first_return_ms": 48.953,
+    "last_return_after_end_ms": 74.35,
+    "base_vertices": {
+      "n": 31,
+      "median": 168,
+      "p95": 168,
+      "max": 168
+    },
+    "drm_interval_ms": {
+      "n": 30,
+      "median": 105.91,
+      "p95": 141.23,
+      "max": 264.8
+    }
+  },
+  "fast": {
+    "duration_ms": 4269.369,
+    "processed_inputs": 353,
+    "unique_updates": 112,
+    "updates_per_second": 26.233384839773745,
+    "latency_ms": {
+      "n": 112,
+      "median": 75.98,
+      "p95": 95.57,
+      "max": 111.37
+    },
+    "pointer_processing_ms": {
+      "n": 353,
+      "median": 0.73,
+      "p95": 1.25,
+      "max": 3.34
+    },
+    "compose_ms": {
+      "n": 112,
+      "median": 3.06,
+      "p95": 3.92,
+      "max": 5.08
+    },
+    "upload_bytes": 5156112,
+    "upload_calls": 111,
+    "return_interval_ms": {
+      "n": 111,
+      "median": 35.31,
+      "p95": 53.08,
+      "max": 176.5
+    },
+    "first_return_ms": 52.53,
+    "last_return_after_end_ms": 108.18,
+    "base_vertices": {
+      "n": 112,
+      "median": 168.0,
+      "p95": 168,
+      "max": 168
+    },
+    "drm_interval_ms": {
+      "n": 111,
+      "median": 35.31,
+      "p95": 52.97,
+      "max": 176.53
+    }
+  },
+  "provenance": {
+    "baseline_release": "6869c4482869c647a56f2a543ea5d9cfc3cea776ba8a811079e34412c1c2814d",
+    "measured_native_release": "8a412c64dc0a0a3d3efb4c13523d4ac078cc3ca5d714e814538afc4d26bf1500",
+    "final_release": "5826d7ed8cf0fd23bdd1d3cf2d56856b1023d2f9e7fb0bb3ef4695fc9bc65631",
+    "baseline_points": 1928,
+    "final_points": 1929,
+    "gesture": "two calibrated contacts; 30 translations at 10 Hz, followed by lift",
+    "fast_gesture": "240 two-contact translations at nominal 60 Hz",
+    "core_profiling": false,
+    "hit_zones": true,
+    "trace_sha256": {
+      "before-2.input.jsonl.gz": "b2f65f2c2681bf4b035d9e9dfcefad72e2d8c45ee53dc07b3197ddc47203e3d5",
+      "before-2.worker.jsonl.gz": "bfbaa10173ae1281966aa08fada293490ee930ef898884fc46f8c73a6d66921d",
+      "before-2.renderer.jsonl.gz": "cf787ac85a6ead896be3351ef56092e4a106bac07c9e5ac80c40d1701620b061",
+      "after-3.input.jsonl.gz": "8b15659219047a01ea29daaf18dd21e3d9bd14519b1df0f819e329d803f7a541",
+      "after-3.worker.jsonl.gz": "31b9a5aa6df344a56db6dfda6b5dedead53301b691c1d43a8758770542823bb6",
+      "after-3.renderer.jsonl.gz": "399d4d9749bec082d85fbedccdec0a4fbd071ca212f4f3a44b502722f423458a",
+      "fast.input.jsonl.gz": "256ec619459f41e5002932423b838dd245e3df4c2c61c23d3b37bbd444c63e6b",
+      "fast.worker.jsonl.gz": "e3d3ca3333ea105d8838477019a9ad2fe4d5426ab216e5383726be390ed88144",
+      "fast.renderer.jsonl.gz": "259453ebda4895d6103adb5e41dad4557969c8f96274287cdf0137bcc88ca7bc"
+    }
+  }
+}
