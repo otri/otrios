@@ -3009,8 +3009,15 @@ impl Client {
                 if epoch != m.epoch {
                     return Ok(false);
                 }
+                let drawing_before = m.drawing.as_ref().and_then(|_| m.doc.drawing_hash());
                 if m.doc.receive(&bytes)? {
-                    m.refresh()
+                    let changed = m.refresh()?;
+                    let drawing_changed =
+                        m.drawing.is_some() && drawing_before != m.doc.drawing_hash();
+                    if drawing_changed {
+                        m.invalidate();
+                    }
+                    Ok(changed || drawing_changed)
                 } else {
                     Ok(false)
                 }

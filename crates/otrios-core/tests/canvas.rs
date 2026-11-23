@@ -6028,8 +6028,18 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
         pump(&mut c, &mut doc, &mut session);
         (c, session)
     };
+    fn has_stroke(node: &otrios_interfaces::scene::SceneNode) -> bool {
+        matches!(
+            node.primitive,
+            otrios_interfaces::scene::Primitive::Triangles {
+                color: [94, 218, 231, 255],
+                ..
+            }
+        ) || node.children.iter().any(has_stroke)
+    }
     let (mut a, mut sa) = mount([1280., 800.]);
     let (mut b, mut sb) = mount([400., 800.]);
+    assert!(!has_stroke(b.scene().unwrap().root()));
     assert_eq!(
         b.viewport_policy(),
         otrios_interfaces::layout::ViewportPolicy::Responsive {
@@ -6061,6 +6071,10 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
     }
     assert_eq!(a.resource_usage().ink.unwrap().points, 3);
     assert_eq!(b.resource_usage().ink.unwrap().points, 3);
+    assert!(
+        has_stroke(b.scene().unwrap().root()),
+        "remote stroke invalidates the cached scene even with no scalar fields"
+    );
     assert_eq!(
         doc.drawing().unwrap().strokes[0].points,
         vec![[2560, 1600], [2880, 1600], [2880, 1920]]
@@ -6084,6 +6098,10 @@ fn shared_touch_tracing_syncs_across_aspects_and_keeps_camera_local() {
     pump(&mut a, &mut doc, &mut sa);
     pump(&mut b, &mut doc, &mut sb);
     assert_eq!(b.resource_usage().ink.unwrap().points, 0);
+    assert!(
+        !has_stroke(b.scene().unwrap().root()),
+        "remote Clear invalidates cached drawing geometry"
+    );
     for viewport in [[400., 800.], [1280., 800.], [1600., 900.]] {
         b.set_viewport(viewport).unwrap();
         assert!(

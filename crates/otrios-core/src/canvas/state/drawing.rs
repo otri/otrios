@@ -243,6 +243,9 @@ impl Document {
     }
 }
 impl StateAdapter {
+    pub(crate) fn drawing_hash(&self) -> Option<merkle::Hash> {
+        self.doc.tree.subtree(&[5]).ok().map(|tree| tree.hash())
+    }
     pub fn drawing(&self) -> Result<Drawing> {
         let mut result = self.doc.drawing()?;
         if let Some(command) = self.flight.as_ref().and_then(|f| f.drawing.as_ref()) {
