@@ -29,7 +29,24 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
     )
 }
 pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
-    ui::description()
+    let mut ui = ui::description();
+    // The managed collection renders installed children from signed catalog paths;
+    // this edge declares containment without changing its legacy reorder data.
+    let action = ui
+        .navigation
+        .iter()
+        .map(|n| n.action)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .expect("navigation budget");
+    ui.navigation.push(otrios_interfaces::canvas::Navigation {
+        action,
+        route: Some("touch-tracing".into()),
+        ui_ref: "app:touch-trace/ui".into(),
+        state_ref: String::new(),
+    });
+    ui
 }
 pub fn screens() -> Vec<crate::authoring::AppScreen> {
     let mut screens = vec![(manifest(), ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui)];

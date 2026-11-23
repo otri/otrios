@@ -105,6 +105,7 @@ impl Ink {
             if let Some(last) = self
                 .strokes
                 .iter()
+                .rev()
                 .find(|s| s.peer == 0 && s.id == stroke)
                 .and_then(|s| s.points.last())
                 .copied()
@@ -157,7 +158,11 @@ impl Ink {
     pub fn cancel(&mut self) {
         let active = std::mem::take(&mut self.active);
         for (_, stroke) in active {
-            if let Some(s) = self.strokes.iter().find(|s| s.peer == 0 && s.id == stroke)
+            if let Some(s) = self
+                .strokes
+                .iter()
+                .rev()
+                .find(|s| s.peer == 0 && s.id == stroke)
                 && self.outgoing.len() < 32
             {
                 self.outgoing.push(Point {

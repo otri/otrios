@@ -185,7 +185,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let selected = chosen.map(detail_for).transpose()?;
     let snapshot = Discovery {
-        profile: None,
+        profile: metadata
+            .get("profile")
+            .filter(|p| !p.is_null())
+            .map(|p| serde_json::from_value(p.clone()))
+            .transpose()?,
         catalog: vec![],
         version: VERSION,
         cursor: DiscoveryCursor {
@@ -204,6 +208,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         resync: true,
         snapshot: Box::new(snapshot.clone()),
     })?)?;
+    if std::env::args()
+        .any(|a| a == "--controls" || a == "--profile-controls" || a == "--playground-controls")
+    {
+        if std::env::args().any(|a| a == "--profile-controls") {
+            let id = client
+                .control_ids()?
+                .into_iter()
+                .find(|id| client.control_label(*id).ok().as_deref() == Some("Profile"))
+                .ok_or("Profile unavailable")?;
+            client.activate(client.epoch(), id)?;
+        }
+        if std::env::args().any(|a| a == "--playground-controls") {
+            client.navigate("test-playground")?;
+        }
+        let mut result = serde_json::Map::new();
+        for id in client.control_ids()? {
+            if let Some([x, y, w, h]) = client.control_bounds(id)? {
+                result.insert(
+                    client.control_label(id)?,
+                    json!({"point":[x+w/2.,y+h/2.],"bounds":[x,y,w,h]}),
+                );
+            }
+        }
+        println!("{}", serde_json::Value::Object(result));
+        return Ok(());
+    }
     let scene = client.scene()?;
     let edit = scene
         .controls()
